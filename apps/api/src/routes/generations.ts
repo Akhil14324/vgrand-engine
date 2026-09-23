@@ -221,7 +221,7 @@ export async function generationRoutes(app: FastifyInstance) {
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
-      "Access-Control-Allow-Origin": env.WEB_ORIGIN,
+      "Access-Control-Allow-Origin": "*",
     });
 
     const send = (evt: GenerationEvent) =>

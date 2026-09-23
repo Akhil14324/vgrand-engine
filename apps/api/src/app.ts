@@ -25,8 +25,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(cors, {
-    origin: [env.WEB_ORIGIN, "http://localhost:3000"],
-    credentials: true,
+    // Any origin — the web app may be served from localhost, Railway, Vercel…
+    // Auth uses Bearer tokens (no cookies), so credentials aren't needed and
+    // "*" + credentials is an invalid pairing browsers reject anyway.
+    origin: "*",
     // Explicit list — without it the preflight only advertises GET/HEAD/POST
     // and browsers silently block DELETE/PATCH (delete chat, rename, pin…).
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

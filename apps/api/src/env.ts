@@ -48,8 +48,14 @@ export const env = {
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
-  DEV_AUTH_BYPASS: parsed.DEV_AUTH_BYPASS ?? true,
+  // Defaults on in dev only — production must opt in explicitly.
+  DEV_AUTH_BYPASS:
+    parsed.DEV_AUTH_BYPASS ?? parsed.NODE_ENV !== "production",
   WORKER_INLINE: parsed.WORKER_INLINE ?? true,
+  /** True only when REDIS_URL was explicitly provided — otherwise jobs run inline. */
+  get redisConfigured(): boolean {
+    return Boolean(parsed.REDIS_URL);
+  },
   /** True when enough Supabase config exists to verify JWTs + use Storage. */
   get supabaseConfigured(): boolean {
     return Boolean(this.SUPABASE_URL && this.SUPABASE_SERVICE_ROLE_KEY);

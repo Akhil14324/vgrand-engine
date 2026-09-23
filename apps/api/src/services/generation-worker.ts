@@ -23,10 +23,18 @@ interface GenerationMetadata {
   [key: string]: unknown;
 }
 
-export function startGenerationWorker(): Worker {
+export function startGenerationWorker(): Worker | null {
+  if (!env.redisConfigured) {
+    // No queue — enqueueGeneration() calls runGeneration() directly. Rows
+    // left pending/processing by a previous boot would never resume, so
+    // kick them off again here.
+    console.log("[worker] no REDIS_URL — processing generations inline");
+    void recoverPendingGenerations();
+    return null;
+  }
   const worker = new Worker(
     GENERATION_QUEUE,
-    processGeneration,
+    (job: Job<{ generationId: string }>) => runGeneration(job.data.generationId),
     { connection: createRedisConnection(), concurrency: 3 },
   );
   worker.on("error", (err) => console.error("[worker] error:", err));
@@ -36,10 +44,28 @@ export function startGenerationWorker(): Worker {
   return worker;
 }
 
-async function processGeneration(
-  job: Job<{ generationId: string }>,
-): Promise<void> {
-  const { generationId } = job.data;
+/** Inline mode: re-run rows a previous process left behind. */
+async function recoverPendingGenerations() {
+  try {
+    await prisma.generation.updateMany({
+      where: { status: "processing" },
+      data: { status: "pending" },
+    });
+    const pending = await prisma.generation.findMany({
+      where: { status: "pending" },
+      select: { id: true },
+    });
+    for (const g of pending) {
+      void runGeneration(g.id).catch((err) =>
+        console.error(`[inline] generation ${g.id} failed:`, err),
+      );
+    }
+  } catch (err) {
+    console.error("[worker] pending-job recovery failed:", err);
+  }
+}
+
+export async function runGeneration(generationId: string): Promise<void> {
   const generation = await prisma.generation.findUnique({
     where: { id: generationId },
     include: { theme: true },

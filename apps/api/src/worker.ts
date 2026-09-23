@@ -7,6 +7,12 @@ import { startGenerationWorker } from "./services/generation-worker.js";
  * (With WORKER_INLINE=true the API process already runs one.)
  */
 const worker = startGenerationWorker();
+if (!worker) {
+  console.log(
+    "no REDIS_URL — generations run inline inside the API process; nothing to do",
+  );
+  process.exit(0);
+}
 console.log("generation worker listening for jobs");
 
 const shutdown = async () => {

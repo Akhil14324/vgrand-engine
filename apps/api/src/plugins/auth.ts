@@ -69,15 +69,18 @@ export const authPlugin = fp(async (app) => {
 
     if (supabase && token) {
       const { data, error } = await supabase.auth.getUser(token);
-      if (error || !data.user) throw unauthorized("Invalid or expired token");
-      req.userId = await upsertUser(
-        data.user.id,
-        data.user.email,
-        (data.user.user_metadata?.name as string | undefined) ??
-          (data.user.user_metadata?.full_name as string | undefined),
-        data.user.user_metadata?.avatar_url as string | undefined,
-      );
-      return;
+      if (!error && data.user) {
+        req.userId = await upsertUser(
+          data.user.id,
+          data.user.email,
+          (data.user.user_metadata?.name as string | undefined) ??
+            (data.user.user_metadata?.full_name as string | undefined),
+          data.user.user_metadata?.avatar_url as string | undefined,
+        );
+        return;
+      }
+      // Bad token: fall through — DEV_AUTH_BYPASS still rescues the request
+      // when it's explicitly enabled; otherwise this 401s below.
     }
 
     if (env.DEV_AUTH_BYPASS) {
@@ -85,6 +88,8 @@ export const authPlugin = fp(async (app) => {
       return;
     }
 
-    throw unauthorized("Missing bearer token");
+    throw unauthorized(
+      token ? "Invalid or expired token" : "Missing bearer token",
+    );
   });
 });
