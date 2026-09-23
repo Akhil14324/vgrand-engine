@@ -22,6 +22,7 @@ const envSchema = z.object({
 
   OPENAI_API_KEY: opt(z.string().min(1)),
   OPENAI_BASE_URL: opt(z.string().url()),
+  DEFAULT_IMAGE_PROVIDER: opt(z.enum(["openai", "flux", "ideogram"])),
   FLUX_API_KEY: opt(z.string().min(1)),
   FLUX_MODEL_ENDPOINT: opt(z.string().min(1)),
   IDEOGRAM_API_KEY: opt(z.string().min(1)),

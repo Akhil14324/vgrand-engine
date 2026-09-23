@@ -70,9 +70,18 @@ export class OpenAIImageProvider implements ImageProvider {
         metadata: { model, quality, size, usage: res.usage },
       };
     } catch (err) {
-      throw new ProviderError(this.name, "generation request failed", err);
+      throw new ProviderError(this.name, describeError(err), err);
     }
   }
+}
+
+/** Unwrap the SDK's APIError to the provider's own message (quota, model, etc). */
+function describeError(err: unknown): string {
+  const e = err as {
+    error?: { message?: string };
+    message?: string;
+  } | null;
+  return e?.error?.message ?? e?.message ?? "generation request failed";
 }
 
 function mapImages(

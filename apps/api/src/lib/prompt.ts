@@ -4,6 +4,7 @@ import {
   type ProviderName,
   type ThemeStyleGuide,
 } from "@prompthub/types";
+import { env } from "../env.js";
 
 /**
  * Used when no theme is armed — any free-form prompt should still produce a
@@ -43,5 +44,5 @@ export function resolveProvider(
   if (pinned && (PROVIDERS as readonly string[]).includes(pinned)) {
     return pinned;
   }
-  return "openai";
+  return env.DEFAULT_IMAGE_PROVIDER ?? "openai";
 }
