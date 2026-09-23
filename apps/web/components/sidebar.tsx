@@ -34,6 +34,7 @@ import { useStudio } from "@/lib/store";
 import {
   useConversations,
   useDeleteConversation,
+  useDeleteGeneration,
   useDeleteMemory,
   useGenerations,
   useMemories,
@@ -487,43 +488,74 @@ function HistoryRow({
   onClick: () => void;
 }) {
   const thumb = generation.imageUrls[0];
+  const del = useDeleteGeneration();
+  const { select, selectedId } = useStudio();
   return (
-    <button
-      onClick={onClick}
+    <div
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
+        "group flex w-full items-center gap-1 rounded-md px-2 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
-      <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border bg-muted">
-        {thumb ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={thumb} alt="" className="h-full w-full object-cover" />
-        ) : generation.status === "failed" ? (
-          <div className="flex h-full items-center justify-center text-[9px] text-destructive">
-            failed
-          </div>
-        ) : (
-          <div className="shimmer h-full w-full" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-xs">{generation.prompt}</p>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          {generation.theme && (
-            <span className="text-[10px] text-primary">
-              /{generation.theme.slug}
-            </span>
-          )}
-          <span className="text-[10px] text-muted-foreground">
-            {timeAgo(generation.createdAt)}
-          </span>
-          {generation.parentId && (
-            <span className="text-[10px] text-muted-foreground">· edit</span>
+      <button
+        onClick={onClick}
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+      >
+        <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border bg-muted">
+          {thumb ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={thumb} alt="" className="h-full w-full object-cover" />
+          ) : generation.status === "failed" ? (
+            <div className="flex h-full items-center justify-center text-[9px] text-destructive">
+              failed
+            </div>
+          ) : (
+            <div className="shimmer h-full w-full" />
           )}
         </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs">{generation.prompt}</p>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            {generation.theme && (
+              <span className="text-[10px] text-primary">
+                /{generation.theme.slug}
+              </span>
+            )}
+            <span className="text-[10px] text-muted-foreground">
+              {timeAgo(generation.createdAt)}
+            </span>
+            {generation.parentId && (
+              <span className="text-[10px] text-muted-foreground">· edit</span>
+            )}
+          </div>
+        </div>
+      </button>
+      <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Generation options"
+              className="rounded p-1 hover:bg-accent"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="right" className="w-40">
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => {
+                del.mutate(generation.id);
+                if (selectedId === generation.id) select(null);
+              }}
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-    </button>
+    </div>
   );
 }
 
