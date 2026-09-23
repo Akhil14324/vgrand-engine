@@ -12,6 +12,9 @@ let pub: IORedis | null = null;
  */
 export function publishGenerationEvent(evt: GenerationEvent): void {
   pub ??= new IORedis(env.REDIS_URL);
+  // No 'error' listener => unhandled EventEmitter error => process crash when
+  // Redis is down. Swallow it — publishes already fail soft via .catch().
+  pub.on("error", () => {});
   pub.publish(CHANNEL, JSON.stringify(evt)).catch(() => {});
 }
 
@@ -19,6 +22,7 @@ export function subscribeGenerationEvents(
   handler: (evt: GenerationEvent) => void,
 ): () => void {
   const sub = new IORedis(env.REDIS_URL);
+  sub.on("error", () => {});
   sub.subscribe(CHANNEL).catch(() => {});
   const onMessage = (_channel: string, message: string) => {
     try {

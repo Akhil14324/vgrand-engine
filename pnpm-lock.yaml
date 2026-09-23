@@ -56,6 +56,9 @@ importers:
       openai:
         specifier: ^5.0.0
         version: 5.23.2(zod@3.25.76)
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.15
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -66,9 +69,6 @@ importers:
       '@types/node':
         specifier: ^22.15.0
         version: 22.20.4
-      tsx:
-        specifier: ^4.19.4
-        version: 4.23.15
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -171,6 +171,12 @@ importers:
       '@prompthub/types':
         specifier: workspace:*
         version: link:../types
+      prisma:
+        specifier: ^6.9.0
+        version: 6.19.3(typescript@5.9.3)
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.15
     devDependencies:
       '@prompthub/config':
         specifier: workspace:*
@@ -181,12 +187,6 @@ importers:
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1
-      prisma:
-        specifier: ^6.9.0
-        version: 6.19.3(typescript@5.9.3)
-      tsx:
-        specifier: ^4.19.4
-        version: 4.23.15
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
