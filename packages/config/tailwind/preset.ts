@@ -60,9 +60,24 @@ export const prompthubPreset = {
           from: { opacity: "0", transform: "translateY(4px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "slide-in-left": {
+          from: { transform: "translateX(-100%)" },
+          to: { transform: "translateX(0)" },
+        },
+        "slide-in-right": {
+          from: { transform: "translateX(100%)" },
+          to: { transform: "translateX(0)" },
+        },
+        "slide-in-up": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "translateY(0)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 200ms ease-out",
+        "slide-in-left": "slide-in-left 200ms ease-out",
+        "slide-in-right": "slide-in-right 200ms ease-out",
+        "slide-in-up": "slide-in-up 220ms ease-out",
       },
     },
   },

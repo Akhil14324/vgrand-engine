@@ -54,6 +54,7 @@ export interface GenerationDto {
   userId: string;
   themeId: string | null;
   theme?: Pick<ThemeDto, "id" | "slug" | "label" | "icon"> | null;
+  conversationId: string | null;
   prompt: string;
   finalPrompt: string;
   provider: string;
@@ -80,6 +81,22 @@ export interface BoardDto {
   name: string;
   items: BoardItemDto[];
   createdAt: string;
+}
+
+/** A chat — a group of generations, like a Claude/ChatGPT conversation. */
+export interface ConversationDto {
+  id: string;
+  userId: string;
+  title: string;
+  generationCount: number;
+  /** Latest generation in the chat — thumbnail + context for the sidebar. */
+  preview: {
+    prompt: string;
+    imageUrl: string | null;
+    status: GenerationStatus;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface MemoryDto {
@@ -111,6 +128,8 @@ export interface PublicShareDto {
 export const createGenerationSchema = z.object({
   themeSlug: z.string().min(1).optional(),
   prompt: z.string().min(1).max(4000),
+  /** Existing chat to append to. Omit to start a new conversation. */
+  conversationId: z.string().uuid().optional(),
   provider: z.enum(PROVIDERS).optional(),
   quality: z.enum(QUALITIES).optional(),
   size: z.enum(IMAGE_SIZES).optional(),
@@ -154,6 +173,11 @@ export const addBoardItemSchema = z.object({
   generationId: z.string().uuid(),
 });
 export type AddBoardItemRequest = z.infer<typeof addBoardItemSchema>;
+
+export const updateConversationSchema = z.object({
+  title: z.string().min(1).max(140),
+});
+export type UpdateConversationRequest = z.infer<typeof updateConversationSchema>;
 
 export const createMemorySchema = z.object({
   type: z.enum(MEMORY_TYPES),

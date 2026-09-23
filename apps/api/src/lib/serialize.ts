@@ -1,6 +1,7 @@
 import type {
   Board,
   BoardItem,
+  Conversation,
   Generation,
   Memory,
   Theme,
@@ -8,6 +9,7 @@ import type {
 import type {
   BoardDto,
   BoardItemDto,
+  ConversationDto,
   GenerationDto,
   MemoryDto,
   ThemeDto,
@@ -44,6 +46,7 @@ export function toGenerationDto(g: GenerationWithTheme): GenerationDto {
           icon: g.theme.icon,
         }
       : null,
+    conversationId: g.conversationId,
     prompt: g.prompt,
     finalPrompt: g.finalPrompt,
     provider: g.provider,
@@ -80,6 +83,32 @@ export function toBoardDto(
     name: board.name,
     items: (board.items ?? []).map(toBoardItemDto),
     createdAt: board.createdAt.toISOString(),
+  };
+}
+
+type ConversationWithPreview = Conversation & {
+  generations?: Array<
+    Pick<Generation, "prompt" | "imageUrls" | "status">
+  >;
+  _count?: { generations: number };
+};
+
+export function toConversationDto(c: ConversationWithPreview): ConversationDto {
+  const last = c.generations?.[0];
+  return {
+    id: c.id,
+    userId: c.userId,
+    title: c.title,
+    generationCount: c._count?.generations ?? c.generations?.length ?? 0,
+    preview: last
+      ? {
+          prompt: last.prompt,
+          imageUrl: last.imageUrls[0] ?? null,
+          status: last.status as GenerationDto["status"],
+        }
+      : null,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
   };
 }
 

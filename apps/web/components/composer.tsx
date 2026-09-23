@@ -169,7 +169,7 @@ export function Composer() {
   return (
     <div
       className={cn(
-        "border-t bg-background p-4 transition-colors",
+        "border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-colors sm:p-4",
         dragging && "bg-accent/40",
       )}
       onDragOver={(e) => {
@@ -182,7 +182,7 @@ export function Composer() {
       <div className="mx-auto w-full max-w-3xl">
         <div className="rounded-xl border bg-card shadow-sm transition-shadow focus-within:ring-1 focus-within:ring-ring">
           {(armedTheme || refImage || uploading) && (
-            <div className="flex items-center gap-2 px-3 pt-3">
+            <div className="flex flex-wrap items-center gap-2 px-3 pt-3">
               {armedTheme && (
                 <Badge variant="default" className="gap-1.5 pr-1">
                   /{armedTheme.slug}
@@ -278,8 +278,8 @@ export function Composer() {
             </PopoverContent>
           </Popover>
 
-          <div className="flex items-center justify-between px-3 pb-2.5">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
+            <div className="flex min-w-0 items-center gap-2">
               <Badge variant="muted" className="font-mono text-[10px]">
                 {providerLabel}
               </Badge>

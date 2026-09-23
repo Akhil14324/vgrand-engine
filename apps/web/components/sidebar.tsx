@@ -4,24 +4,31 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Building2,
+  Check,
   Home,
   ImagePlus,
   LayoutGrid,
   LogOut,
+  MessageSquare,
+  Pencil,
   Search,
   Slash,
   Sparkles,
   Trash2,
   UtensilsCrossed,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import type { GenerationDto } from "@prompthub/types";
+import type { ConversationDto, GenerationDto } from "@prompthub/types";
 import { useAuth } from "@/lib/auth";
 import { useStudio } from "@/lib/store";
 import {
+  useConversations,
+  useDeleteConversation,
   useDeleteMemory,
   useGenerations,
   useMemories,
+  useRenameConversation,
   useThemes,
 } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
@@ -53,7 +60,16 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+/** Desktop column wrapper. The same content renders inside the mobile drawer. */
 export function Sidebar() {
+  return (
+    <aside className="hidden min-h-0 border-r md:block">
+      <SidebarContent />
+    </aside>
+  );
+}
+
+export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, signOut, isDev } = useAuth();
   const {
     armTheme,
@@ -65,11 +81,23 @@ export function Sidebar() {
     disarmTheme,
   } = useStudio();
   const { data: themes } = useThemes();
-  const [tab, setTab] = useState<"history" | "memory">("history");
+  const [tab, setTab] = useState<"chats" | "history" | "memory">("chats");
   const [search, setSearch] = useState("");
-  const { data: generations } = useGenerations(historyTheme);
+  const { data: generations } = useGenerations({ themeSlug: historyTheme });
+  const { data: conversations } = useConversations();
   const { data: memories } = useMemories();
   const deleteMemory = useDeleteMemory();
+
+  const filteredChats = useMemo(() => {
+    const items = conversations?.items ?? [];
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        c.preview?.prompt.toLowerCase().includes(q),
+    );
+  }, [conversations, search]);
 
   const filtered = useMemo(() => {
     const items = generations?.items ?? [];
@@ -86,10 +114,11 @@ export function Sidebar() {
   const newImage = () => {
     disarmTheme();
     select(null);
+    onNavigate?.();
   };
 
   return (
-    <div className="hidden min-h-0 flex-col border-r bg-card/40 md:flex">
+    <div className="flex h-full min-h-0 flex-col bg-card">
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
         <Link href="/" className="font-display text-lg font-semibold tracking-tight">
           PromptHub
@@ -108,7 +137,10 @@ export function Sidebar() {
           {(themes ?? []).map((t) => (
             <button
               key={t.id}
-              onClick={() => armTheme(t)}
+              onClick={() => {
+                armTheme(t);
+                onNavigate?.();
+              }}
               title={t.description ?? t.label}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
@@ -184,7 +216,10 @@ export function Sidebar() {
                 key={g.id}
                 generation={g}
                 active={selectedId === g.id}
-                onClick={() => select(g.id)}
+                onClick={() => {
+                  select(g.id);
+                  onNavigate?.();
+                }}
               />
             ))}
             {filtered.length === 0 && (
@@ -233,7 +268,7 @@ export function Sidebar() {
       <Separator />
       <div className="flex items-center gap-2 px-4 py-3">
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/boards">
+          <Link href="/boards" onClick={onNavigate}>
             <LayoutGrid /> Boards
           </Link>
         </Button>

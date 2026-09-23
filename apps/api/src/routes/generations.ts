@@ -12,6 +12,20 @@ import { enqueueGeneration } from "../services/queue.js";
 import { subscribeGenerationEvents } from "../services/events.js";
 import { env } from "../env.js";
 
+/** Chat title from the first prompt — first line, capped at 60 chars. */
+function deriveTitle(prompt: string): string {
+  const line = prompt.split("\n")[0]!.trim();
+  return line.length > 60 ? `${line.slice(0, 60).trimEnd()}…` : line;
+}
+
+/** Verify a conversation exists and belongs to the caller. */
+async function loadOwnedConversation(req: FastifyRequest, id: string) {
+  const conversation = await prisma.conversation.findUnique({ where: { id } });
+  if (!conversation) throw notFound("Conversation not found");
+  if (conversation.userId !== req.userId) throw forbidden();
+  return conversation;
+}
+
 async function loadOwned(req: FastifyRequest, id: string) {
   const generation = await prisma.generation.findUnique({
     where: { id },
@@ -40,37 +54,66 @@ export async function generationRoutes(app: FastifyInstance) {
         throw notFound(`Theme "/${body.themeSlug}" not found`);
       }
     }
-    if (body.parentId) await loadOwned(req, body.parentId);
+    const parent = body.parentId ? await loadOwned(req, body.parentId) : null;
 
-    const generation = await prisma.generation.create({
-      data: {
-        userId: req.userId,
-        themeId: theme?.id ?? null,
-        prompt: body.prompt,
-        finalPrompt: buildFinalPrompt(theme, body.prompt),
-        provider: resolveProvider(theme, body.provider),
-        parentId: body.parentId ?? null,
-        metadata: {
-          referenceImageUrl: body.referenceImageUrl,
-          quality: body.quality ?? "low",
-          size: body.size ?? "auto",
+    // Chat resolution order: explicit conversationId → inherit the parent's
+    // chat → spin up a new conversation titled from the prompt.
+    let conversationId =
+      body.conversationId ?? parent?.conversationId ?? null;
+    if (body.conversationId) {
+      await loadOwnedConversation(req, body.conversationId);
+    }
+
+    const generation = await prisma.$transaction(async (tx) => {
+      if (conversationId) {
+        // Bump recency so the chat floats to the top of the sidebar.
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
+      } else {
+        const conversation = await tx.conversation.create({
+          data: { userId: req.userId, title: deriveTitle(body.prompt) },
+        });
+        conversationId = conversation.id;
+      }
+      return tx.generation.create({
+        data: {
+          userId: req.userId,
+          themeId: theme?.id ?? null,
+          conversationId,
+          prompt: body.prompt,
+          finalPrompt: buildFinalPrompt(theme, body.prompt),
+          provider: resolveProvider(theme, body.provider),
+          parentId: body.parentId ?? null,
+          metadata: {
+            referenceImageUrl: body.referenceImageUrl,
+            quality: body.quality ?? "low",
+            size: body.size ?? "auto",
+          },
         },
-      },
+      });
     });
     await enqueueGeneration(generation.id);
     return reply
       .code(202)
-      .send({ generationId: generation.id, status: "pending" });
+      .send({ generationId: generation.id, conversationId, status: "pending" });
   });
 
-  /** Paginated history — the "memory" feed. */
+  /** Paginated history — the "memory" feed. Filter by theme or chat. */
   app.get("/generations", async (req) => {
-    const q = req.query as { themeSlug?: string; cursor?: string; limit?: string };
+    const q = req.query as {
+      themeSlug?: string;
+      conversationId?: string;
+      cursor?: string;
+      limit?: string;
+    };
     const limit = Math.min(Number(q.limit) || 30, 100);
     const items = await prisma.generation.findMany({
       where: {
         userId: req.userId,
         ...(q.themeSlug ? { theme: { slug: q.themeSlug } } : {}),
+        ...(q.conversationId ? { conversationId: q.conversationId } : {}),
       },
       orderBy: { createdAt: "desc" },
       take: limit + 1,
@@ -122,6 +165,7 @@ export async function generationRoutes(app: FastifyInstance) {
       data: {
         userId: req.userId,
         themeId: parent.themeId,
+        conversationId: parent.conversationId,
         prompt,
         finalPrompt: buildFinalPrompt(theme, prompt),
         provider: resolveProvider(theme, parent.provider),
@@ -133,8 +177,18 @@ export async function generationRoutes(app: FastifyInstance) {
         },
       },
     });
+    if (child.conversationId) {
+      await prisma.conversation.update({
+        where: { id: child.conversationId },
+        data: { updatedAt: new Date() },
+      });
+    }
     await enqueueGeneration(child.id);
-    return reply.code(202).send({ generationId: child.id, status: "pending" });
+    return reply.code(202).send({
+      generationId: child.id,
+      conversationId: child.conversationId,
+      status: "pending",
+    });
   });
 
   /** SSE stream for the live "generating..." state. Token may come via ?token=. */

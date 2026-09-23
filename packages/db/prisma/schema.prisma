@@ -8,14 +8,29 @@ datasource db {
 }
 
 model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  name          String?
+  avatarUrl     String?
+  createdAt     DateTime       @default(now())
+  generations   Generation[]
+  boards        Board[]
+  memories      Memory[]
+  conversations Conversation[]
+}
+
+// A "chat" — groups generations into a conversation you can revisit and
+// continue, like Claude/ChatGPT history.
+model Conversation {
   id          String       @id @default(uuid())
-  email       String       @unique
-  name        String?
-  avatarUrl   String?
-  createdAt   DateTime     @default(now())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String       // auto-derived from the first prompt
   generations Generation[]
-  boards      Board[]
-  memories    Memory[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId, updatedAt(sort: Desc)])
 }
 
 model Theme {
@@ -45,15 +60,18 @@ model Generation {
   status       String      @default("pending") // pending | processing | completed | failed
   error        String?
   metadata     Json? // size, quality, seed, cost, latency
-  parentId     String? // for "regenerate/edit" chains
-  parent       Generation? @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
-  children     Generation[] @relation("GenerationChain")
-  boardItems   BoardItem[]
-  shareLinks   ShareLink[]
-  createdAt    DateTime    @default(now())
+  parentId       String? // for "regenerate/edit" chains
+  parent         Generation? @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Generation[] @relation("GenerationChain")
+  conversationId String? // chat this generation belongs to
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  boardItems     BoardItem[]
+  shareLinks     ShareLink[]
+  createdAt      DateTime    @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([themeId])
+  @@index([conversationId, createdAt(sort: Desc)])
 }
 
 model Board {

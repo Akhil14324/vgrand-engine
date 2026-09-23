@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
-import { AlertCircle, Loader2, MousePointerClick } from "lucide-react";
+import { AlertCircle, Loader2, MousePointerClick, X } from "lucide-react";
 import { useGeneration, useGenerations } from "@/lib/hooks";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { ActionRow } from "./generation-actions";
@@ -20,13 +21,22 @@ function MetaRow({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-export function DetailPanel() {
+export function DetailPanel({
+  id,
+  onClose,
+}: {
+  /** Explicit id (mobile sheet). When omitted, falls back to selection → latest. */
+  id?: string | null;
+  /** When provided, renders a header with a close button. */
+  onClose?: () => void;
+}) {
   const { selectedId } = useStudio();
   // Fall back to the most recent generation so the panel is never dead space.
   const { data: list } = useGenerations();
   const effectiveId = useMemo(
-    () => selectedId ?? list?.items[0]?.id ?? null,
-    [selectedId, list],
+    () =>
+      id !== undefined ? id : (selectedId ?? list?.items[0]?.id ?? null),
+    [id, selectedId, list],
   );
   const { data: gen } = useGeneration(effectiveId);
 
@@ -48,8 +58,25 @@ export function DetailPanel() {
   const meta = (gen.metadata ?? {}) as Record<string, unknown>;
 
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-4 p-4">
+    <div className="flex h-full min-h-0 flex-col">
+      {onClose && (
+        <div className="flex items-center justify-between border-b px-4 py-2.5">
+          <span className="font-display text-sm font-semibold">
+            Generation details
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            <X />
+          </Button>
+        </div>
+      )}
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 p-4">
         <div className="overflow-hidden rounded-lg border bg-muted/40">
           {gen.imageUrls[0] ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -132,7 +159,8 @@ export function DetailPanel() {
             <MetaRow label="Note" value="fell back to OpenAI" />
           )}
         </div>
-      </div>
-    </ScrollArea>
+        </div>
+      </ScrollArea>
+    </div>
   );
 }

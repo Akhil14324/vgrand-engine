@@ -32,6 +32,7 @@ export function useGenerationStream(
           const evt = JSON.parse(msg.data) as GenerationEvent;
           qc.invalidateQueries({ queryKey: ["generation", id] });
           qc.invalidateQueries({ queryKey: ["generations"] });
+          qc.invalidateQueries({ queryKey: ["conversations"] });
           if (evt.status === "completed" || evt.status === "failed") {
             es?.close();
           }

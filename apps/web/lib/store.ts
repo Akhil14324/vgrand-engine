@@ -9,6 +9,11 @@ interface StudioState {
   armTheme: (theme: ThemeDto) => void;
   disarmTheme: () => void;
 
+  /** Chat currently open in the feed. null = fresh "new chat" screen. */
+  activeConversationId: string | null;
+  openConversation: (id: string | null) => void;
+  startNewChat: () => void;
+
   /** Generation shown in the right-hand detail panel. */
   selectedId: string | null;
   select: (id: string | null) => void;
@@ -26,6 +31,13 @@ export const useStudio = create<StudioState>((set) => ({
   armedTheme: null,
   armTheme: (theme) => set({ armedTheme: theme }),
   disarmTheme: () => set({ armedTheme: null }),
+
+  activeConversationId: null,
+  // Opening a chat clears the detail selection so the panel falls back to
+  // the chat's latest generation.
+  openConversation: (id) => set({ activeConversationId: id, selectedId: null }),
+  startNewChat: () =>
+    set({ activeConversationId: null, selectedId: null, armedTheme: null }),
 
   selectedId: null,
   select: (id) => set({ selectedId: id }),

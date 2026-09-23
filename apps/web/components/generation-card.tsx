@@ -55,8 +55,8 @@ export function GenerationCard({ generation }: { generation: GenerationDto }) {
 
       <div className="flex flex-col gap-2 p-3">
         <p className="line-clamp-2 text-sm leading-snug">{generation.prompt}</p>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-y-1">
+          <div className="flex min-w-0 items-center gap-1.5">
             {generation.theme ? (
               <Badge variant="default" className="text-[10px]">
                 /{generation.theme.slug}

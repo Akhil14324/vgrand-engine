@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import type {
   BoardDto,
+  ConversationDto,
   CreateGenerationRequest,
   GenerationDto,
   MemoryDto,
@@ -14,6 +15,7 @@ import type {
   RegenerateGenerationRequest,
   ShareLinkDto,
   ThemeDto,
+  UpdateConversationRequest,
 } from "@prompthub/types";
 import { apiFetch } from "./api";
 
@@ -30,12 +32,17 @@ export function useThemes() {
 
 /* ------------------------------- generations ------------------------------ */
 
-export function useGenerations(themeSlug?: string | null) {
+export function useGenerations(filter?: {
+  themeSlug?: string | null;
+  conversationId?: string | null;
+}) {
+  const themeSlug = filter?.themeSlug ?? null;
+  const conversationId = filter?.conversationId ?? null;
   return useQuery({
-    queryKey: ["generations", themeSlug ?? null],
+    queryKey: ["generations", themeSlug, conversationId],
     queryFn: () =>
       apiFetch<Paginated<GenerationDto>>(
-        `/generations?limit=50${themeSlug ? `&themeSlug=${themeSlug}` : ""}`,
+        `/generations?limit=50${themeSlug ? `&themeSlug=${themeSlug}` : ""}${conversationId ? `&conversationId=${conversationId}` : ""}`,
       ),
     refetchInterval: (query) => {
       // Poll lightly while anything is in flight — SSE covers the selected
@@ -56,16 +63,23 @@ export function useGeneration(id: string | null) {
   });
 }
 
+interface CreateGenerationResponse {
+  generationId: string;
+  conversationId: string;
+  status: string;
+}
+
 export function useCreateGeneration() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateGenerationRequest) =>
-      apiFetch<{ generationId: string; status: string }>("/generations", {
+      apiFetch<CreateGenerationResponse>("/generations", {
         method: "POST",
         json: body,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["generations"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
 }
@@ -77,11 +91,14 @@ export function useRegenerate() {
       id,
       ...body
     }: RegenerateGenerationRequest & { id: string }) =>
-      apiFetch<{ generationId: string; status: string }>(
+      apiFetch<CreateGenerationResponse>(
         `/generations/${id}/regenerate`,
         { method: "POST", json: body },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["generations"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["generations"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
   });
 }
 
@@ -90,7 +107,61 @@ export function useDeleteGeneration() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<void>(`/generations/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["generations"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["generations"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+/* ------------------------------ conversations ----------------------------- */
+
+export function useConversations() {
+  return useQuery({
+    queryKey: ["conversations"],
+    queryFn: () =>
+      apiFetch<Paginated<ConversationDto>>("/conversations?limit=50"),
+    refetchInterval: (query) => {
+      const pending = query.state.data?.items.some(
+        (c) =>
+          c.preview &&
+          (c.preview.status === "pending" ||
+            c.preview.status === "processing"),
+      );
+      return pending ? 4000 : false;
+    },
+  });
+}
+
+export function useConversation(id: string | null) {
+  return useQuery({
+    queryKey: ["conversation", id],
+    queryFn: () => apiFetch<ConversationDto>(`/conversations/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export function useRenameConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdateConversationRequest & { id: string }) =>
+      apiFetch<ConversationDto>(`/conversations/${id}`, {
+        method: "PATCH",
+        json: body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+}
+
+export function useDeleteConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/conversations/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["generations"] });
+    },
   });
 }
 

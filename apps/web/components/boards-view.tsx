@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, FolderPlus, Trash2 } from "lucide-react";
+import type { BoardDto } from "@prompthub/types";
 import { useBoards, useCreateBoard, useRemoveBoardItem } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -28,9 +29,21 @@ export function BoardsView() {
     router.push("/");
   };
 
+  const create = (e: FormEvent) => {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name) return;
+    createBoard.mutate(name, {
+      onSuccess: (b) => {
+        setNewName("");
+        setActiveId(b.id);
+      },
+    });
+  };
+
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-3 border-b px-4 py-3">
+    <div className="flex h-dvh flex-col">
+      <header className="flex items-center gap-3 border-b px-3 py-2.5 sm:px-4">
         <Button variant="ghost" size="icon" asChild>
           <Link href="/" aria-label="Back to studio">
             <ArrowLeft />
@@ -41,22 +54,40 @@ export function BoardsView() {
         </h1>
       </header>
 
-      <div className="grid min-h-0 flex-1 md:grid-cols-[260px_1fr]">
-        <div className="flex min-h-0 flex-col border-r">
-          <form
-            className="flex gap-2 p-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const name = newName.trim();
-              if (!name) return;
-              createBoard.mutate(name, {
-                onSuccess: (b) => {
-                  setNewName("");
-                  setActiveId(b.id);
-                },
-              });
-            }}
-          >
+      <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[260px_1fr]">
+        {/* Board picker — horizontal chip strip on mobile */}
+        <div className="border-b md:hidden">
+          <form className="flex gap-2 px-3 pt-3" onSubmit={create}>
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="New board…"
+              className="h-8 text-sm"
+            />
+            <Button type="submit" size="sm" variant="secondary">
+              <FolderPlus />
+            </Button>
+          </form>
+          <div className="flex gap-1.5 overflow-x-auto px-3 py-3">
+            {(boards ?? []).map((b) => (
+              <BoardChip
+                key={b.id}
+                board={b}
+                active={active?.id === b.id}
+                onClick={() => setActiveId(b.id)}
+              />
+            ))}
+            {boards?.length === 0 && (
+              <p className="py-1 text-xs text-muted-foreground">
+                Save generations to boards from the feed.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Board list — side column on md+ */}
+        <div className="hidden min-h-0 flex-col border-r md:flex">
+          <form className="flex gap-2 p-3" onSubmit={create}>
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -94,8 +125,8 @@ export function BoardsView() {
           </ScrollArea>
         </div>
 
-        <ScrollArea className="min-h-0">
-          <div className="p-4 md:p-6">
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="p-3 sm:p-4 md:p-6">
             {active ? (
               <>
                 <h2 className="mb-4 font-display text-base font-semibold">
@@ -106,7 +137,7 @@ export function BoardsView() {
                     Nothing saved here yet.
                   </p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                     {active.items.map((item) => {
                       const src = item.generation?.imageUrls[0];
                       return (
@@ -132,7 +163,7 @@ export function BoardsView() {
                                 itemId: item.id,
                               })
                             }
-                            className="absolute right-2 top-2 rounded-md bg-black/60 p-1.5 opacity-0 backdrop-blur transition-opacity group-hover:opacity-100"
+                            className="absolute right-2 top-2 rounded-md bg-black/60 p-1.5 backdrop-blur transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
                             aria-label="Remove from board"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -152,5 +183,30 @@ export function BoardsView() {
         </ScrollArea>
       </div>
     </div>
+  );
+}
+
+function BoardChip({
+  board,
+  active,
+  onClick,
+}: {
+  board: BoardDto;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors",
+        active
+          ? "border-primary/60 bg-primary/15 text-primary"
+          : "border-border text-muted-foreground",
+      )}
+    >
+      {board.name}
+      <span className="ml-1.5 opacity-70">{board.items.length}</span>
+    </button>
   );
 }

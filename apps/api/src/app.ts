@@ -10,6 +10,7 @@ import { HttpError } from "./lib/errors.js";
 import { authPlugin } from "./plugins/auth.js";
 import { themeRoutes } from "./routes/themes.js";
 import { generationRoutes } from "./routes/generations.js";
+import { conversationRoutes } from "./routes/conversations.js";
 import { boardRoutes } from "./routes/boards.js";
 import { shareRoutes } from "./routes/share.js";
 import { memoryRoutes } from "./routes/memories.js";
@@ -68,6 +69,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(themeRoutes);
   await app.register(generationRoutes);
+  await app.register(conversationRoutes);
   await app.register(boardRoutes);
   await app.register(shareRoutes);
   await app.register(memoryRoutes);
