@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { ActionRow } from "./generation-actions";
 
 /**
- * One chat turn: the user's prompt bubble (right) + the generated image
- * rendered inline (left), ChatGPT-style. Image opens a lightbox on click.
+ * One chat turn: the user's prompt bubble (right) + the assistant reply
+ * (left) — an image for kind="image", a text bubble for kind="text".
+ * Images open a lightbox on click.
  */
 export function ChatTurn({ generation }: { generation: GenerationDto }) {
   const { select, selectedId } = useStudio();
@@ -47,9 +48,27 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
         </div>
       </div>
 
-      {/* Assistant turn — the image previews directly in the thread */}
+      {/* Assistant turn — image or text reply inline in the thread */}
       <div className="flex flex-col items-start gap-2">
-        {image ? (
+        {generation.status === "failed" ? (
+          <div className="flex max-w-md items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="break-words text-xs leading-relaxed text-muted-foreground">
+              {generation.error ?? "Generation failed"}
+            </p>
+          </div>
+        ) : generation.kind === "text" ? (
+          generation.textResponse ? (
+            <p className="max-w-[85%] whitespace-pre-wrap break-words text-sm leading-relaxed sm:max-w-[75%]">
+              {generation.textResponse}
+            </p>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {generation.status === "processing" ? "Answering…" : "Queued…"}
+            </div>
+          )
+        ) : image ? (
           <button
             onClick={() => {
               select(generation.id);
@@ -68,13 +87,6 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
               loading="lazy"
             />
           </button>
-        ) : generation.status === "failed" ? (
-          <div className="flex max-w-md items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            <p className="break-words text-xs leading-relaxed text-muted-foreground">
-              {generation.error ?? "Generation failed"}
-            </p>
-          </div>
         ) : (
           <div className="shimmer flex aspect-square w-full max-w-md items-center justify-center rounded-xl border">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

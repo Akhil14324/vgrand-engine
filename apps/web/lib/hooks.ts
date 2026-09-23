@@ -10,6 +10,7 @@ import type {
   ConversationDto,
   CreateGenerationRequest,
   GenerationDto,
+  GenerationKind,
   MemoryDto,
   Paginated,
   RegenerateGenerationRequest,
@@ -67,6 +68,7 @@ interface CreateGenerationResponse {
   generationId: string;
   conversationId: string;
   status: string;
+  kind: GenerationKind;
 }
 
 export function useCreateGeneration() {

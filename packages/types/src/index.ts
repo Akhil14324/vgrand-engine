@@ -27,6 +27,9 @@ export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
 export const MEMORY_TYPES = ["preference", "fact", "style"] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
+export const GENERATION_KINDS = ["image", "text"] as const;
+export type GenerationKind = (typeof GENERATION_KINDS)[number];
+
 /* ---------------------------------- DTOs ---------------------------------- */
 
 export interface ThemeStyleGuide {
@@ -55,8 +58,11 @@ export interface GenerationDto {
   themeId: string | null;
   theme?: Pick<ThemeDto, "id" | "slug" | "label" | "icon"> | null;
   conversationId: string | null;
+  /** "image" = generated image, "text" = chat reply (textResponse set). */
+  kind: GenerationKind;
   prompt: string;
   finalPrompt: string;
+  textResponse: string | null;
   provider: string;
   model: string | null;
   imageUrls: string[];
@@ -216,6 +222,8 @@ export interface ApiError {
 export interface GenerationEvent {
   generationId: string;
   status: GenerationStatus;
+  kind?: GenerationKind;
   imageUrls?: string[];
+  textResponse?: string | null;
   error?: string | null;
 }

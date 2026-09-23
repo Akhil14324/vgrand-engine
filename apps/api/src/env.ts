@@ -22,6 +22,8 @@ const envSchema = z.object({
 
   OPENAI_API_KEY: opt(z.string().min(1)),
   OPENAI_BASE_URL: opt(z.string().url()),
+  /** Chat + intent-classification model — cheap tier, not the image models. */
+  CHAT_MODEL: opt(z.string().min(1)),
   DEFAULT_IMAGE_PROVIDER: opt(z.enum(["openai", "flux", "ideogram"])),
   FLUX_API_KEY: opt(z.string().min(1)),
   FLUX_MODEL_ENDPOINT: opt(z.string().min(1)),
@@ -43,6 +45,7 @@ const parsed = envSchema.parse(process.env);
 export const env = {
   ...parsed,
   REDIS_URL: parsed.REDIS_URL ?? "redis://localhost:6379",
+  CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
   DEV_AUTH_BYPASS: parsed.DEV_AUTH_BYPASS ?? true,

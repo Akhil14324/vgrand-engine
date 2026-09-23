@@ -288,7 +288,7 @@ export function Composer() {
                 placeholder={
                   armedTheme
                     ? `Describe your ${armedTheme.label.toLowerCase()} idea…`
-                    : "Describe an image — type / for themes"
+                    : "Ask anything, or describe an image — / for themes"
                 }
                 rows={1}
                 className="max-h-[168px] min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-2.5 leading-5 shadow-none focus-visible:ring-0"
@@ -318,7 +318,7 @@ export function Composer() {
                   onClick={submit}
                   disabled={!canSend}
                   className="h-9 w-9 rounded-full"
-                  aria-label="Generate"
+                  aria-label="Send"
                 >
                   {create.isPending ? (
                     <Loader2 className="animate-spin" />

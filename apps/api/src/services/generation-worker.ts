@@ -13,6 +13,8 @@ import {
 import { GENERATION_QUEUE, createRedisConnection } from "./queue.js";
 import { publishGenerationEvent } from "./events.js";
 import { storeImage } from "./storage.js";
+import { answerChat, loadChatHistory } from "./chat.js";
+import { env } from "../env.js";
 
 interface GenerationMetadata {
   referenceImageUrl?: string;
@@ -61,6 +63,31 @@ async function processGeneration(
     : "openai";
 
   try {
+    // Text turns skip the image pipeline entirely — chat completion in,
+    // textResponse out, over the same queue + SSE plumbing.
+    if (generation.kind === "text") {
+      const history = generation.conversationId
+        ? await loadChatHistory(generation.conversationId, generation.id)
+        : [];
+      const text = await answerChat(generation.prompt, history);
+      await prisma.generation.update({
+        where: { id: generationId },
+        data: {
+          status: "completed",
+          textResponse: text,
+          model: env.CHAT_MODEL,
+          metadata: { ...meta, latencyMs: Date.now() - startedAt },
+        },
+      });
+      publishGenerationEvent({
+        generationId,
+        status: "completed",
+        kind: "text",
+        textResponse: text,
+      });
+      return;
+    }
+
     const result = await generateWithFallback(providerName, {
       prompt: generation.finalPrompt,
       mode,

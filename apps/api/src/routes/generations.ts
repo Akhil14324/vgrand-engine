@@ -10,6 +10,7 @@ import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
 import { toGenerationDto } from "../lib/serialize.js";
 import { enqueueGeneration } from "../services/queue.js";
 import { subscribeGenerationEvents } from "../services/events.js";
+import { classifyIntent, loadChatHistory } from "../services/chat.js";
 import { env } from "../env.js";
 
 /** Chat title from the first prompt — first line, capped at 60 chars. */
@@ -64,6 +65,18 @@ export async function generationRoutes(app: FastifyInstance) {
       await loadOwnedConversation(req, body.conversationId);
     }
 
+    // Explicit opt-ins always make an image; ambiguous prompts get classified
+    // so questions ("what is a linked list?") get a text reply, not an image.
+    const explicitImage = Boolean(
+      theme || body.referenceImageUrl || body.parentId,
+    );
+    const kind = explicitImage
+      ? ("image" as const)
+      : await classifyIntent(
+          body.prompt,
+          conversationId ? await loadChatHistory(conversationId) : [],
+        );
+
     const generation = await prisma.$transaction(async (tx) => {
       if (conversationId) {
         // Bump recency so the chat floats to the top of the sidebar.
@@ -82,9 +95,12 @@ export async function generationRoutes(app: FastifyInstance) {
           userId: req.userId,
           themeId: theme?.id ?? null,
           conversationId,
+          kind,
           prompt: body.prompt,
-          finalPrompt: buildFinalPrompt(theme, body.prompt),
-          provider: resolveProvider(theme, body.provider),
+          finalPrompt:
+            kind === "image" ? buildFinalPrompt(theme, body.prompt) : body.prompt,
+          provider:
+            kind === "image" ? resolveProvider(theme, body.provider) : "openai",
           parentId: body.parentId ?? null,
           metadata: {
             referenceImageUrl: body.referenceImageUrl,
@@ -95,9 +111,12 @@ export async function generationRoutes(app: FastifyInstance) {
       });
     });
     await enqueueGeneration(generation.id);
-    return reply
-      .code(202)
-      .send({ generationId: generation.id, conversationId, status: "pending" });
+    return reply.code(202).send({
+      generationId: generation.id,
+      conversationId,
+      status: "pending",
+      kind,
+    });
   });
 
   /** Paginated history — the "memory" feed. Filter by theme or chat. */
@@ -211,7 +230,9 @@ export async function generationRoutes(app: FastifyInstance) {
     send({
       generationId: generation.id,
       status: generation.status as GenerationEvent["status"],
+      kind: generation.kind as GenerationEvent["kind"],
       imageUrls: generation.imageUrls,
+      textResponse: generation.textResponse,
       error: generation.error,
     });
     if (generation.status === "completed" || generation.status === "failed") {

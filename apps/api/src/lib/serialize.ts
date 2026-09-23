@@ -47,8 +47,10 @@ export function toGenerationDto(g: GenerationWithTheme): GenerationDto {
         }
       : null,
     conversationId: g.conversationId,
+    kind: g.kind as GenerationDto["kind"],
     prompt: g.prompt,
     finalPrompt: g.finalPrompt,
+    textResponse: g.textResponse,
     provider: g.provider,
     model: g.model,
     imageUrls: g.imageUrls,

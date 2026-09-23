@@ -30,7 +30,7 @@ export function GenerationFeed() {
         {conversation && (
           <p className="text-right text-xs text-muted-foreground">
             {conversation.generationCount}{" "}
-            {conversation.generationCount === 1 ? "image" : "images"}
+            {conversation.generationCount === 1 ? "turn" : "turns"}
           </p>
         )}
         {isLoading ? (
@@ -44,7 +44,7 @@ export function GenerationFeed() {
           </div>
         ) : items.length === 0 ? (
           <p className="py-16 text-center text-sm text-muted-foreground">
-            No generations in this chat yet — describe the next one below.
+            No messages yet — ask a question or describe an image below.
           </p>
         ) : (
           items.map((g) => <ChatTurn key={g.id} generation={g} />)

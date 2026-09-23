@@ -55,8 +55,10 @@ model Generation {
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   themeId      String?
   theme        Theme?      @relation(fields: [themeId], references: [id])
+  kind         String      @default("image") // "image" | "text" — text = chat reply, no image
   prompt       String      @db.Text // raw user idea
   finalPrompt  String      @db.Text // template + user idea, what was actually sent
+  textResponse String?     @db.Text // assistant reply for kind="text"
   provider     String // "openai" | "flux" | "ideogram"
   model        String? // "gpt-image-2.5-flare" etc.
   imageUrls    String[] // storage URLs (1+ per generation)
