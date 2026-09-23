@@ -144,8 +144,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <Link
           href="/"
           onClick={onNavigate}
-          className="font-display text-lg font-semibold tracking-tight"
+          className="flex items-center gap-2 font-display text-lg font-semibold tracking-tight"
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" className="h-6 w-6 rounded-md" />
           PromptHub
         </Link>
         <div className="flex items-center gap-0.5">
