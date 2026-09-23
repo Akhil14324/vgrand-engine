@@ -96,6 +96,8 @@ function mapImages(
     .filter((d) => d.b64Json || d.url);
 }
 
+const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
 async function fetchImageFile(url: string): Promise<File> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -106,5 +108,17 @@ async function fetchImageFile(url: string): Promise<File> {
   }
   const buf = Buffer.from(await res.arrayBuffer());
   const name = url.split("/").pop()?.split("?")[0] || "reference.png";
-  return toFile(buf, name);
+  // OpenAI rejects octet-stream, so set the type explicitly: prefer the
+  // response header when it's an image, else infer from the file extension.
+  const headerType = res.headers.get("content-type")?.split(";")[0]?.trim();
+  const ext = name.split(".").pop()?.toLowerCase();
+  const type =
+    headerType && SUPPORTED_IMAGE_TYPES.has(headerType)
+      ? headerType
+      : ext === "jpg" || ext === "jpeg"
+        ? "image/jpeg"
+        : ext === "webp"
+          ? "image/webp"
+          : "image/png";
+  return toFile(buf, name, { type });
 }
