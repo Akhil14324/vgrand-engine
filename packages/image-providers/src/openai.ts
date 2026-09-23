@@ -43,8 +43,12 @@ export class OpenAIImageProvider implements ImageProvider {
     const size = params.size ?? "auto";
 
     try {
-      if (params.mode === "edit" && params.referenceImageUrl) {
-        const image = await fetchImageFile(params.referenceImageUrl);
+      const refs =
+        params.referenceImageUrls ??
+        (params.referenceImageUrl ? [params.referenceImageUrl] : []);
+      if (params.mode === "edit" && refs.length > 0) {
+        const files = await Promise.all(refs.map(fetchImageFile));
+        const image = files.length === 1 ? files[0]! : files;
         const res = await client.images.edit({
           model,
           image,

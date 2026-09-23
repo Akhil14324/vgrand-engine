@@ -56,6 +56,12 @@ export async function generationRoutes(app: FastifyInstance) {
       }
     }
     const parent = body.parentId ? await loadOwned(req, body.parentId) : null;
+    const referenceImageUrls = [
+      ...new Set([
+        ...(body.referenceImageUrl ? [body.referenceImageUrl] : []),
+        ...(body.referenceImageUrls ?? []),
+      ]),
+    ].slice(0, 10);
 
     // Chat resolution order: explicit conversationId → inherit the parent's
     // chat → spin up a new conversation titled from the prompt.
@@ -68,7 +74,7 @@ export async function generationRoutes(app: FastifyInstance) {
     // Explicit opt-ins always make an image; ambiguous prompts get classified
     // so questions ("what is a linked list?") get a text reply, not an image.
     const explicitImage = Boolean(
-      theme || body.referenceImageUrl || body.parentId,
+      theme || referenceImageUrls.length > 0 || body.parentId,
     );
     const kind = explicitImage
       ? ("image" as const)
@@ -103,7 +109,8 @@ export async function generationRoutes(app: FastifyInstance) {
             kind === "image" ? resolveProvider(theme, body.provider) : "openai",
           parentId: body.parentId ?? null,
           metadata: {
-            referenceImageUrl: body.referenceImageUrl,
+            referenceImageUrl: referenceImageUrls[0],
+            referenceImageUrls,
             quality: body.quality ?? "low",
             size: body.size ?? "auto",
           },

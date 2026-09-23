@@ -8,6 +8,9 @@ export interface GenerateParams {
   mode: GenerationMode;
   /** Required for edit mode — the image being iterated on. */
   referenceImageUrl?: string;
+  /** All reference images (first == referenceImageUrl). Providers that only
+   * accept one image use the first. */
+  referenceImageUrls?: string[];
   quality?: Quality;
   size?: ImageSize;
   n?: number;

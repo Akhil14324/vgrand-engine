@@ -147,6 +147,8 @@ export const createGenerationSchema = z.object({
   quality: z.enum(QUALITIES).optional(),
   size: z.enum(IMAGE_SIZES).optional(),
   referenceImageUrl: z.string().url().optional(),
+  /** Up to 10 reference images (edit mode). Merged with referenceImageUrl. */
+  referenceImageUrls: z.array(z.string().url()).max(10).optional(),
   parentId: z.string().uuid().optional(),
 });
 export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;

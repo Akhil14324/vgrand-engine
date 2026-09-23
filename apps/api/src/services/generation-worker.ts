@@ -18,6 +18,7 @@ import { env } from "../env.js";
 
 interface GenerationMetadata {
   referenceImageUrl?: string;
+  referenceImageUrls?: string[];
   quality?: Quality;
   size?: ImageSize;
   [key: string]: unknown;
@@ -81,7 +82,16 @@ export async function runGeneration(generationId: string): Promise<void> {
   const startedAt = Date.now();
   const meta = (generation.metadata ?? {}) as GenerationMetadata;
   const mode: GenerationMode =
-    generation.parentId || meta.referenceImageUrl ? "edit" : "draft";
+    generation.parentId ||
+    meta.referenceImageUrl ||
+    meta.referenceImageUrls?.length
+      ? "edit"
+      : "draft";
+  const referenceImageUrls = meta.referenceImageUrls?.length
+    ? meta.referenceImageUrls
+    : meta.referenceImageUrl
+      ? [meta.referenceImageUrl]
+      : [];
   const providerName = (PROVIDERS as readonly string[]).includes(
     generation.provider,
   )
@@ -117,7 +127,8 @@ export async function runGeneration(generationId: string): Promise<void> {
     const result = await generateWithFallback(providerName, {
       prompt: generation.finalPrompt,
       mode,
-      referenceImageUrl: meta.referenceImageUrl,
+      referenceImageUrl: referenceImageUrls[0],
+      referenceImageUrls,
       quality: meta.quality ?? "low",
       size: meta.size ?? "auto",
     });
