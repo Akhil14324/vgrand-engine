@@ -8,7 +8,9 @@ import {
   Home,
   LayoutGrid,
   Menu,
+  PanelLeftOpen,
   Sparkles,
+  SquarePen,
   UtensilsCrossed,
   X,
   type LucideIcon,
@@ -32,7 +34,8 @@ export function StudioShell() {
   const { user, loading, isDev } = useAuth();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { activeConversationId } = useStudio();
+  const { activeConversationId, sidebarCollapsed, toggleSidebar, startNewChat } =
+    useStudio();
   const { data: conversation } = useConversation(activeConversationId);
 
   useEffect(() => {
@@ -66,6 +69,27 @@ export function StudioShell() {
           >
             <Menu />
           </Button>
+          {/* Reopen controls when the desktop sidebar is collapsed */}
+          {sidebarCollapsed && (
+            <div className="hidden items-center gap-0.5 md:flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                aria-label="Open sidebar"
+              >
+                <PanelLeftOpen />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={startNewChat}
+                aria-label="New chat"
+              >
+                <SquarePen />
+              </Button>
+            </div>
+          )}
           <div className="min-w-0 flex-1 text-center">
             {conversation && (
               <span className="truncate text-sm font-medium">

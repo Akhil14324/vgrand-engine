@@ -22,6 +22,10 @@ interface StudioState {
   quality: Quality;
   setQuality: (q: Quality) => void;
 
+  /** Desktop sidebar collapsed via the PanelLeft button. */
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
+
   /** History filter — mirrors ?themeSlug= on GET /generations. */
   historyTheme: string | null;
   setHistoryTheme: (slug: string | null) => void;
@@ -44,6 +48,10 @@ export const useStudio = create<StudioState>((set) => ({
 
   quality: "low",
   setQuality: (quality) => set({ quality }),
+
+  sidebarCollapsed: false,
+  toggleSidebar: () =>
+    set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
   historyTheme: null,
   setHistoryTheme: (slug) => set({ historyTheme: slug }),

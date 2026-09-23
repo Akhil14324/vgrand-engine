@@ -13,6 +13,7 @@ import {
   LayoutGrid,
   LogOut,
   MessageSquare,
+  PanelLeftClose,
   Pencil,
   Search,
   Sparkles,
@@ -64,8 +65,14 @@ function timeAgo(iso: string): string {
 
 /** Desktop column wrapper. The same content renders inside the mobile drawer. */
 export function Sidebar() {
+  const collapsed = useStudio((s) => s.sidebarCollapsed);
   return (
-    <aside className="hidden w-[280px] shrink-0 border-r border-sidebar bg-sidebar md:block">
+    <aside
+      className={cn(
+        "hidden w-[280px] shrink-0 border-r border-sidebar bg-sidebar md:block",
+        collapsed && "md:hidden",
+      )}
+    >
       <SidebarContent />
     </aside>
   );
@@ -83,6 +90,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     activeConversationId,
     openConversation,
     startNewChat,
+    toggleSidebar,
   } = useStudio();
   const { data: themes } = useThemes();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -140,15 +148,29 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         >
           PromptHub
         </Link>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground"
-          onClick={() => setSearchOpen((v) => !v)}
-          aria-label="Search"
-        >
-          <Search />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground"
+            onClick={() => setSearchOpen((v) => !v)}
+            aria-label="Search"
+          >
+            <Search />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground"
+            onClick={() => {
+              toggleSidebar();
+              onNavigate?.();
+            }}
+            aria-label="Close sidebar"
+          >
+            <PanelLeftClose />
+          </Button>
+        </div>
       </div>
 
       {searchOpen && (
