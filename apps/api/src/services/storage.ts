@@ -14,10 +14,23 @@ import { env } from "../env.js";
 let supabase: SupabaseClient | null = null;
 let bucketEnsured = false;
 
+/**
+ * Tolerate a hand-pasted project URL: add a missing scheme and strip trailing
+ * slashes or an API suffix (/rest/v1, /storage/v1) — any of those makes the
+ * Storage API reject requests with "Invalid path specified in request URL".
+ */
+function normalizeSupabaseUrl(raw: string): string {
+  const url = raw.trim();
+  const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return withScheme.replace(/\/(rest|storage|auth)\/v1.*$/i, "").replace(/\/+$/, "");
+}
+
+const BUCKET = env.STORAGE_BUCKET.trim();
+
 function getSupabase(): SupabaseClient | null {
   if (!env.supabaseConfigured) return null;
   supabase ??= createClient(
-    env.SUPABASE_URL!,
+    normalizeSupabaseUrl(env.SUPABASE_URL!),
     env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } },
   );
@@ -26,7 +39,7 @@ function getSupabase(): SupabaseClient | null {
 
 async function ensureBucket(client: SupabaseClient) {
   if (bucketEnsured) return;
-  const { error } = await client.storage.createBucket(env.STORAGE_BUCKET, {
+  const { error } = await client.storage.createBucket(BUCKET, {
     public: true,
   });
   // "already exists" is fine — anything else surfaces on upload anyway.
@@ -72,11 +85,11 @@ export async function storeImage(input: StoreImageInput): Promise<string> {
   if (client) {
     await ensureBucket(client);
     const { error } = await client.storage
-      .from(env.STORAGE_BUCKET)
+      .from(BUCKET)
       .upload(key, buffer, { contentType: mimeType ?? "image/png" });
     if (error) throw new Error(`storage upload failed: ${error.message}`);
     const { data } = client.storage
-      .from(env.STORAGE_BUCKET)
+      .from(BUCKET)
       .getPublicUrl(key);
     return data.publicUrl;
   }
