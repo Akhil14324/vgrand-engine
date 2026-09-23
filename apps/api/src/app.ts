@@ -7,6 +7,7 @@ import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
 import { env } from "./env.js";
 import { HttpError } from "./lib/errors.js";
+import { queueStats } from "./services/queue.js";
 import { authPlugin } from "./plugins/auth.js";
 import { themeRoutes } from "./routes/themes.js";
 import { generationRoutes } from "./routes/generations.js";
@@ -70,6 +71,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     status: "ok",
     auth: env.supabaseConfigured ? "supabase" : "dev-bypass",
     storage: env.supabaseConfigured ? "supabase" : "local",
+    queue: await queueStats().catch((e: Error) => ({ error: e.message })),
   }));
 
   await app.register(themeRoutes);

@@ -6,7 +6,12 @@ export const GENERATION_QUEUE = "image-generation";
 
 /** Shared by BullMQ Queue (server) and Worker. */
 export function createRedisConnection(): IORedis {
-  const conn = new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  const conn = new IORedis(env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    // Railway's private network (*.railway.internal) is IPv6-only; family 0
+    // lets ioredis resolve either stack instead of hanging on IPv4.
+    family: 0,
+  });
   // An ioredis 'error' with no listener is an unhandled EventEmitter error and
   // kills the process — log instead of crashing when Redis is unreachable.
   conn.on("error", (err) => console.error("[redis] connection error:", err.message));
@@ -46,4 +51,11 @@ export async function enqueueGeneration(generationId: string) {
   }
   // jobId = generationId keeps the queue idempotent on retries/duplicate POSTs.
   await getQueue().add("generate", { generationId }, { jobId: generationId });
+}
+
+/** Queue depth for /health — shows whether jobs are piling up unconsumed. */
+export async function queueStats() {
+  if (!env.redisConfigured) return { mode: "inline" as const };
+  const counts = await getQueue().getJobCounts("waiting", "active", "failed");
+  return { mode: "redis" as const, workerInline: env.WORKER_INLINE, ...counts };
 }
