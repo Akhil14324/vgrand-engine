@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
 import { Composer } from "./composer";
 import { GenerationFeed } from "./generation-feed";
-import { DetailPanel } from "./detail-panel";
 
 const THEME_ICONS: Record<string, LucideIcon> = {
   utensils: UtensilsCrossed,
@@ -33,7 +32,7 @@ export function StudioShell() {
   const { user, loading, isDev } = useAuth();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { selectedId, select, activeConversationId } = useStudio();
+  const { activeConversationId } = useStudio();
   const { data: conversation } = useConversation(activeConversationId);
 
   useEffect(() => {
@@ -100,10 +99,6 @@ export function StudioShell() {
         </main>
       </div>
 
-      <aside className="hidden w-[380px] shrink-0 border-l xl:block">
-        <DetailPanel />
-      </aside>
-
       {/* Sidebar drawer — mobile only */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
@@ -124,18 +119,6 @@ export function StudioShell() {
         </div>
       )}
 
-      {/* Detail sheet — below xl: bottom sheet on phones, side panel on tablets */}
-      {selectedId && (
-        <div className="fixed inset-0 z-50 xl:hidden">
-          <div
-            className="absolute inset-0 bg-black/60 animate-fade-in"
-            onClick={() => select(null)}
-          />
-          <div className="absolute inset-x-0 bottom-0 h-[85dvh] animate-slide-in-up overflow-hidden rounded-t-2xl border-t bg-card shadow-xl sm:inset-y-0 sm:left-auto sm:h-full sm:w-[440px] sm:max-w-[90vw] sm:animate-slide-in-right sm:rounded-none sm:border-l sm:border-t-0">
-            <DetailPanel id={selectedId} onClose={() => select(null)} />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
