@@ -62,7 +62,7 @@ export function StudioShell() {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="shrink-0 md:hidden"
             onClick={() => setSidebarOpen(true)}
             aria-label="Open menu"
           >
@@ -95,7 +95,7 @@ export function StudioShell() {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="shrink-0 md:hidden"
             asChild
           >
             <Link href="/boards" aria-label="Library">

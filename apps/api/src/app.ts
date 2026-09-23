@@ -27,6 +27,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: [env.WEB_ORIGIN, "http://localhost:3000"],
     credentials: true,
+    // Explicit list — without it the preflight only advertises GET/HEAD/POST
+    // and browsers silently block DELETE/PATCH (delete chat, rename, pin…).
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
   await app.register(multipart, {
     limits: { fileSize: 10 * 1024 * 1024, files: 1 },

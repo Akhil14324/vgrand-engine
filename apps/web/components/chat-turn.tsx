@@ -29,7 +29,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
       {/* User turn */}
       <div className="flex justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 sm:max-w-[70%]">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
             {generation.prompt}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5">
@@ -71,7 +71,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
         ) : generation.status === "failed" ? (
           <div className="flex max-w-md items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <p className="break-words text-xs leading-relaxed text-muted-foreground">
               {generation.error ?? "Generation failed"}
             </p>
           </div>
