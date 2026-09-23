@@ -112,13 +112,17 @@ export function toConversationDto(c: ConversationWithPreview): ConversationDto {
   };
 }
 
-export function toMemoryDto(m: Memory): MemoryDto {
+export function toMemoryDto(
+  m: Memory & { sourceGen?: { imageUrls: string[] } | null },
+): MemoryDto {
   return {
     id: m.id,
     userId: m.userId,
     type: m.type,
     content: m.content,
     sourceGenId: m.sourceGenId,
+    previewImage: m.sourceGen?.imageUrls[0] ?? null,
+    metadata: (m.metadata as MemoryDto["metadata"]) ?? null,
     createdAt: m.createdAt.toISOString(),
   };
 }

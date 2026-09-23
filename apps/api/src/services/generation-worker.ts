@@ -95,8 +95,8 @@ async function processGeneration(
       },
     });
 
-    // Keep a lightweight memory trail so the memory feed is useful from day
-    // one; richer preference extraction can build on this later.
+    // Persistent memory snapshot — everything needed to recall or reproduce
+    // this generation later, not just the image.
     await prisma.memory.create({
       data: {
         userId: generation.userId,
@@ -105,6 +105,18 @@ async function processGeneration(
           generation.theme ? ` with /${generation.theme.slug}` : ""
         } (${result.providerUsed}${result.fellBack ? ", fallback" : ""})`,
         sourceGenId: generationId,
+        metadata: {
+          prompt: generation.prompt,
+          finalPrompt: generation.finalPrompt,
+          themeSlug: generation.theme?.slug ?? null,
+          provider: result.providerUsed,
+          model: result.metadata.model ?? null,
+          quality: meta.quality ?? "low",
+          size: meta.size ?? "auto",
+          imageUrls,
+          latencyMs: Date.now() - startedAt,
+          conversationId: generation.conversationId,
+        },
       },
     });
 

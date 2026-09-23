@@ -67,6 +67,7 @@ model Generation {
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   boardItems     BoardItem[]
   shareLinks     ShareLink[]
+  memories       Memory[]
   createdAt      DateTime    @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
@@ -96,13 +97,17 @@ model BoardItem {
 }
 
 model Memory {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        String // "preference" | "fact" | "style"
-  content     String   @db.Text // e.g. "prefers warm color palettes for restaurant posters"
+  content     String      @db.Text // e.g. "prefers warm color palettes for restaurant posters"
   sourceGenId String? // generation that produced this memory
-  createdAt   DateTime @default(now())
+  sourceGen   Generation? @relation(fields: [sourceGenId], references: [id], onDelete: SetNull)
+  // Full snapshot of what was generated — more than just the image:
+  // prompt, finalPrompt, theme, provider/model, quality/size, urls, latency.
+  metadata    Json?
+  createdAt   DateTime    @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
 }

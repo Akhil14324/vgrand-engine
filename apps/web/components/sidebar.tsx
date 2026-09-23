@@ -277,26 +277,42 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           {(memories ?? []).map((m) => (
             <div
               key={m.id}
-              className="group rounded-md border bg-card/60 px-2.5 py-2"
+              className="group flex gap-2.5 rounded-md border bg-card/60 p-2.5"
             >
-              <div className="flex items-center justify-between gap-2">
-                <Badge variant="muted" className="text-[10px]">
-                  {m.type}
-                </Badge>
-                <button
-                  onClick={() => deleteMemory.mutate(m.id)}
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                  aria-label="Delete memory"
-                >
-                  <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                </button>
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted">
+                {m.previewImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={m.previewImage}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <Brain className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                )}
               </div>
-              <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                {m.content}
-              </p>
-              <p className="mt-1 text-[10px] text-muted-foreground/60">
-                {timeAgo(m.createdAt)}
-              </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="muted" className="text-[10px]">
+                    {m.type}
+                  </Badge>
+                  <button
+                    onClick={() => deleteMemory.mutate(m.id)}
+                    className="opacity-0 transition-opacity group-hover:opacity-100"
+                    aria-label="Delete memory"
+                  >
+                    <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                  </button>
+                </div>
+                <p className="mt-1 text-xs leading-snug text-muted-foreground">
+                  {m.content}
+                </p>
+                <p className="mt-1 text-[10px] text-muted-foreground/60">
+                  {timeAgo(m.createdAt)}
+                </p>
+              </div>
             </div>
           ))}
           {memories?.length === 0 && (

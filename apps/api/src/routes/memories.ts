@@ -12,6 +12,7 @@ export async function memoryRoutes(app: FastifyInstance) {
       where: { userId: req.userId },
       orderBy: { createdAt: "desc" },
       take: 100,
+      include: { sourceGen: { select: { imageUrls: true } } },
     });
     return { items: items.map(toMemoryDto) };
   });

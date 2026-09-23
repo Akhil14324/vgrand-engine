@@ -105,6 +105,10 @@ export interface MemoryDto {
   type: MemoryType | string;
   content: string;
   sourceGenId: string | null;
+  /** First image of the source generation, when it still exists. */
+  previewImage: string | null;
+  /** Snapshot stored at generation time (prompt, model, urls, latency…). */
+  metadata: Record<string, unknown> | null;
   createdAt: string;
 }
 
