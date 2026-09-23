@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# generated
+packages/db/generated/
+apps/api/uploads/
+
+# misc
+.DS_Store
+Thumbs.db
+*.log
+.turbo/
+.vercel
+coverage/

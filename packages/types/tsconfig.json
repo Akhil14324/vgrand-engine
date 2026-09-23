@@ -1,0 +1,4 @@
+{
+  "extends": "@prompthub/config/tsconfig/base.json",
+  "include": ["src"]
+}

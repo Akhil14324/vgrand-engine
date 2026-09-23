@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(uuid())
+  email       String       @unique
+  name        String?
+  avatarUrl   String?
+  createdAt   DateTime     @default(now())
+  generations Generation[]
+  boards      Board[]
+  memories    Memory[]
+}
+
+model Theme {
+  id             String       @id @default(uuid())
+  slug           String       @unique // "restaurant", "infra"
+  label          String // "Restaurant Posters"
+  description    String?
+  promptTemplate String       @db.Text // system prompt injected per theme
+  styleGuide     Json? // color palette, layout hints, negative prompts, preferredProvider
+  icon           String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  generations    Generation[]
+}
+
+model Generation {
+  id           String      @id @default(uuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  themeId      String?
+  theme        Theme?      @relation(fields: [themeId], references: [id])
+  prompt       String      @db.Text // raw user idea
+  finalPrompt  String      @db.Text // template + user idea, what was actually sent
+  provider     String // "openai" | "flux" | "ideogram"
+  model        String? // "gpt-image-2.5-flare" etc.
+  imageUrls    String[] // storage URLs (1+ per generation)
+  status       String      @default("pending") // pending | processing | completed | failed
+  error        String?
+  metadata     Json? // size, quality, seed, cost, latency
+  parentId     String? // for "regenerate/edit" chains
+  parent       Generation? @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Generation[] @relation("GenerationChain")
+  boardItems   BoardItem[]
+  shareLinks   ShareLink[]
+  createdAt    DateTime    @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([themeId])
+}
+
+model Board {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  items     BoardItem[]
+  createdAt DateTime    @default(now())
+}
+
+model BoardItem {
+  id           String     @id @default(uuid())
+  boardId      String
+  board        Board      @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  generationId String
+  generation   Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  addedAt      DateTime   @default(now())
+
+  @@unique([boardId, generationId])
+  @@index([boardId])
+}
+
+model Memory {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String // "preference" | "fact" | "style"
+  content     String   @db.Text // e.g. "prefers warm color palettes for restaurant posters"
+  sourceGenId String? // generation that produced this memory
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model ShareLink {
+  id           String     @id @default(uuid())
+  generationId String
+  generation   Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  token        String     @unique
+  expiresAt    DateTime?
+  createdAt    DateTime   @default(now())
+}

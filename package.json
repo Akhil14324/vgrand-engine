@@ -1,0 +1,26 @@
+{
+  "name": "prompthub",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "lint": "turbo lint",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "db:generate": "pnpm --filter @prompthub/db generate",
+    "db:migrate": "pnpm --filter @prompthub/db migrate",
+    "db:push": "pnpm --filter @prompthub/db push",
+    "db:seed": "pnpm --filter @prompthub/db seed",
+    "db:studio": "pnpm --filter @prompthub/db studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.5",
+    "typescript": "^5.8.3"
+  }
+}
