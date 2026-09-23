@@ -3,8 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LayoutGrid, Menu, X } from "lucide-react";
+import {
+  Building2,
+  Home,
+  LayoutGrid,
+  Menu,
+  Sparkles,
+  UtensilsCrossed,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useConversation, useThemes } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
@@ -12,11 +22,19 @@ import { Composer } from "./composer";
 import { GenerationFeed } from "./generation-feed";
 import { DetailPanel } from "./detail-panel";
 
+const THEME_ICONS: Record<string, LucideIcon> = {
+  utensils: UtensilsCrossed,
+  building: Building2,
+  sparkles: Sparkles,
+  home: Home,
+};
+
 export function StudioShell() {
   const { user, loading, isDev } = useAuth();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { selectedId, select } = useStudio();
+  const { selectedId, select, activeConversationId } = useStudio();
+  const { data: conversation } = useConversation(activeConversationId);
 
   useEffect(() => {
     if (!loading && !user && !isDev) router.replace("/login");
@@ -34,37 +52,57 @@ export function StudioShell() {
   if (!user) return null;
 
   return (
-    <div className="flex h-dvh flex-col">
-      {/* Mobile top bar — drawer + boards shortcuts */}
-      <header className="flex items-center gap-1 border-b bg-card/60 px-2 py-2 md:hidden">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Open menu"
-        >
-          <Menu />
-        </Button>
-        <span className="font-display text-base font-semibold tracking-tight">
-          PromptHub
-        </span>
-        <Button variant="ghost" size="icon" className="ml-auto" asChild>
-          <Link href="/boards" aria-label="Boards">
-            <LayoutGrid />
-          </Link>
-        </Button>
-      </header>
+    <div className="flex h-dvh overflow-hidden">
+      <Sidebar />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[300px_1fr] xl:grid-cols-[300px_1fr_380px]">
-        <Sidebar />
-        <main className="flex min-h-0 flex-col">
-          <GenerationFeed />
-          <Composer />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Slim top bar — chat title centered, like ChatGPT's header */}
+        <header className="flex h-12 shrink-0 items-center gap-2 px-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu />
+          </Button>
+          <div className="min-w-0 flex-1 text-center">
+            {conversation && (
+              <span className="truncate text-sm font-medium">
+                {conversation.title}
+              </span>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            asChild
+          >
+            <Link href="/boards" aria-label="Library">
+              <LayoutGrid />
+            </Link>
+          </Button>
+        </header>
+
+        <main className="flex min-h-0 flex-1 flex-col">
+          {activeConversationId ? (
+            <>
+              <GenerationFeed />
+              <div className="border-t border-transparent">
+                <Composer />
+              </div>
+            </>
+          ) : (
+            <Hero />
+          )}
         </main>
-        <aside className="hidden min-h-0 border-l xl:block">
-          <DetailPanel />
-        </aside>
       </div>
+
+      <aside className="hidden w-[380px] shrink-0 border-l xl:block">
+        <DetailPanel />
+      </aside>
 
       {/* Sidebar drawer — mobile only */}
       {sidebarOpen && (
@@ -73,7 +111,7 @@ export function StudioShell() {
             className="absolute inset-0 bg-black/60 animate-fade-in"
             onClick={() => setSidebarOpen(false)}
           />
-          <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] animate-slide-in-left border-r bg-card shadow-xl">
+          <div className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] animate-slide-in-left border-r border-sidebar bg-sidebar shadow-xl">
             <SidebarContent onNavigate={() => setSidebarOpen(false)} />
           </div>
           <button
@@ -86,8 +124,7 @@ export function StudioShell() {
         </div>
       )}
 
-      {/* Detail sheet — below xl the right column becomes an overlay:
-          bottom sheet on phones, right-side panel on tablets. */}
+      {/* Detail sheet — below xl: bottom sheet on phones, side panel on tablets */}
       {selectedId && (
         <div className="fixed inset-0 z-50 xl:hidden">
           <div
@@ -99,6 +136,36 @@ export function StudioShell() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Empty state — greeting + centered pill composer, like ChatGPT's home. */
+function Hero() {
+  const { armTheme } = useStudio();
+  const { data: themes } = useThemes();
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-10">
+      <h1 className="text-center font-display text-2xl font-medium tracking-tight md:text-3xl">
+        Ready when you are.
+      </h1>
+      <div className="mt-7 w-full">
+        <Composer />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+        {(themes ?? []).map((t) => {
+          const Icon = (t.icon && THEME_ICONS[t.icon]) || Sparkles;
+          return (
+            <button
+              key={t.id}
+              onClick={() => armTheme(t)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Icon className="h-3.5 w-3.5" />/{t.slug}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

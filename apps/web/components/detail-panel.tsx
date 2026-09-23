@@ -30,9 +30,12 @@ export function DetailPanel({
   /** When provided, renders a header with a close button. */
   onClose?: () => void;
 }) {
-  const { selectedId } = useStudio();
-  // Fall back to the most recent generation so the panel is never dead space.
-  const { data: list } = useGenerations();
+  const { selectedId, activeConversationId } = useStudio();
+  // Fall back to the chat's most recent generation so the panel is never
+  // dead space. With no chat open, the latest generation overall is used.
+  const { data: list } = useGenerations({
+    conversationId: activeConversationId,
+  });
   const effectiveId = useMemo(
     () =>
       id !== undefined ? id : (selectedId ?? list?.items[0]?.id ?? null),

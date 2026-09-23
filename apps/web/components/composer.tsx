@@ -9,11 +9,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  ArrowUp,
   Building2,
   Home,
   Image as ImageIcon,
   Loader2,
-  SendHorizonal,
+  Plus,
   Sparkles,
   UtensilsCrossed,
   X,
@@ -54,8 +55,16 @@ const QUALITY_LABEL: Record<Quality, string> = {
 };
 
 export function Composer() {
-  const { armedTheme, armTheme, disarmTheme, quality, setQuality, select } =
-    useStudio();
+  const {
+    armedTheme,
+    armTheme,
+    disarmTheme,
+    quality,
+    setQuality,
+    select,
+    activeConversationId,
+    openConversation,
+  } = useStudio();
   const { data: themes } = useThemes();
   const create = useCreateGeneration();
 
@@ -66,14 +75,14 @@ export function Composer() {
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const slashQuery = value.startsWith("/") ? value.slice(1) : null;
   const filtered = useMemo(() => {
     if (slashQuery === null || !themes) return [];
     const q = slashQuery.toLowerCase();
     return themes.filter(
-      (t) =>
-        t.slug.startsWith(q) || t.label.toLowerCase().includes(q),
+      (t) => t.slug.startsWith(q) || t.label.toLowerCase().includes(q),
     );
   }, [slashQuery, themes]);
 
@@ -113,16 +122,18 @@ export function Composer() {
         themeSlug: armedTheme?.slug,
         quality,
         referenceImageUrl: refImage?.url,
+        conversationId: activeConversationId ?? undefined,
       },
       {
         onSuccess: (res) => {
           setValue("");
           setRefImage(null);
+          openConversation(res.conversationId);
           select(res.generationId);
         },
       },
     );
-  }, [value, create, armedTheme, quality, refImage, select]);
+  }, [value, create, armedTheme, quality, refImage, activeConversationId, openConversation, select]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -166,11 +177,13 @@ export function Composer() {
       ? "gpt-image-2.5-sunburst"
       : "gpt-image-2.5-flare";
 
+  const canSend = Boolean(value.trim()) && value !== "/" && !create.isPending;
+
   return (
     <div
       className={cn(
-        "border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-colors sm:p-4",
-        dragging && "bg-accent/40",
+        "w-full px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-colors sm:px-4",
+        dragging && "bg-accent/30",
       )}
       onDragOver={(e) => {
         e.preventDefault();
@@ -179,44 +192,72 @@ export function Composer() {
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
-      <div className="mx-auto w-full max-w-3xl">
-        <div className="rounded-xl border bg-card shadow-sm transition-shadow focus-within:ring-1 focus-within:ring-ring">
-          {(armedTheme || refImage || uploading) && (
-            <div className="flex flex-wrap items-center gap-2 px-3 pt-3">
-              {armedTheme && (
-                <Badge variant="default" className="gap-1.5 pr-1">
-                  /{armedTheme.slug}
-                  <button
-                    onClick={disarmTheme}
-                    className="rounded-full p-0.5 hover:bg-primary/20"
-                    aria-label="Clear theme"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              )}
-              {uploading && (
-                <Badge variant="muted" className="gap-1.5">
-                  <Loader2 className="h-3 w-3 animate-spin" /> uploading…
-                </Badge>
-              )}
-              {refImage && (
-                <Badge variant="secondary" className="gap-1.5 pr-1">
-                  <ImageIcon className="h-3 w-3" /> reference attached
-                  <button
-                    onClick={() => setRefImage(null)}
-                    className="rounded-full p-0.5 hover:bg-accent"
-                    aria-label="Remove reference"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              )}
-            </div>
-          )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void uploadFile(file);
+          e.target.value = "";
+        }}
+      />
 
-          <Popover open={menuOpen && filtered.length > 0}>
-            <PopoverAnchor asChild>
+      <Popover open={menuOpen && filtered.length > 0}>
+        <PopoverAnchor asChild>
+          <div
+            className={cn(
+              "mx-auto w-full max-w-3xl rounded-[28px] border bg-card px-2.5 py-2 shadow-lg transition-shadow focus-within:ring-1 focus-within:ring-ring",
+              dragging && "ring-1 ring-primary",
+            )}
+          >
+            {(armedTheme || refImage || uploading) && (
+              <div className="flex flex-wrap items-center gap-2 px-2 pb-1.5 pt-0.5">
+                {armedTheme && (
+                  <Badge variant="default" className="gap-1.5 pr-1">
+                    /{armedTheme.slug}
+                    <button
+                      onClick={disarmTheme}
+                      className="rounded-full p-0.5 hover:bg-primary/20"
+                      aria-label="Clear theme"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                )}
+                {uploading && (
+                  <Badge variant="muted" className="gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" /> uploading…
+                  </Badge>
+                )}
+                {refImage && (
+                  <Badge variant="secondary" className="gap-1.5 pr-1">
+                    <ImageIcon className="h-3 w-3" /> reference attached
+                    <button
+                      onClick={() => setRefImage(null)}
+                      className="rounded-full p-0.5 hover:bg-accent"
+                      aria-label="Remove reference"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-end gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="mb-0.5 h-9 w-9 shrink-0 rounded-full text-muted-foreground"
+                onClick={() => fileRef.current?.click()}
+                aria-label="Attach reference image"
+                title="Attach reference image (edit mode)"
+              >
+                <Plus />
+              </Button>
+
               <Textarea
                 ref={textareaRef}
                 value={value}
@@ -236,97 +277,100 @@ export function Composer() {
                 placeholder={
                   armedTheme
                     ? `Describe your ${armedTheme.label.toLowerCase()} idea…`
-                    : "Describe an image, or type / to arm a theme…"
+                    : "Describe an image — type / for themes"
                 }
-                className="min-h-[72px] resize-none border-0 shadow-none focus-visible:ring-0"
+                rows={1}
+                className="max-h-40 min-h-[40px] flex-1 resize-none border-0 bg-transparent py-2.5 shadow-none focus-visible:ring-0"
               />
-            </PopoverAnchor>
-            <PopoverContent
-              align="start"
-              side="top"
-              className="w-[--radix-popover-trigger-width] min-w-64 p-1"
-              onOpenAutoFocus={(e) => e.preventDefault()}
-            >
-              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                Themes
-              </div>
-              {filtered.map((t, i) => {
-                const Icon =
-                  (t.icon && THEME_ICONS[t.icon]) || Sparkles;
-                return (
-                  <button
-                    key={t.id}
-                    onMouseEnter={() => setHighlight(i)}
-                    onClick={() => pick(t)}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm",
-                      i === highlight && "bg-accent",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <div className="min-w-0">
-                      <div className="font-medium">/{t.slug}</div>
-                      {t.description && (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {t.description}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </PopoverContent>
-          </Popover>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
-            <div className="flex min-w-0 items-center gap-2">
-              <Badge variant="muted" className="font-mono text-[10px]">
-                {providerLabel}
-              </Badge>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                    {QUALITY_LABEL[quality]}
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuLabel>Quality tier</DropdownMenuLabel>
-                  {(Object.keys(QUALITY_LABEL) as Quality[]).map((q) => (
-                    <DropdownMenuItem key={q} onClick={() => setQuality(q)}>
-                      {QUALITY_LABEL[q]}
-                      {q === quality && (
-                        <span className="ml-auto text-primary">●</span>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="mb-0.5 flex shrink-0 items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="hidden rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:block">
+                      {QUALITY_LABEL[quality]}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Quality tier</DropdownMenuLabel>
+                    {(Object.keys(QUALITY_LABEL) as Quality[]).map((q) => (
+                      <DropdownMenuItem key={q} onClick={() => setQuality(q)}>
+                        {QUALITY_LABEL[q]}
+                        {q === quality && (
+                          <span className="ml-auto text-primary">●</span>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  size="icon"
+                  onClick={submit}
+                  disabled={!canSend}
+                  className="h-9 w-9 rounded-full"
+                  aria-label="Generate"
+                >
+                  {create.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <ArrowUp />
+                  )}
+                </Button>
+              </div>
             </div>
-            <Button
-              size="sm"
-              onClick={submit}
-              disabled={!value.trim() || value === "/" || create.isPending}
-            >
-              {create.isPending ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <SendHorizonal />
-              )}
-              Generate
-            </Button>
           </div>
-        </div>
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          <kbd className="rounded border px-1 font-mono">/</kbd> arm a theme ·
-          drop or paste an image to edit it ·{" "}
+        </PopoverAnchor>
+        <PopoverContent
+          align="start"
+          side="top"
+          sideOffset={8}
+          className="w-[--radix-popover-trigger-width] min-w-64 p-1"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            Themes
+          </div>
+          {filtered.map((t, i) => {
+            const Icon = (t.icon && THEME_ICONS[t.icon]) || Sparkles;
+            return (
+              <button
+                key={t.id}
+                onMouseEnter={() => setHighlight(i)}
+                onClick={() => pick(t)}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm",
+                  i === highlight && "bg-accent",
+                )}
+              >
+                <Icon className="h-4 w-4 text-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="font-medium">/{t.slug}</div>
+                  {t.description && (
+                    <div className="truncate text-xs text-muted-foreground">
+                      {t.description}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </PopoverContent>
+      </Popover>
+
+      <div className="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-2 text-center text-[11px] text-muted-foreground">
+        <Badge variant="muted" className="font-mono text-[10px]">
+          {providerLabel}
+        </Badge>
+        <span className="hidden sm:inline">
+          <kbd className="rounded border px-1 font-mono">/</kbd> themes · drop
+          an image to edit ·{" "}
           <kbd className="rounded border px-1 font-mono">Enter</kbd> to generate
-        </p>
-        {create.isError && (
-          <p className="mt-1 text-center text-xs text-destructive">
-            {create.error.message}
-          </p>
-        )}
+        </span>
       </div>
+      {create.isError && (
+        <p className="mt-1 text-center text-xs text-destructive">
+          {create.error.message}
+        </p>
+      )}
     </div>
   );
 }

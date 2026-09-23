@@ -1,33 +1,52 @@
 "use client";
 
-import { useGenerations } from "@/lib/hooks";
+import { useConversation, useGenerations } from "@/lib/hooks";
+import { useStudio } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { GenerationCard } from "./generation-card";
 
 export function GenerationFeed() {
-  const { data, isLoading } = useGenerations();
+  const { activeConversationId } = useStudio();
+  const { data, isLoading } = useGenerations({
+    conversationId: activeConversationId,
+  });
+  const { data: conversation } = useConversation(activeConversationId);
   const items = data?.items ?? [];
 
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="mx-auto w-full max-w-5xl p-4 md:p-6">
-        {isLoading ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="aspect-square rounded-xl border shimmer"
-              />
-            ))}
-          </div>
-        ) : items.length === 0 ? (
+        {activeConversationId === null ? (
           <EmptyFeed />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-            {items.map((g) => (
-              <GenerationCard key={g.id} generation={g} />
-            ))}
-          </div>
+          <>
+            {conversation && (
+              <p className="mb-4 text-right text-xs text-muted-foreground">
+                {conversation.generationCount}{" "}
+                {conversation.generationCount === 1 ? "image" : "images"}
+              </p>
+            )}
+            {isLoading ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="aspect-square rounded-xl border shimmer"
+                  />
+                ))}
+              </div>
+            ) : items.length === 0 ? (
+              <p className="py-16 text-center text-sm text-muted-foreground">
+                No generations in this chat yet — describe the next one below.
+              </p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {items.map((g) => (
+                  <GenerationCard key={g.id} generation={g} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </ScrollArea>
