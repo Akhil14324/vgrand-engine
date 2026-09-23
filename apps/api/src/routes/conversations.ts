@@ -23,13 +23,17 @@ async function loadOwned(req: FastifyRequest, id: string) {
 export async function conversationRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
 
-  /** Recent chats for the sidebar — most recently active first. */
+  /** Recent chats for the sidebar — pinned first, then most recently active. */
   app.get("/conversations", async (req) => {
-    const q = req.query as { cursor?: string; limit?: string };
+    const q = req.query as {
+      cursor?: string;
+      limit?: string;
+      archived?: string;
+    };
     const limit = Math.min(Number(q.limit) || 50, 100);
     const items = await prisma.conversation.findMany({
-      where: { userId: req.userId },
-      orderBy: { updatedAt: "desc" },
+      where: { userId: req.userId, archived: q.archived === "true" },
+      orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
       take: limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
       include: PREVIEW_INCLUDE,
@@ -52,14 +56,14 @@ export async function conversationRoutes(app: FastifyInstance) {
     return toConversationDto(conversation);
   });
 
-  /** Rename a chat. */
+  /** Rename / pin / archive a chat. */
   app.patch("/conversations/:id", async (req) => {
     const { id } = req.params as { id: string };
     await loadOwned(req, id);
     const body = parseBody(updateConversationSchema, req.body);
     const conversation = await prisma.conversation.update({
       where: { id },
-      data: { title: body.title },
+      data: body,
       include: PREVIEW_INCLUDE,
     });
     return toConversationDto(conversation);

@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -76,6 +77,16 @@ export function Composer() {
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Auto-grow the textarea: one line at rest, expands with content up to
+  // ~7 lines (168px), then scrolls — same behavior as ChatGPT/Claude.
+  const autosize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
+  }, []);
+  useEffect(autosize, [value, autosize]);
 
   const slashQuery = value.startsWith("/") ? value.slice(1) : null;
   const filtered = useMemo(() => {
@@ -280,7 +291,7 @@ export function Composer() {
                     : "Describe an image — type / for themes"
                 }
                 rows={1}
-                className="max-h-40 min-h-[40px] flex-1 resize-none border-0 bg-transparent py-2.5 shadow-none focus-visible:ring-0"
+                className="max-h-[168px] min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-2.5 leading-5 shadow-none focus-visible:ring-0"
               />
 
               <div className="mb-0.5 flex shrink-0 items-center gap-1">

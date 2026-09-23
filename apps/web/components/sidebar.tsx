@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  Archive,
+  ArchiveRestore,
   Brain,
   Building2,
   Check,
@@ -13,8 +15,11 @@ import {
   LayoutGrid,
   LogOut,
   MessageSquare,
+  MoreHorizontal,
   PanelLeftClose,
   Pencil,
+  Pin,
+  PinOff,
   Search,
   Sparkles,
   SquarePen,
@@ -32,12 +37,19 @@ import {
   useDeleteMemory,
   useGenerations,
   useMemories,
-  useRenameConversation,
   useThemes,
+  useUpdateConversation,
 } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -96,6 +108,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [themesOpen, setThemesOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const { data: generations } = useGenerations({ themeSlug: historyTheme });
   const { data: conversations } = useConversations();
   const { data: memories } = useMemories();
@@ -259,6 +272,26 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </p>
           )}
         </div>
+        {/* Archived chats — hidden like ChatGPT until expanded */}
+        <button
+          onClick={() => setArchivedOpen((v) => !v)}
+          className="mx-2 mt-1 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Archive className="h-3 w-3" />
+          <span className="flex-1 text-left">Archived</span>
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform",
+              archivedOpen && "rotate-180",
+            )}
+          />
+        </button>
+        {archivedOpen && (
+          <ArchivedChats
+            onNavigate={onNavigate}
+            activeId={activeConversationId}
+          />
+        )}
 
         <SectionLabel icon={History} label="History" />
         {themes && themes.length > 0 && (
@@ -504,7 +537,7 @@ function ChatRow({
   onClick: () => void;
 }) {
   const { startNewChat } = useStudio();
-  const rename = useRenameConversation();
+  const update = useUpdateConversation();
   const del = useDeleteConversation();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(conversation.title);
@@ -513,7 +546,7 @@ function ChatRow({
     setEditing(false);
     const t = title.trim();
     if (t && t !== conversation.title) {
-      rename.mutate({ id: conversation.id, title: t });
+      update.mutate({ id: conversation.id, title: t });
     } else {
       setTitle(conversation.title);
     }
@@ -548,7 +581,12 @@ function ChatRow({
               className="w-full rounded border bg-background px-1 py-0.5 text-xs outline-none focus:ring-1 focus:ring-ring"
             />
           ) : (
-            <p className="truncate text-sm">{conversation.title}</p>
+            <p className="flex items-center gap-1.5 truncate text-sm">
+              <span className="truncate">{conversation.title}</span>
+              {conversation.pinned && (
+                <Pin className="h-3 w-3 shrink-0 rotate-45 text-muted-foreground" />
+              )}
+            </p>
           )}
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <span>{timeAgo(conversation.updatedAt)}</span>
@@ -581,30 +619,106 @@ function ChatRow({
             </button>
           </>
         ) : (
-          <>
-            <button
-              onClick={() => {
-                setTitle(conversation.title);
-                setEditing(true);
-              }}
-              aria-label="Rename chat"
-              className="rounded p-1 hover:bg-accent"
-            >
-              <Pencil className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-            </button>
-            <button
-              onClick={() => {
-                del.mutate(conversation.id);
-                if (active) startNewChat();
-              }}
-              aria-label="Delete chat"
-              className="rounded p-1 hover:bg-accent"
-            >
-              <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-            </button>
-          </>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label="Chat options"
+                className="rounded p-1 hover:bg-accent"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="right" className="w-44">
+              <DropdownMenuItem
+                onClick={() => {
+                  setTitle(conversation.title);
+                  setEditing(true);
+                }}
+              >
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  update.mutate({
+                    id: conversation.id,
+                    pinned: !conversation.pinned,
+                  })
+                }
+              >
+                {conversation.pinned ? (
+                  <PinOff className="mr-2 h-3.5 w-3.5" />
+                ) : (
+                  <Pin className="mr-2 h-3.5 w-3.5" />
+                )}
+                {conversation.pinned ? "Unpin" : "Pin"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  update.mutate({
+                    id: conversation.id,
+                    archived: !conversation.archived,
+                  })
+                }
+              >
+                {conversation.archived ? (
+                  <ArchiveRestore className="mr-2 h-3.5 w-3.5" />
+                ) : (
+                  <Archive className="mr-2 h-3.5 w-3.5" />
+                )}
+                {conversation.archived ? "Unarchive" : "Archive"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => {
+                  del.mutate(conversation.id);
+                  if (active) startNewChat();
+                }}
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Collapsed-by-default archived chats list. */
+function ArchivedChats({
+  onNavigate,
+  activeId,
+}: {
+  onNavigate?: () => void;
+  activeId: string | null;
+}) {
+  const { openConversation } = useStudio();
+  const { data } = useConversations({ archived: true });
+  const items = data?.items ?? [];
+  if (items.length === 0) {
+    return (
+      <p className="px-5 py-2 text-xs text-muted-foreground">
+        No archived chats.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-0.5 px-2">
+      {items.map((c) => (
+        <ChatRow
+          key={c.id}
+          conversation={c}
+          active={activeId === c.id}
+          onClick={() => {
+            openConversation(c.id);
+            onNavigate?.();
+          }}
+        />
+      ))}
     </div>
   );
 }

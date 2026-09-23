@@ -99,6 +99,8 @@ export function toConversationDto(c: ConversationWithPreview): ConversationDto {
     id: c.id,
     userId: c.userId,
     title: c.title,
+    pinned: c.pinned,
+    archived: c.archived,
     generationCount: c._count?.generations ?? c.generations?.length ?? 0,
     preview: last
       ? {

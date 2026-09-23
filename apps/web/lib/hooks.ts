@@ -116,11 +116,13 @@ export function useDeleteGeneration() {
 
 /* ------------------------------ conversations ----------------------------- */
 
-export function useConversations() {
+export function useConversations(opts: { archived?: boolean } = {}) {
   return useQuery({
-    queryKey: ["conversations"],
+    queryKey: ["conversations", opts.archived ? "archived" : "active"],
     queryFn: () =>
-      apiFetch<Paginated<ConversationDto>>("/conversations?limit=50"),
+      apiFetch<Paginated<ConversationDto>>(
+        `/conversations?limit=50${opts.archived ? "&archived=true" : ""}`,
+      ),
     refetchInterval: (query) => {
       const pending = query.state.data?.items.some(
         (c) =>
@@ -141,7 +143,8 @@ export function useConversation(id: string | null) {
   });
 }
 
-export function useRenameConversation() {
+/** Rename, pin, or archive a chat — one PATCH for all fields. */
+export function useUpdateConversation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: UpdateConversationRequest & { id: string }) =>

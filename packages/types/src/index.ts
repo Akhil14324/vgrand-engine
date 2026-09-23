@@ -88,6 +88,8 @@ export interface ConversationDto {
   id: string;
   userId: string;
   title: string;
+  pinned: boolean;
+  archived: boolean;
   generationCount: number;
   /** Latest generation in the chat — thumbnail + context for the sidebar. */
   preview: {
@@ -178,9 +180,15 @@ export const addBoardItemSchema = z.object({
 });
 export type AddBoardItemRequest = z.infer<typeof addBoardItemSchema>;
 
-export const updateConversationSchema = z.object({
-  title: z.string().min(1).max(140),
-});
+export const updateConversationSchema = z
+  .object({
+    title: z.string().min(1).max(140).optional(),
+    pinned: z.boolean().optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: "nothing to update",
+  });
 export type UpdateConversationRequest = z.infer<typeof updateConversationSchema>;
 
 export const createMemorySchema = z.object({
