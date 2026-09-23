@@ -9,7 +9,7 @@ const PREVIEW_INCLUDE = {
   generations: {
     take: 1,
     orderBy: { createdAt: "desc" as const },
-    select: { prompt: true, imageUrls: true, status: true },
+    select: { id: true, prompt: true, imageUrls: true, status: true },
   },
 };
 

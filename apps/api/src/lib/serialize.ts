@@ -88,7 +88,7 @@ export function toBoardDto(
 
 type ConversationWithPreview = Conversation & {
   generations?: Array<
-    Pick<Generation, "prompt" | "imageUrls" | "status">
+    Pick<Generation, "id" | "prompt" | "imageUrls" | "status">
   >;
   _count?: { generations: number };
 };
@@ -104,6 +104,7 @@ export function toConversationDto(c: ConversationWithPreview): ConversationDto {
     generationCount: c._count?.generations ?? c.generations?.length ?? 0,
     preview: last
       ? {
+          id: last.id,
           prompt: last.prompt,
           imageUrl: last.imageUrls[0] ?? null,
           status: last.status as GenerationDto["status"],

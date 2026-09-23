@@ -14,13 +14,13 @@ import {
   Layers,
   LayoutGrid,
   LogOut,
-  MessageSquare,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
   Pin,
   PinOff,
   Search,
+  Share2,
   Sparkles,
   SquarePen,
   Trash2,
@@ -38,6 +38,7 @@ import {
   useDeleteMemory,
   useGenerations,
   useMemories,
+  useShareGeneration,
   useThemes,
   useUpdateConversation,
 } from "@/lib/hooks";
@@ -127,6 +128,17 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     );
   }, [conversations, q]);
 
+  // ChatGPT-style grouping: pinned float into their own section, the rest
+  // bucket by recency. All derived from updatedAt — nothing hardcoded.
+  const pinnedChats = useMemo(
+    () => filteredChats.filter((c) => c.pinned),
+    [filteredChats],
+  );
+  const chatGroups = useMemo(
+    () => groupChatsByRecency(filteredChats.filter((c) => !c.pinned)),
+    [filteredChats],
+  );
+
   const filtered = useMemo(() => {
     const items = generations?.items ?? [];
     if (!q) return items;
@@ -179,8 +191,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             size="icon"
             className="h-8 w-8 text-muted-foreground"
             onClick={() => {
-              toggleSidebar();
-              onNavigate?.();
+              // In the mobile drawer this button just closes the drawer;
+              // on desktop it collapses the column.
+              if (onNavigate) onNavigate();
+              else toggleSidebar();
             }}
             aria-label="Close sidebar"
           >
@@ -252,27 +266,33 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </nav>
 
-      {/* Sections — mirrors ChatGPT's Pinned / Projects stacking */}
+      {/* Sections — mirrors ChatGPT's Pinned / date-grouped stacking */}
       <ScrollArea className="min-h-0 flex-1">
-        <SectionLabel icon={MessageSquare} label="Chats" />
-        <div className="flex flex-col gap-0.5 px-2">
-          {filteredChats.map((c) => (
-            <ChatRow
-              key={c.id}
-              conversation={c}
-              active={activeConversationId === c.id}
-              onClick={() => {
-                openConversation(c.id);
-                onNavigate?.();
-              }}
+        {pinnedChats.length > 0 && (
+          <>
+            <SectionLabel icon={Pin} label="Pinned" />
+            <ChatList
+              items={pinnedChats}
+              activeId={activeConversationId}
+              onNavigate={onNavigate}
             />
-          ))}
-          {filteredChats.length === 0 && (
-            <p className="px-2.5 py-4 text-xs text-muted-foreground">
-              {q ? "No chats match." : "Your conversations appear here."}
-            </p>
-          )}
-        </div>
+          </>
+        )}
+        {chatGroups.map((group) => (
+          <div key={group.label}>
+            <SectionLabel label={group.label} />
+            <ChatList
+              items={group.items}
+              activeId={activeConversationId}
+              onNavigate={onNavigate}
+            />
+          </div>
+        ))}
+        {filteredChats.length === 0 && (
+          <p className="px-5 py-4 text-xs text-muted-foreground">
+            {q ? "No chats match." : "Your conversations appear here."}
+          </p>
+        )}
         {/* Archived chats — hidden like ChatGPT until expanded */}
         <button
           onClick={() => setArchivedOpen((v) => !v)}
@@ -443,13 +463,65 @@ function SectionLabel({
   icon: Icon,
   label,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   label: string;
 }) {
   return (
     <div className="flex items-center gap-1.5 px-3 pb-1 pt-4 text-xs font-medium text-muted-foreground">
-      <Icon className="h-3 w-3" />
+      {Icon && <Icon className="h-3 w-3" />}
       {label}
+    </div>
+  );
+}
+
+/** Buckets chats into Today / Yesterday / Previous 7 days / Older. */
+function groupChatsByRecency(items: ConversationDto[]) {
+  const DAY = 86_400_000;
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const groups = [
+    { label: "Today", items: [] as ConversationDto[] },
+    { label: "Yesterday", items: [] as ConversationDto[] },
+    { label: "Previous 7 days", items: [] as ConversationDto[] },
+    { label: "Older", items: [] as ConversationDto[] },
+  ];
+  for (const c of items) {
+    const t = new Date(c.updatedAt).getTime();
+    if (t >= startOfToday) groups[0]!.items.push(c);
+    else if (t >= startOfToday - DAY) groups[1]!.items.push(c);
+    else if (t >= startOfToday - 7 * DAY) groups[2]!.items.push(c);
+    else groups[3]!.items.push(c);
+  }
+  return groups.filter((g) => g.items.length > 0);
+}
+
+function ChatList({
+  items,
+  activeId,
+  onNavigate,
+}: {
+  items: ConversationDto[];
+  activeId: string | null;
+  onNavigate?: () => void;
+}) {
+  const { openConversation } = useStudio();
+  return (
+    <div className="flex flex-col gap-0.5 px-2">
+      {items.map((c) => (
+        <ChatRow
+          key={c.id}
+          conversation={c}
+          active={activeId === c.id}
+          onClick={() => {
+            openConversation(c.id);
+            onNavigate?.();
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -489,6 +561,7 @@ function HistoryRow({
 }) {
   const thumb = generation.imageUrls[0];
   const del = useDeleteGeneration();
+  const share = useShareGeneration();
   const { select, selectedId } = useStudio();
   return (
     <div
@@ -543,6 +616,19 @@ function HistoryRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="right" className="w-40">
             <DropdownMenuItem
+              disabled={!thumb}
+              onClick={() =>
+                share.mutate(generation.id, {
+                  onSuccess: (link) =>
+                    void navigator.clipboard.writeText(link.url),
+                })
+              }
+            >
+              <Share2 className="mr-2 h-3.5 w-3.5" />
+              Share
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
               className="text-destructive focus:text-destructive"
               onClick={() => {
                 del.mutate(generation.id);
@@ -571,8 +657,22 @@ function ChatRow({
   const { startNewChat } = useStudio();
   const update = useUpdateConversation();
   const del = useDeleteConversation();
+  const share = useShareGeneration();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(conversation.title);
+  const [copied, setCopied] = useState(false);
+
+  const copyShareLink = () => {
+    const genId = conversation.preview?.id;
+    if (!genId) return;
+    share.mutate(genId, {
+      onSuccess: (link) => {
+        void navigator.clipboard.writeText(link.url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+    });
+  };
 
   const commit = () => {
     setEditing(false);
@@ -610,23 +710,19 @@ function ChatRow({
               }}
               onBlur={commit}
               onClick={(e) => e.stopPropagation()}
-              className="w-full rounded border bg-background px-1 py-0.5 text-xs outline-none focus:ring-1 focus:ring-ring"
+              className="w-full rounded border bg-background px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-ring"
             />
           ) : (
-            <p className="flex items-center gap-1.5 truncate text-sm">
-              <span className="truncate">{conversation.title}</span>
+            <p
+              className="line-clamp-2 break-words text-sm leading-snug"
+              title={conversation.title}
+            >
+              {conversation.title}
               {conversation.pinned && (
-                <Pin className="h-3 w-3 shrink-0 rotate-45 text-muted-foreground" />
+                <Pin className="ml-1 inline h-3 w-3 rotate-45 align-[-1px] text-muted-foreground" />
               )}
             </p>
           )}
-          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span>{timeAgo(conversation.updatedAt)}</span>
-            <span>
-              · {conversation.generationCount}{" "}
-              {conversation.generationCount === 1 ? "image" : "images"}
-            </span>
-          </div>
         </div>
       </button>
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -658,10 +754,21 @@ function ChatRow({
                 className="rounded p-1 hover:bg-accent"
                 onClick={(e) => e.stopPropagation()}
               >
-                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                {copied ? (
+                  <Check className="h-4 w-4 text-primary" />
+                ) : (
+                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                )}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="right" className="w-44">
+              <DropdownMenuItem
+                disabled={!conversation.preview?.imageUrl}
+                onClick={copyShareLink}
+              >
+                <Share2 className="mr-2 h-3.5 w-3.5" />
+                Share
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
                   setTitle(conversation.title);
@@ -728,7 +835,6 @@ function ArchivedChats({
   onNavigate?: () => void;
   activeId: string | null;
 }) {
-  const { openConversation } = useStudio();
   const { data } = useConversations({ archived: true });
   const items = data?.items ?? [];
   if (items.length === 0) {
@@ -739,18 +845,6 @@ function ArchivedChats({
     );
   }
   return (
-    <div className="flex flex-col gap-0.5 px-2">
-      {items.map((c) => (
-        <ChatRow
-          key={c.id}
-          conversation={c}
-          active={activeId === c.id}
-          onClick={() => {
-            openConversation(c.id);
-            onNavigate?.();
-          }}
-        />
-      ))}
-    </div>
+    <ChatList items={items} activeId={activeId} onNavigate={onNavigate} />
   );
 }

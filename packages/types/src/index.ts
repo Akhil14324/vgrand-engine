@@ -93,6 +93,7 @@ export interface ConversationDto {
   generationCount: number;
   /** Latest generation in the chat — thumbnail + context for the sidebar. */
   preview: {
+    id: string;
     prompt: string;
     imageUrl: string | null;
     status: GenerationStatus;

@@ -12,7 +12,6 @@ import {
   Sparkles,
   SquarePen,
   UtensilsCrossed,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -90,12 +89,8 @@ export function StudioShell() {
               </Button>
             </div>
           )}
-          <div className="min-w-0 flex-1 text-center">
-            {conversation && (
-              <span className="truncate text-sm font-medium">
-                {conversation.title}
-              </span>
-            )}
+          <div className="min-w-0 flex-1 truncate text-center text-sm font-medium">
+            {conversation?.title}
           </div>
           <Button
             variant="ghost"
@@ -133,13 +128,6 @@ export function StudioShell() {
           <div className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] animate-slide-in-left border-r border-sidebar bg-sidebar shadow-xl">
             <SidebarContent onNavigate={() => setSidebarOpen(false)} />
           </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 hover:text-white"
-            aria-label="Close menu"
-          >
-            <X className="h-5 w-5" />
-          </button>
         </div>
       )}
 
