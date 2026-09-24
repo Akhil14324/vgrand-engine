@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { ResponseIncludable } from "openai/resources/responses/responses";
 import { prisma } from "@catgpt/db";
 import type { GenerationKind, WebSource } from "@catgpt/types";
 import { env } from "../env.js";
@@ -28,10 +29,19 @@ export async function loadChatHistory(
       ...(excludeId ? { NOT: { id: excludeId } } : {}),
     },
     orderBy: { createdAt: "desc" },
-    take,
-    select: { prompt: true, kind: true, textResponse: true },
+    take: take + 8,
+    select: { prompt: true, kind: true, textResponse: true, metadata: true },
   });
-  return rows.reverse();
+  // Auto-written campaign creative briefs are long machine prompts, not things
+  // the user said - keeping them would bloat and confuse the model's context.
+  return rows
+    .filter(
+      (r) =>
+        !(r.metadata as Record<string, unknown> | null)?.campaignCreative,
+    )
+    .slice(0, take)
+    .reverse()
+    .map(({ prompt, kind, textResponse }) => ({ prompt, kind, textResponse }));
 }
 
 let client: OpenAI | null = null;
@@ -294,8 +304,6 @@ You have a live web search tool. Use it for anything time-sensitive or that you 
 export interface SearchReply {
   text: string;
   sources: WebSource[];
-  /** Diagnostics: streamed event counts + citations seen (temporary). */
-  trace: Record<string, number>;
 }
 
 /**
@@ -316,6 +324,9 @@ export async function streamChatWithSearch(
   const stream = await getClient().responses.create({
     model: env.CHAT_MODEL,
     stream: true,
+    // Without this the API returns no source list at all for a search. The
+    // installed SDK typings predate the option, hence the cast.
+    include: ["web_search_call.action.sources"] as unknown as ResponseIncludable[],
     tools: [{ type: "web_search", search_context_size: "low" }],
     input: [
       { role: "developer", content: SEARCH_SYSTEM },
@@ -328,9 +339,7 @@ export async function streamChatWithSearch(
 
   let text = "";
   const sources = new Map<string, WebSource>();
-  const trace: Record<string, number> = {};
   for await (const evt of stream) {
-    trace[evt.type] = (trace[evt.type] ?? 0) + 1;
     if (evt.type === "response.web_search_call.searching") {
       onSearching();
     } else if (evt.type === "response.output_text.delta") {
@@ -349,6 +358,25 @@ export async function streamChatWithSearch(
       // Citations are not always streamed as separate events - read them off
       // the finished message too.
       for (const item of evt.response.output ?? []) {
+        if (item.type === "web_search_call") {
+          const action = (
+            item as unknown as {
+              action?: { type?: string; sources?: { url: string }[] };
+            }
+          ).action;
+          for (const s of action?.type === "search" ? (action.sources ?? []) : []) {
+            if (!sources.has(s.url)) {
+              let host = s.url;
+              try {
+                host = new URL(s.url).hostname.replace(/^www\./, "");
+              } catch {
+                // keep the raw url as the title
+              }
+              sources.set(s.url, { url: s.url, title: host });
+            }
+          }
+          continue;
+        }
         if (item.type !== "message") continue;
         for (const part of item.content) {
           if (part.type !== "output_text") continue;
@@ -364,5 +392,5 @@ export async function streamChatWithSearch(
     }
   }
   if (!text.trim()) throw new Error("web search returned an empty response");
-  return { text, sources: [...sources.values()], trace };
+  return { text, sources: [...sources.values()] };
 }

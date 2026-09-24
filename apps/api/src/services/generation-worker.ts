@@ -178,8 +178,8 @@ export async function runGeneration(generationId: string): Promise<void> {
       let sources: WebSource[] = [];
       let searched = false;
       let searchError: string | null = null;
-      let searchTrace: Record<string, number> | null = null;
       let campaign = false;
+      let creativesRequested = 0;
       if (!codeRun) {
         campaign =
           isCampaignPrompt(generation.prompt) ||
@@ -198,6 +198,7 @@ export async function runGeneration(generationId: string): Promise<void> {
           onDelta,
         );
         text = reply.text;
+        creativesRequested = reply.creativeCount;
         // Creatives are queued BEFORE this turn is marked completed, so the
         // client's refetch on completion already sees them and keeps polling.
         if (reply.creativeCount > 0 && generation.conversationId) {
@@ -254,7 +255,6 @@ export async function runGeneration(generationId: string): Promise<void> {
             );
             text = reply.text;
             sources = reply.sources;
-            searchTrace = reply.trace;
             searched = true;
           } catch (err) {
             // Tokens already reached the client, so we cannot restart cleanly.
@@ -287,9 +287,8 @@ export async function runGeneration(generationId: string): Promise<void> {
           metadata: {
             ...meta,
             ...(codeRun ? { codeRun: true } : {}),
-            ...(campaign ? { campaign: true } : {}),
+            ...(campaign ? { campaign: true, creativesRequested } : {}),
             ...(searchError ? { searchError: searchError.slice(0, 300) } : {}),
-            ...(searchTrace ? { searchTrace } : {}),
             ...(searched
               ? {
                   webSearched: true,
