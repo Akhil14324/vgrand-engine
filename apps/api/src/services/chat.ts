@@ -294,6 +294,8 @@ You have a live web search tool. Use it for anything time-sensitive or that you 
 export interface SearchReply {
   text: string;
   sources: WebSource[];
+  /** Diagnostics: streamed event counts + citations seen (temporary). */
+  trace: Record<string, number>;
 }
 
 /**
@@ -326,7 +328,9 @@ export async function streamChatWithSearch(
 
   let text = "";
   const sources = new Map<string, WebSource>();
+  const trace: Record<string, number> = {};
   for await (const evt of stream) {
+    trace[evt.type] = (trace[evt.type] ?? 0) + 1;
     if (evt.type === "response.web_search_call.searching") {
       onSearching();
     } else if (evt.type === "response.output_text.delta") {
@@ -360,5 +364,5 @@ export async function streamChatWithSearch(
     }
   }
   if (!text.trim()) throw new Error("web search returned an empty response");
-  return { text, sources: [...sources.values()] };
+  return { text, sources: [...sources.values()], trace };
 }

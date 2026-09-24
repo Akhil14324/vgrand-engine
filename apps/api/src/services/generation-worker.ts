@@ -171,6 +171,7 @@ export async function runGeneration(generationId: string): Promise<void> {
       let sources: WebSource[] = [];
       let searched = false;
       let searchError: string | null = null;
+      let searchTrace: Record<string, number> | null = null;
       if (codeRun) {
         text = await runWithCodeInterpreter(
           stripRunPrefix(generation.prompt) || generation.prompt,
@@ -203,6 +204,7 @@ export async function runGeneration(generationId: string): Promise<void> {
             );
             text = reply.text;
             sources = reply.sources;
+            searchTrace = reply.trace;
             searched = true;
           } catch (err) {
             // Tokens already reached the client, so we cannot restart cleanly.
@@ -232,6 +234,7 @@ export async function runGeneration(generationId: string): Promise<void> {
             ...meta,
             ...(codeRun ? { codeRun: true } : {}),
             ...(searchError ? { searchError: searchError.slice(0, 300) } : {}),
+            ...(searchTrace ? { searchTrace } : {}),
             ...(searched
               ? {
                   webSearched: true,
