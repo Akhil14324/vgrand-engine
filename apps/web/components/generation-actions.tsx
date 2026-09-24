@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   Copy,
@@ -143,14 +143,16 @@ export function ActionRow({
   const [copied, setCopied] = useState(false);
   const [textCopied, setTextCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  // Post-mount detection — a render-time `window` read would diverge from
+  // server HTML and break hydration (React #418).
+  const [canSpeak, setCanSpeak] = useState(false);
+  useEffect(() => setCanSpeak("speechSynthesis" in window), []);
   const ready =
     generation.status === "completed" && generation.imageUrls.length > 0;
   const textReady =
     generation.status === "completed" &&
     generation.kind === "text" &&
     Boolean(generation.textResponse);
-  const canSpeak =
-    typeof window !== "undefined" && "speechSynthesis" in window;
 
   // Browser TTS — instant and free. Markdown is flattened so the voice reads
   // prose, not syntax; fenced code collapses to "code block".

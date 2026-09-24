@@ -102,11 +102,14 @@ export function Composer() {
   const { data: conversationDocs } = useDocuments(activeConversationId);
 
   // Browser speech recognition (Chrome/Edge/Safari) — zero API cost.
-  const speechSupported =
-    typeof window !== "undefined" &&
-    (("SpeechRecognition" in window || "webkitSpeechRecognition" in window) as
-      | boolean
-      | undefined);
+  // Detected post-mount: reading `window` during render would diverge from
+  // the server HTML (no mic → mic) and break hydration.
+  const [speechSupported, setSpeechSupported] = useState(false);
+  useEffect(() => {
+    setSpeechSupported(
+      "SpeechRecognition" in window || "webkitSpeechRecognition" in window,
+    );
+  }, []);
 
   const toggleMic = useCallback(() => {
     if (listening) {
