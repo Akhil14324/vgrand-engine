@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { ChatMenu } from "@/components/chat-menu";
+import { PENDING_JOIN_KEY } from "@/lib/config";
 import { useConversation, useThemes } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,18 @@ export function StudioShell() {
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
+    // An invite link opened while signed out: resume it now that they are in.
+    if (!loading && user) {
+      try {
+        const pending = localStorage.getItem(PENDING_JOIN_KEY);
+        if (pending) {
+          localStorage.removeItem(PENDING_JOIN_KEY);
+          router.replace(`/join/${pending}`);
+        }
+      } catch {
+        // storage unavailable - the user can reopen the link
+      }
+    }
   }, [loading, user, router]);
 
   if (loading) {

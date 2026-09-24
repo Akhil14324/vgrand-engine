@@ -8,6 +8,7 @@ import {
 } from "@catgpt/types";
 import { env } from "../env.js";
 import { notFound } from "./errors.js";
+import { workspaceAccess } from "./workspace-access.js";
 
 /** Caps that keep a brand's footprint (rows, embeddings, prompt size) small. */
 export const MAX_BRAND_ASSETS = 20;
@@ -120,7 +121,7 @@ export function buildBrandSummary(
  */
 export async function findAccessibleBrand(userId: string, id: string) {
   const brand = await prisma.brand.findFirst({
-    where: { id, OR: [{ userId }, { workspace: { userId } }] },
+    where: { id, OR: [{ userId }, { workspace: workspaceAccess(userId) }] },
     include: BRAND_INCLUDE,
   });
   if (!brand) throw notFound("Brand not found");
@@ -144,7 +145,9 @@ export async function loadBrandContext(brandId: string, userId?: string) {
   return prisma.brand.findFirst({
     where: {
       id: brandId,
-      ...(userId ? { OR: [{ userId }, { workspace: { userId } }] } : {}),
+      ...(userId
+        ? { OR: [{ userId }, { workspace: workspaceAccess(userId) }] }
+        : {}),
     },
     select: {
       id: true,

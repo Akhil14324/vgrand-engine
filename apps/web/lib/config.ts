@@ -6,6 +6,9 @@ export const API_URL = (
   /^https?:\/\//i.test(rawApiUrl) ? rawApiUrl : `https://${rawApiUrl}`
 ).replace(/\/+$/, "");
 
+/** localStorage key holding a workspace invite token across the login redirect. */
+export const PENDING_JOIN_KEY = "catgpt-pending-join";
+
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 

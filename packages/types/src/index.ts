@@ -83,6 +83,10 @@ export interface WorkspaceDto {
   id: string;
   userId: string;
   name: string;
+  /** The viewer's role: the creator is the owner; everyone else is a member. */
+  role: "owner" | "member";
+  /** People in the workspace, including the owner. */
+  memberCount: number;
   documentCount: number;
   createdAt: string;
   updatedAt: string;
@@ -421,3 +425,30 @@ export interface PublicChatDto {
   createdAt: string;
   turns: PublicChatTurn[];
 }
+
+/* ------------------------------ team workspaces ---------------------------- */
+
+export interface WorkspaceMemberDto {
+  userId: string;
+  name: string;
+  email: string;
+  role: "owner" | "member";
+}
+
+export interface TeamMessageDto {
+  id: string;
+  workspaceId: string;
+  role: "user" | "ai";
+  authorId: string | null;
+  /** Display name; "CatGPT" for AI replies. */
+  authorName: string;
+  body: string;
+  status: "pending" | "done" | "failed";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const teamMessageSchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+});
+export const addMemberSchema = z.object({ email: z.string().email() });

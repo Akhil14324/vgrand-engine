@@ -26,6 +26,7 @@ import {
   loadBrandContext,
 } from "../lib/brand.js";
 import type { BrandProfile } from "@catgpt/types";
+import { findWorkspaceForUser } from "../lib/workspace-access.js";
 import { env } from "../env.js";
 
 /**
@@ -223,11 +224,7 @@ export async function generationRoutes(app: FastifyInstance) {
     // A workspaceId only applies to conversations this request creates —
     // it gives the new chat a durable workspace home from turn one.
     if (body.workspaceId) {
-      const ws = await prisma.workspace.findUnique({
-        where: { id: body.workspaceId },
-      });
-      if (!ws) throw notFound("Workspace not found");
-      if (ws.userId !== req.userId) throw forbidden();
+      await findWorkspaceForUser(req.userId, body.workspaceId);
     }
 
     // Plain sequential writes, not an interactive $transaction: behind the

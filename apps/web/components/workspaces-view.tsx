@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { MembersPanel, TeamChat } from "@/components/team-panel";
 
 const DOC_ACCEPT =
   "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,.doc,.docx";
@@ -158,7 +159,12 @@ function WorkspaceContent() {
                   )}
                 >
                   <span className="truncate">{w.name}</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {w.memberCount > 1 && (
+                      <span title={`${w.memberCount} people`}>
+                        {w.memberCount} 👥
+                      </span>
+                    )}
                     {w.documentCount}
                   </span>
                 </button>
@@ -214,6 +220,7 @@ function WorkspaceDetail({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
+  const [tab, setTab] = useState<"files" | "team">("files");
 
   if (!workspace) {
     return <div className="shimmer h-40 w-full rounded-xl" />;
@@ -285,7 +292,7 @@ function WorkspaceDetail({
           </h2>
         )}
         <div className="ml-auto flex items-center gap-1">
-          {!renaming && (
+          {!renaming && workspace.role === "owner" && (
             <Button
               variant="ghost"
               size="icon"
@@ -321,15 +328,17 @@ function WorkspaceDetail({
             <MessageSquare className="h-3.5 w-3.5" />
             Open chat
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Delete workspace"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={() => del.mutate(workspaceId)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {workspace.role === "owner" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Delete workspace"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => del.mutate(workspaceId)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
@@ -337,11 +346,35 @@ function WorkspaceDetail({
         here — nothing needs re-attaching.
       </p>
 
-      {uploadError && (
+      <MembersPanel workspace={workspace} />
+
+      <div className="flex gap-1 rounded-lg border p-0.5 text-sm">
+        {(
+          [
+            ["files", "Files"],
+            ["team", "Team chat"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={cn(
+              "flex-1 rounded-md px-3 py-1.5 transition-colors",
+              tab === id ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "team" && <TeamChat workspaceId={workspaceId} />}
+
+      {uploadError && tab === "files" && (
         <p className="text-xs text-destructive">{uploadError}</p>
       )}
 
-      <div className="flex flex-col gap-1.5">
+      <div className={cn("flex flex-col gap-1.5", tab !== "files" && "hidden")}>
         {workspace.documents.map((d) => (
           <DocRow
             key={d.id}

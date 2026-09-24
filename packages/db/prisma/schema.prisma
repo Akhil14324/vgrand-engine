@@ -9,11 +9,11 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
+  id            String            @id @default(uuid())
+  email         String            @unique
   name          String?
   avatarUrl     String?
-  createdAt     DateTime       @default(now())
+  createdAt     DateTime          @default(now())
   generations   Generation[]
   memories      Memory[]
   conversations Conversation[]
@@ -21,6 +21,8 @@ model User {
   workspaces    Workspace[]
   imageUsage    ImageUsage[]
   brands        Brand[]
+  memberships   WorkspaceMember[]
+  teamMessages  TeamMessage[]
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
@@ -74,15 +76,18 @@ model ImageUsage {
 // A named collection of documents + chats — "analyze everything here" context
 // that persists across conversations (replaces the old Library/boards).
 model Workspace {
-  id            String         @id @default(uuid())
+  id            String            @id @default(uuid())
   userId        String
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   name          String
   documents     Document[]
   conversations Conversation[]
   brands        Brand[]
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  members       WorkspaceMember[]
+  invites       WorkspaceInvite[]
+  teamMessages  TeamMessage[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 
   @@index([userId, updatedAt(sort: Desc)])
 }
@@ -208,6 +213,49 @@ model DocumentChunk {
 }
 
 // Public read-only link to a whole chat (text + images), revocable.
+// People a workspace is shared with. The workspace owner is Workspace.userId
+// and is not listed here.
+model WorkspaceMember {
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+// Revocable join links: whoever opens one (signed in) becomes a member.
+model WorkspaceInvite {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  token       String    @unique
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+// The workspace's shared chat: people talk to each other, and the AI joins in
+// when someone addresses it (@ai). role "ai" rows have no author.
+model TeamMessage {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorId    String?
+  author      User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  role        String // user | ai
+  body        String    @db.Text
+  status      String    @default("done") // pending | done | failed (AI replies)
+  replyToId   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId, updatedAt])
+}
+
 model ConversationShare {
   id             String       @id @default(uuid())
   conversationId String

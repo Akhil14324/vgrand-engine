@@ -7,6 +7,7 @@ import {
   type BrandProfile,
 } from "@catgpt/types";
 import { HttpError, badRequest, notFound, parseBody } from "../lib/errors.js";
+import { findWorkspaceForUser, workspaceAccess } from "../lib/workspace-access.js";
 import {
   BRAND_INCLUDE,
   MAX_BRAND_ASSETS,
@@ -29,7 +30,7 @@ export async function brandRoutes(app: FastifyInstance) {
       where: {
         OR: [
           { userId: req.userId, workspaceId: null },
-          { workspace: { userId: req.userId } },
+          { workspace: workspaceAccess(req.userId) },
         ],
       },
       orderBy: { createdAt: "asc" },
@@ -43,11 +44,7 @@ export async function brandRoutes(app: FastifyInstance) {
     const profile: BrandProfile = body.profile ?? {};
 
     if (body.workspaceId) {
-      const ws = await prisma.workspace.findFirst({
-        where: { id: body.workspaceId, userId: req.userId },
-        select: { id: true },
-      });
-      if (!ws) throw notFound("Workspace not found");
+      await findWorkspaceForUser(req.userId, body.workspaceId);
     } else {
       const existing = await prisma.brand.findFirst({
         where: { userId: req.userId, workspaceId: null },

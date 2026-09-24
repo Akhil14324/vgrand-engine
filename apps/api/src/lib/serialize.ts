@@ -113,12 +113,15 @@ export function toDocumentDto(d: Document): DocumentDto {
 }
 
 export function toWorkspaceDto(
-  w: Workspace & { _count?: { documents: number } },
+  w: Workspace & { _count?: { documents: number; members?: number } },
+  viewerId: string,
 ): WorkspaceDto {
   return {
     id: w.id,
     userId: w.userId,
     name: w.name,
+    role: w.userId === viewerId ? "owner" : "member",
+    memberCount: (w._count?.members ?? 0) + 1,
     documentCount: w._count?.documents ?? 0,
     createdAt: w.createdAt.toISOString(),
     updatedAt: w.updatedAt.toISOString(),
@@ -126,10 +129,14 @@ export function toWorkspaceDto(
 }
 
 export function toWorkspaceDetailDto(
-  w: Workspace & { documents: Document[]; _count?: { documents: number } },
+  w: Workspace & {
+    documents: Document[];
+    _count?: { documents: number; members?: number };
+  },
+  viewerId: string,
 ): WorkspaceDetailDto {
   return {
-    ...toWorkspaceDto(w),
+    ...toWorkspaceDto(w, viewerId),
     documents: w.documents.map(toDocumentDto),
   };
 }

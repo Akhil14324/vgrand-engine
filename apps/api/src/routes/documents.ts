@@ -6,6 +6,7 @@ import { toDocumentDto } from "../lib/serialize.js";
 import { enqueueDocumentIngestion } from "../services/queue.js";
 import { storeFile } from "../services/storage.js";
 import { MAX_BRAND_DOCUMENTS, findAccessibleBrand } from "../lib/brand.js";
+import { findWorkspaceForUser } from "../lib/workspace-access.js";
 
 /**
  * PDF/DOCX uploads for RAG. The file is stored, then ingestion (text
@@ -57,13 +58,7 @@ export async function documentRoutes(app: FastifyInstance) {
         );
       }
     }
-    if (workspaceId) {
-      const ws = await prisma.workspace.findUnique({
-        where: { id: workspaceId },
-      });
-      if (!ws) throw notFound("Workspace not found");
-      if (ws.userId !== req.userId) throw forbidden();
-    }
+    if (workspaceId) await findWorkspaceForUser(req.userId, workspaceId);
 
     const storageUrl = await storeFile({
       buffer,
@@ -85,11 +80,15 @@ export async function documentRoutes(app: FastifyInstance) {
       workspaceId?: string;
       brandId?: string;
     };
+    // Asking for a workspace's files needs membership, and then shows every
+    // member's uploads; anything else stays limited to the caller's own.
+    const ws = q.workspaceId
+      ? await findWorkspaceForUser(req.userId, q.workspaceId)
+      : null;
     const docs = await prisma.document.findMany({
       where: {
-        userId: req.userId,
+        ...(ws ? { workspaceId: ws.id } : { userId: req.userId }),
         ...(q.conversationId ? { conversationId: q.conversationId } : {}),
-        ...(q.workspaceId ? { workspaceId: q.workspaceId } : {}),
         ...(q.brandId ? { brandId: q.brandId } : {}),
       },
       orderBy: { createdAt: "desc" },
@@ -100,9 +99,15 @@ export async function documentRoutes(app: FastifyInstance) {
 
   app.delete("/documents/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const doc = await prisma.document.findUnique({ where: { id } });
+    const doc = await prisma.document.findUnique({
+      where: { id },
+      include: { workspace: { select: { userId: true } } },
+    });
     if (!doc) throw notFound("Document not found");
-    if (doc.userId !== req.userId) throw forbidden();
+    // The uploader, or the owner of the workspace it lives in.
+    if (doc.userId !== req.userId && doc.workspace?.userId !== req.userId) {
+      throw forbidden();
+    }
     await prisma.document.delete({ where: { id } });
     return reply.code(204).send();
   });
