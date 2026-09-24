@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Archive,
   ArchiveRestore,
@@ -110,9 +111,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     toggleSidebar,
   } = useStudio();
   const { data: themes } = useThemes();
-  const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [themesOpen, setThemesOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const { data: generations } = useGenerations({ themeSlug: historyTheme });
   // Server-side search — matches title AND generation contents inside chats.
@@ -191,15 +193,6 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
-            onClick={() => setSearchOpen((v) => !v)}
-            aria-label="Search"
-          >
-            <Search />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground"
             onClick={() => {
               // In the mobile drawer this button just closes the drawer;
               // on desktop it collapses the column.
@@ -213,17 +206,18 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
-      {searchOpen && (
-        <div className="px-3 pb-1">
+      <div className="px-3 pb-1 pt-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search chats…"
-            className="h-8 text-xs"
+            placeholder="Search chats"
+            aria-label="Search chats"
+            className="h-9 rounded-lg border-transparent bg-accent/50 pl-8 text-sm placeholder:text-muted-foreground/70 focus-visible:bg-accent"
           />
         </div>
-      )}
+      </div>
 
       {/* Primary nav */}
       <nav className="flex flex-col gap-0.5 px-2 pt-1">
@@ -330,8 +324,13 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           />
         )}
 
-        <SectionLabel icon={History} label="History" />
-        {themes && themes.length > 0 && (
+        <SectionToggle
+          icon={History}
+          label="Image history"
+          open={historyOpen}
+          onToggle={() => setHistoryOpen((v) => !v)}
+        />
+        {historyOpen && themes && themes.length > 0 && (
           <div className="flex flex-wrap gap-1 px-3 pb-2">
             <FilterChip
               label="All"
@@ -350,6 +349,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             ))}
           </div>
         )}
+        {historyOpen && (
         <div className="flex flex-col gap-0.5 px-2">
           {filtered.map((g) => (
             <HistoryRow
@@ -365,8 +365,15 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </p>
           )}
         </div>
+        )}
 
-        <SectionLabel icon={Brain} label="Memory" />
+        <SectionToggle
+          icon={Brain}
+          label="Memory"
+          open={memoryOpen}
+          onToggle={() => setMemoryOpen((v) => !v)}
+        />
+        {memoryOpen && (
         <div className="flex flex-col gap-1.5 px-3 pb-4">
           {(memories ?? []).map((m) => (
             <div
@@ -415,11 +422,13 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </p>
           )}
         </div>
+        )}
+        <div className="h-4" />
       </ScrollArea>
 
       {/* Footer — user row, like ChatGPT's account row */}
       <div className="flex items-center gap-2.5 border-t border-sidebar px-3 py-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-orange-400/80 text-xs font-semibold text-primary-foreground shadow-sm">
           {(user?.name ?? user?.email ?? "?").slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
@@ -454,8 +463,11 @@ function NavRow({
   href?: string;
   onNavigate?: () => void;
 }) {
-  const cls =
-    "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-accent";
+  const pathname = usePathname();
+  const cls = cn(
+    "flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm transition-colors hover:bg-accent",
+    href && pathname.startsWith(href) && "bg-accent font-medium",
+  );
   if (href) {
     return (
       <Link href={href} onClick={onNavigate} className={cls}>
@@ -480,10 +492,37 @@ function SectionLabel({
   label: string;
 }) {
   return (
-    <div className="flex items-center gap-1.5 px-3 pb-1 pt-4 text-xs font-medium text-muted-foreground">
+    <div className="flex items-center gap-1.5 px-4 pb-1.5 pt-5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
       {Icon && <Icon className="h-3 w-3" />}
       {label}
     </div>
+  );
+}
+
+/** Secondary sections (history, memory) stay folded so chats own the column. */
+function SectionToggle({
+  icon: Icon,
+  label,
+  open,
+  onToggle,
+}: {
+  icon: LucideIcon;
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-expanded={open}
+      className="mx-2 mt-3 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <Icon className="h-3.5 w-3.5" />
+      <span className="flex-1 text-left">{label}</span>
+      <ChevronDown
+        className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+      />
+    </button>
   );
 }
 
@@ -700,7 +739,7 @@ function ChatRow({
   return (
     <div
       className={cn(
-        "group flex w-full items-center gap-1 rounded-lg px-2 py-1.5 transition-colors",
+        "group flex w-full items-center gap-1 rounded-lg px-3 py-2.5 transition-colors",
         active ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
@@ -727,7 +766,7 @@ function ChatRow({
             />
           ) : (
             <p
-              className="line-clamp-2 break-words text-sm leading-snug"
+              className="truncate text-sm leading-snug"
               title={conversation.title}
             >
               {conversation.title}
@@ -738,7 +777,12 @@ function ChatRow({
           )}
         </div>
       </button>
-      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100",
+          active && "md:opacity-100",
+        )}
+      >
         {editing ? (
           <>
             <button

@@ -128,6 +128,20 @@ export function useRegenerate() {
   });
 }
 
+/** Stop a running turn — the worker keeps whatever it already produced. */
+export function useCancelGeneration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/generations/${id}/cancel`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["generations"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["usage"] });
+    },
+  });
+}
+
 export function useDeleteGeneration() {
   const qc = useQueryClient();
   return useMutation({
@@ -224,8 +238,13 @@ export function useUpdateConversation() {
       for (const [key, data] of prev) {
         if (!data) continue;
         const isArchivedList = key[1] === "archived";
-        // An archived-toggle moves the chat between the two lists.
-        const belongs = targetArchived === isArchivedList;
+        const isSearchList = Boolean(key[2]);
+        // An archived-toggle moves the chat between the two lists. Search
+        // results are only edited in place: a rename must not pull a chat into
+        // a search it doesn't match.
+        const belongs = isSearchList
+          ? data.items.some((c) => c.id === id) && targetArchived === isArchivedList
+          : targetArchived === isArchivedList;
         const items = data.items.filter((c) => c.id !== id);
         if (belongs) items.push(patched);
         qc.setQueryData(key, { ...data, items: sortConversations(items) });

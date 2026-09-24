@@ -76,12 +76,18 @@ export const catgptPreset = {
           from: { transform: "translateY(100%)" },
           to: { transform: "translateY(0)" },
         },
+        // Dictation equalizer bars — staggered via animation-delay inline.
+        wave: {
+          "0%, 100%": { transform: "scaleY(0.35)" },
+          "50%": { transform: "scaleY(1)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 200ms ease-out",
         "slide-in-left": "slide-in-left 200ms ease-out",
         "slide-in-right": "slide-in-right 200ms ease-out",
         "slide-in-up": "slide-in-up 220ms ease-out",
+        wave: "wave 1s ease-in-out infinite",
       },
     },
   },

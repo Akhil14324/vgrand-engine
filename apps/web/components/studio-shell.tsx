@@ -7,6 +7,7 @@ import {
   Building2,
   Home,
   LayoutGrid,
+  Megaphone,
   Menu,
   PanelLeftOpen,
   Sparkles,
@@ -18,6 +19,7 @@ import { useAuth } from "@/lib/auth";
 import { ChatMenu } from "@/components/chat-menu";
 import { PENDING_JOIN_KEY } from "@/lib/config";
 import { useConversation, useThemes } from "@/lib/hooks";
+import { useBrandMode } from "@/lib/brand-mode";
 import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
@@ -163,6 +165,7 @@ export function StudioShell() {
 /** Empty state — greeting + centered pill composer, like ChatGPT's home. */
 function Hero() {
   const { armTheme, pendingTurn } = useStudio();
+  const { setDraft } = useBrandMode();
   const { data: themes } = useThemes();
   // First message of a new chat: show it the instant Send is hit, right here,
   // until the POST resolves and the chat opens. The slot is shared with the
@@ -175,7 +178,7 @@ function Hero() {
           <PendingTurnBubble />
         </div>
       ) : (
-        <h1 className="text-center font-display text-2xl font-medium tracking-tight md:text-3xl">
+        <h1 className="text-gradient-brand animate-fade-in text-center font-display text-3xl font-semibold tracking-tight md:text-4xl">
           Cat is waiting for you.
         </h1>
       )}
@@ -183,20 +186,41 @@ function Hero() {
         <Composer />
       </div>
       <div
-        className={`mt-4 flex flex-wrap items-center justify-center gap-1.5 ${sending ? "hidden" : ""}`}
+        className={`mt-5 grid w-full max-w-4xl grid-cols-1 gap-2 sm:grid-cols-3 ${sending ? "hidden" : ""}`}
       >
         {(themes ?? []).map((t) => {
           const Icon = (t.icon && THEME_ICONS[t.icon]) || Sparkles;
           return (
             <button
               key={t.id}
-              onClick={() => armTheme(t)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                armTheme(t);
+                setDraft("create an image of a ");
+              }}
+              className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
             >
-              <Icon className="h-3.5 w-3.5" />/{t.slug}
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">/{t.slug}</span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {t.description ?? t.label}
+                </span>
+              </span>
             </button>
           );
         })}
+        <button
+          onClick={() => setDraft("/campaign ")}
+          className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+        >
+          <Megaphone className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">/campaign</span>
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              Plan a sales campaign — strategy, copy, creatives
+            </span>
+          </span>
+        </button>
       </div>
     </div>
   );

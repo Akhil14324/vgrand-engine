@@ -21,6 +21,8 @@ function getClient(): OpenAI {
   client ??= new OpenAI({
     apiKey: env.OPENAI_API_KEY,
     baseURL: env.OPENAI_BASE_URL || undefined,
+    timeout: 120_000,
+    maxRetries: 2,
   });
   return client;
 }

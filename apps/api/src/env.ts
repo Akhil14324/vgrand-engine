@@ -42,6 +42,11 @@ const envSchema = z.object({
   RAG_TOP_K: z.coerce.number().int().positive().default(6),
   RAG_CHUNK_CHARS: z.coerce.number().int().positive().default(1200),
   RAG_CHUNK_OVERLAP: z.coerce.number().int().nonnegative().default(150),
+  /** Jev (TypeSafe AI) — typed evaluations for intent routing + memory gating. */
+  TYPESAFE_API_KEY: opt(z.string().min(1)),
+  TYPESAFE_BASE_URL: opt(z.string().url()),
+  JEV_MODEL: opt(z.string().min(1)),
+
   DEFAULT_IMAGE_PROVIDER: opt(z.enum(["openai", "flux", "ideogram"])),
   FLUX_API_KEY: opt(z.string().min(1)),
   FLUX_MODEL_ENDPOINT: opt(z.string().min(1)),
@@ -88,6 +93,8 @@ export const env = {
   VOICE_TTS_VOICE: parsed.VOICE_TTS_VOICE ?? "alloy",
   CAMPAIGN_IMAGE_QUALITY: parsed.CAMPAIGN_IMAGE_QUALITY ?? "medium",
   EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
+  JEV_MODEL: parsed.JEV_MODEL ?? "jev-latest",
+  TYPESAFE_BASE_URL: parsed.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
   // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults

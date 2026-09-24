@@ -101,9 +101,16 @@ export function useGenerationStream(
     let cancelled = false;
 
     getToken().then((token) => {
-      if (cancelled) return;
-      const url = `${API_URL}/generations/${id}/events?token=${encodeURIComponent(token ?? "")}`;
+      // Signed out (or session not ready): an anonymous stream would only 401 and retry.
+      if (cancelled || !token) return;
+      const url = `${API_URL}/generations/${id}/events?token=${encodeURIComponent(token)}`;
       es = new EventSource(url);
+      // EventSource retries forever by itself; give up on a dead stream (the
+      // list polling covers status) instead of hammering the API.
+      es.onerror = () => {
+        if (es?.readyState === EventSource.CLOSED) return;
+        es?.close();
+      };
       es.onmessage = (msg) => {
         try {
           const evt = JSON.parse(msg.data) as GenerationEvent;
@@ -118,7 +125,11 @@ export function useGenerationStream(
             qc.invalidateQueries({ queryKey: ["generations"] });
             qc.invalidateQueries({ queryKey: ["conversations"] });
           }
-          if (evt.status === "completed" || evt.status === "failed") {
+          if (
+            evt.status === "completed" ||
+            evt.status === "failed" ||
+            evt.status === "cancelled"
+          ) {
             streamBuffers.delete(evt.generationId);
             es?.close();
           }

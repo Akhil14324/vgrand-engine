@@ -51,6 +51,9 @@ interface GenerationMetadata {
   [key: string]: unknown;
 }
 
+/** Thrown mid-stream when the user hit Stop (row flipped to "cancelled"). */
+class GenerationCancelled extends Error {}
+
 export function startGenerationWorker(): Worker | null {
   if (!env.redisConfigured) {
     // No queue — enqueueGeneration() calls runGeneration() directly. Rows
@@ -60,6 +63,7 @@ export function startGenerationWorker(): Worker | null {
     void recoverPendingGenerations();
     return null;
   }
+  void failInterruptedGenerations();
   const worker = new Worker(
     GENERATION_QUEUE,
     (job: Job<GenerationJob>) => runGeneration(job.data.generationId),
@@ -83,6 +87,30 @@ export function startGenerationWorker(): Worker | null {
     );
   }
   return worker;
+}
+
+/**
+ * A process that dies mid-job leaves its row "processing" forever — a stalled
+ * BullMQ job is retried but runGeneration only picks up "pending" rows. Fail
+ * (and refund) anything stuck longer than any job could legitimately run.
+ */
+async function failInterruptedGenerations() {
+  try {
+    const cutoff = new Date(Date.now() - 30 * 60_000);
+    const stuck = await prisma.generation.findMany({
+      where: { status: "processing", createdAt: { lt: cutoff } },
+      select: { id: true },
+    });
+    for (const { id } of stuck) {
+      await prisma.generation.update({
+        where: { id },
+        data: { status: "failed", error: "Interrupted - please try again" },
+      });
+      await refundImageUsage(id).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[worker] interrupted-job sweep failed:", err);
+  }
 }
 
 /** Inline mode: re-run rows a previous process left behind. */
@@ -118,6 +146,27 @@ export async function runGeneration(generationId: string): Promise<void> {
     data: { status: "processing" },
   });
   publishGenerationEvent({ generationId, status: "processing" });
+
+  // Cooperative cancel: POST /generations/:id/cancel flips the row to
+  // "cancelled". The token stream polls it at most once per 700ms and the
+  // final writes are guarded by status:"processing", so a cancel can never
+  // be overwritten by a late "completed".
+  let cancelFlag = false;
+  let lastCancelCheck = 0;
+  const pollCancelled = () => {
+    const now = Date.now();
+    if (now - lastCancelCheck < 700) return;
+    lastCancelCheck = now;
+    void prisma.generation
+      .findUnique({ where: { id: generationId }, select: { status: true } })
+      .then((g) => {
+        if (g?.status === "cancelled") cancelFlag = true;
+      })
+      .catch(() => {});
+  };
+  // Tokens already streamed — persisted if the turn is stopped, so the
+  // partial reply survives instead of disappearing on the next refetch.
+  let partialText = "";
 
   const startedAt = Date.now();
   const meta = (generation.metadata ?? {}) as GenerationMetadata;
@@ -186,13 +235,17 @@ export async function runGeneration(generationId: string): Promise<void> {
       // "run this" / "/run" → real Python execution in OpenAI's sandbox
       // (non-streaming — runs take seconds; the reply is assembled once).
       const codeRun = wantsCodeExecution(generation.prompt);
-      const onDelta = (delta: string) =>
+      const onDelta = (delta: string) => {
+        partialText += delta;
         publishGenerationEvent({
           generationId,
           status: "processing",
           kind: "text",
           delta,
         });
+        pollCancelled();
+        if (cancelFlag) throw new GenerationCancelled();
+      };
 
       // Live web search only when asked for or clearly time-sensitive - the
       // normal path stays untouched (no added latency). If the search path
@@ -307,8 +360,8 @@ export async function runGeneration(generationId: string): Promise<void> {
           );
         }
       }
-      await prisma.generation.update({
-        where: { id: generationId },
+      const finished = await prisma.generation.updateMany({
+        where: { id: generationId, status: "processing" },
         data: {
           status: "completed",
           textResponse: text,
@@ -332,6 +385,17 @@ export async function runGeneration(generationId: string): Promise<void> {
           },
         },
       });
+      if (finished.count === 0) {
+        // Cancelled after the last token — keep the partial reply, stay cancelled.
+        await prisma.generation
+          .update({
+            where: { id: generationId },
+            data: { textResponse: partialText || null },
+          })
+          .catch(() => {});
+        publishGenerationEvent({ generationId, status: "cancelled" });
+        return;
+      }
       publishGenerationEvent({
         generationId,
         status: "completed",
@@ -379,8 +443,8 @@ export async function runGeneration(generationId: string): Promise<void> {
       ),
     );
 
-    await prisma.generation.update({
-      where: { id: generationId },
+    const finished = await prisma.generation.updateMany({
+      where: { id: generationId, status: "processing" },
       data: {
         status: "completed",
         imageUrls,
@@ -393,6 +457,12 @@ export async function runGeneration(generationId: string): Promise<void> {
         },
       },
     });
+    if (finished.count === 0) {
+      // Cancelled while the provider was rendering — refund and stop quietly.
+      await refundImageUsage(generationId).catch(() => {});
+      publishGenerationEvent({ generationId, status: "cancelled" });
+      return;
+    }
 
     // Persistent memory snapshot — everything needed to recall or reproduce
     // this generation later, not just the image.
@@ -421,11 +491,30 @@ export async function runGeneration(generationId: string): Promise<void> {
 
     publishGenerationEvent({ generationId, status: "completed", imageUrls });
   } catch (err) {
+    if (err instanceof GenerationCancelled) {
+      // Stop hit mid-stream — keep the tokens already sent, stay cancelled.
+      await prisma.generation
+        .update({
+          where: { id: generationId },
+          data: {
+            status: "cancelled",
+            error: "Stopped",
+            ...(partialText ? { textResponse: partialText } : {}),
+          },
+        })
+        .catch(() => {});
+      await refundImageUsage(generationId).catch(() => {});
+      publishGenerationEvent({ generationId, status: "cancelled" });
+      return;
+    }
     const message = err instanceof Error ? err.message : "generation failed";
-    await prisma.generation.update({
-      where: { id: generationId },
-      data: { status: "failed", error: message },
-    });
+    // The row may be gone (chat deleted mid-job) — don't let that mask the error.
+    await prisma.generation
+      .update({
+        where: { id: generationId },
+        data: { status: "failed", error: message },
+      })
+      .catch(() => {});
     await refundImageUsage(generationId).catch(() => {});
     publishGenerationEvent({ generationId, status: "failed", error: message });
     throw err;

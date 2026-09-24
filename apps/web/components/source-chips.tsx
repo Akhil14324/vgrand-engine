@@ -14,6 +14,8 @@ export function SourceChips({ sources }: { sources: WebSource[] }) {
   // Search often returns several pages from one site - show each site once.
   const seen = new Set<string>();
   const unique = sources.filter((s) => {
+    // Only http(s) — never render javascript:/data: links.
+    if (!/^https?:\/\//i.test(s.url)) return false;
     const host = hostOf(s.url);
     if (seen.has(host)) return false;
     seen.add(host);

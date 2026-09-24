@@ -1,7 +1,12 @@
 import fp from "fastify-plugin";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { decodeJwt, jwtVerify } from "jose";
+import {
+  createRemoteJWKSet,
+  decodeJwt,
+  decodeProtectedHeader,
+  jwtVerify,
+} from "jose";
 import { prisma } from "@catgpt/db";
 import { env } from "../env.js";
 import { unauthorized } from "../lib/errors.js";
@@ -32,10 +37,14 @@ function getSupabase(): SupabaseClient | null {
   return supabaseAuth;
 }
 
+const SSE_PATH = /^\/generations\/[^/]+\/events$/;
+
 function extractToken(req: FastifyRequest): string | null {
   const header = req.headers.authorization;
   if (header?.startsWith("Bearer ")) return header.slice(7);
-  // EventSource can't set headers, so SSE sends the token as a query param.
+  // EventSource can't set headers, so the SSE stream sends the token as a query
+  // param. Nowhere else: URLs end up in logs and browser history.
+  if (!SSE_PATH.test(req.url.split("?")[0]!)) return null;
   const q = (req.query as Record<string, unknown> | undefined)?.token;
   return typeof q === "string" && q ? q : null;
 }
@@ -100,15 +109,33 @@ function rememberToken(token: string, userId: string) {
 }
 
 let jwtSecret: Uint8Array | null = null;
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 /**
- * In-process verification of a Supabase access token (HS256, signed with the
- * project's JWT secret) — no round-trip to Supabase's auth service per request.
+ * In-process verification of a Supabase access token — no round-trip to
+ * Supabase's auth service per request. Projects on the newer asymmetric
+ * signing keys (ES256/RS256) verify against the project's public JWKS, which
+ * jose fetches once and caches; legacy HS256 projects use the JWT secret.
  */
 async function verifySupabaseJwt(token: string) {
-  jwtSecret ??= new TextEncoder().encode(env.SUPABASE_JWT_SECRET!);
-  const { payload } = await jwtVerify(token, jwtSecret);
-  return payload;
+  const { alg } = decodeProtectedHeader(token);
+  // Supabase user sessions carry aud "authenticated"; other project tokens
+  // (anon, service role) must not pass as users.
+  const audience = "authenticated";
+  if (alg === "HS256") {
+    if (!env.SUPABASE_JWT_SECRET) throw new Error("no JWT secret configured");
+    jwtSecret ??= new TextEncoder().encode(env.SUPABASE_JWT_SECRET);
+    return (await jwtVerify(token, jwtSecret, { audience, algorithms: ["HS256"] }))
+      .payload;
+  }
+  jwks ??= createRemoteJWKSet(
+    new URL("/auth/v1/.well-known/jwks.json", env.SUPABASE_URL!),
+  );
+  return (await jwtVerify(token, jwks, { audience, algorithms: ["ES256", "RS256"] }))
+    .payload;
 }
+
+/** Local verification is possible whenever Supabase is configured (JWKS or secret). */
+const canVerifyLocally = () => Boolean(env.SUPABASE_URL);
 
 /**
  * Rate-limit bucket for a request. The limiter runs in onRequest, before any
@@ -122,7 +149,7 @@ export async function rateLimitKey(req: FastifyRequest): Promise<string> {
   if (token) {
     const hit = verifiedTokens.get(token);
     if (hit && hit.until > Date.now()) return `u:${hit.userId}`;
-    if (env.SUPABASE_JWT_SECRET) {
+    if (canVerifyLocally()) {
       const claims = await verifySupabaseJwt(token).catch(() => null);
       if (claims?.sub) return `u:${claims.sub}`;
     }
@@ -132,9 +159,9 @@ export async function rateLimitKey(req: FastifyRequest): Promise<string> {
 
 /**
  * Auth strategy:
- *  - Supabase configured -> verify the Bearer JWT. With SUPABASE_JWT_SECRET
- *    this is local (jose jwtVerify, zero network calls); without it we fall
- *    back to supabase.auth.getUser (one HTTP call per request).
+ *  - Supabase configured -> verify the Bearer JWT locally (JWKS for asymmetric
+ *    keys, SUPABASE_JWT_SECRET for HS256); if that fails we fall back to
+ *    supabase.auth.getUser (one HTTP call).
  */
 export const authPlugin = fp(async (app) => {
   app.decorateRequest("userId", "");
@@ -149,10 +176,9 @@ export const authPlugin = fp(async (app) => {
         req.userId = hit.userId;
         return;
       }
-      // Fast path: local HS256 verification. If the secret is wrong/unset or the
-      // project uses asymmetric signing keys this fails — fall back to asking
-      // Supabase, which handles every signing setup.
-      if (env.SUPABASE_JWT_SECRET) {
+      // Fast path: local verification. If it fails (unknown key, unreachable
+      // JWKS, unset secret) fall back to asking Supabase directly.
+      if (canVerifyLocally()) {
         const claims = await verifySupabaseJwt(token).catch(() => null);
         if (claims?.sub) {
           req.userId = claims.sub;

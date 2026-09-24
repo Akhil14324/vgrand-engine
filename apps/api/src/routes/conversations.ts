@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { prisma } from "@catgpt/db";
 import { updateConversationSchema } from "@catgpt/types";
-import { forbidden, notFound, parseBody } from "../lib/errors.js";
+import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toConversationDto } from "../lib/serialize.js";
 import { loadTranscript, transcriptMarkdown } from "../lib/transcript.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
@@ -36,8 +36,11 @@ export async function conversationRoutes(app: FastifyInstance) {
       archived?: string;
       search?: string;
     };
-    const limit = Math.min(Number(q.limit) || 50, 100);
+    const limit = Math.min(Math.max(Number(q.limit) || 50, 1), 100);
     const search = q.search?.trim();
+    if (q.cursor && !/^[0-9a-f-]{36}$/i.test(q.cursor)) {
+      throw badRequest("invalid cursor");
+    }
     const items = await prisma.conversation.findMany({
       where: {
         userId: req.userId,
@@ -70,7 +73,7 @@ export async function conversationRoutes(app: FastifyInstance) {
             }
           : {}),
       },
-      orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
+      orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
       include: PREVIEW_INCLUDE,

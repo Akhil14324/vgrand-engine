@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, FileText, Globe, Loader2, Store, X } from "lucide-react";
+import { AlertCircle, FileText, Globe, Loader2, Square, Store, X } from "lucide-react";
 import type { GenerationDto, WebSource } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
@@ -120,12 +120,23 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
               {generation.error ?? "Generation failed"}
             </p>
           </div>
+        ) : generation.status === "cancelled" &&
+          !generation.textResponse &&
+          !image ? (
+          <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">
+            <Square className="h-3.5 w-3.5" /> Stopped
+          </div>
         ) : generation.kind === "text" ? (
           generation.textResponse ? (
             <div className="max-w-[85%] sm:max-w-[75%]">
               <Markdown>{generation.textResponse}</Markdown>
               {inFlight && (
                 <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary/70 align-text-bottom" />
+              )}
+              {generation.status === "cancelled" && (
+                <p className="mt-1 text-[11px] italic text-muted-foreground">
+                  Stopped
+                </p>
               )}
               {!inFlight && sources.length > 0 && <SourceChips sources={sources} />}
             </div>

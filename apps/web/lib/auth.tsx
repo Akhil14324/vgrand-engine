@@ -9,9 +9,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { AUTH_CONFIGURED, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { registerTokenGetter } from "./api";
+import { useStudio } from "./store";
 
 interface AuthUser {
   id: string;
@@ -43,6 +45,7 @@ function getSupabase(): SupabaseClient | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(AUTH_CONFIGURED);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const client = getSupabase();
@@ -51,7 +54,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(toAuthUser(data.session?.user));
       setLoading(false);
     });
+    // Cached chats, brands and UI state belong to one account: drop them when
+    // the session ends or a different user signs in on this browser.
+    let currentUserId: string | null = null;
     const { data: sub } = client.auth.onAuthStateChange((_evt, session) => {
+      const nextId = session?.user?.id ?? null;
+      if (currentUserId !== nextId) {
+        if (currentUserId !== null || nextId === null) {
+          queryClient.clear();
+          useStudio.setState(useStudio.getInitialState(), true);
+        }
+        currentUserId = nextId;
+      }
       setUser(toAuthUser(session?.user));
       setLoading(false);
     });
@@ -60,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return data.session?.access_token ?? null;
     });
     return () => sub.subscription.unsubscribe();
-  }, []);
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(() => {
     const client = getSupabase();

@@ -38,6 +38,10 @@
 }
 
 @layer utilities {
+  /* Brand accent for headings: the primary orange easing into amber. */
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-primary to-amber-300 bg-clip-text text-transparent;
+  }
   /* Shimmer used on image cards while a generation is in flight. */
   .shimmer {
     @apply relative overflow-hidden bg-muted/40;

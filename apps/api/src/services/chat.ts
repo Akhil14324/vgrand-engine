@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ResponseIncludable } from "openai/resources/responses/responses";
 import { prisma } from "@catgpt/db";
 import type { GenerationKind, WebSource } from "@catgpt/types";
+import { evaluate, jevConfigured } from "./jev.js";
 import { env } from "../env.js";
 
 /**
@@ -63,6 +64,8 @@ export function getClient(): OpenAI {
   client ??= new OpenAI({
     apiKey: env.OPENAI_API_KEY,
     baseURL: env.OPENAI_BASE_URL || undefined,
+    timeout: 120_000,
+    maxRetries: 2,
   });
   return client;
 }
@@ -124,12 +127,51 @@ CHAT: questions, explanations, coding help, document requests, conversation, or 
  * IMAGE or CHAT for an ambiguous prompt. Explicit opt-ins (armed /theme,
  * reference image, regenerate) are resolved by the caller before this runs.
  * On classifier failure we default to image — the studio's primary job.
+ *
+ * Jev answers this as a typed choice question — a fast eval call instead of
+ * a chat completion. Without TYPESAFE_API_KEY (or if Jev errors) the OpenAI
+ * classifier below runs unchanged.
  */
 export async function classifyIntent(
   prompt: string,
   history: HistoryTurn[],
   opts: { hasImage?: boolean } = {},
 ): Promise<GenerationKind> {
+  if (jevConfigured()) {
+    try {
+      // State is an array of text turns, most recent last — capped so a long
+      // chat never nears Jev's 32k state budget.
+      const state = [
+        ...history.slice(-8).flatMap((t) => [
+          `User: ${t.prompt.slice(0, 500)}`,
+          `Assistant: ${assistantText(t).slice(0, 500)}`,
+        ]),
+        `User: ${prompt.slice(0, 2000)}`,
+      ];
+      const answers = await evaluate(state, {
+        intent: {
+          type: "choice",
+          instructions: opts.hasImage
+            ? "Classify the user's latest message for CatGPT, an AI image-generation studio. The user attached an image: questions ABOUT the image (what is it, what is wrong with it, describe/read/analyze/compare it, give feedback) are chat; requests to CHANGE or build on it (edit, restyle, remove or add something, make a poster/variation from it) are image."
+            : "Classify the user's latest message for CatGPT, an AI image-generation studio.",
+          criteria: {
+            image:
+              "The user wants an image created or edited — poster, logo, scene, artwork, UI mock, photo — including follow-ups like 'make it darker' or 'same but at night' when the conversation already produced images.",
+            chat: "Questions, explanations, coding help, document requests, conversation, or anything that does not ask for an image.",
+          },
+        },
+      });
+      const verdict = answers.intent?.choice;
+      if (verdict === "image" || verdict === "chat") {
+        return verdict === "image" ? "image" : "text";
+      }
+    } catch (err) {
+      console.warn(
+        "[jev] intent classification failed, using chat model:",
+        (err as Error).message,
+      );
+    }
+  }
   try {
     const res = await getClient().chat.completions.create({
       model: env.CHAT_MODEL,

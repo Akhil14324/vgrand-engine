@@ -21,6 +21,7 @@ export const GENERATION_STATUSES = [
   "processing",
   "completed",
   "failed",
+  "cancelled",
 ] as const;
 export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
 

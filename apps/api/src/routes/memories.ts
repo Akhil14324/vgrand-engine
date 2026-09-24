@@ -19,6 +19,15 @@ export async function memoryRoutes(app: FastifyInstance) {
 
   app.post("/memories", async (req, reply) => {
     const body = parseBody(createMemorySchema, req.body);
+    // The source generation's image is shown as the memory preview, so it must
+    // be the caller's own.
+    if (body.sourceGenId) {
+      const source = await prisma.generation.findFirst({
+        where: { id: body.sourceGenId, userId: req.userId },
+        select: { id: true },
+      });
+      if (!source) throw notFound("Source generation not found");
+    }
     const memory = await prisma.memory.create({
       data: { userId: req.userId, ...body },
     });

@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { prisma } from "@catgpt/db";
 import type { HistoryTurn } from "./chat.js";
+import { evaluate, jevConfigured } from "./jev.js";
 import { env } from "../env.js";
 
 /**
@@ -23,6 +24,8 @@ function getClient(): OpenAI {
   client ??= new OpenAI({
     apiKey: env.OPENAI_API_KEY,
     baseURL: env.OPENAI_BASE_URL || undefined,
+    timeout: 120_000,
+    maxRetries: 2,
   });
   return client;
 }
@@ -53,6 +56,22 @@ export async function rememberTurn(
           `User: ${t.prompt}\nAssistant: ${(t.textResponse ?? "").slice(0, 600)}`,
       )
       .join("\n\n");
+    // Jev gate: most turns contain nothing durable about the user — a cheap
+    // yes/no evaluation skips the extraction call entirely on those.
+    if (jevConfigured()) {
+      try {
+        const answers = await evaluate(transcript.slice(0, 8000), {
+          memorable: {
+            type: "noul",
+            instructions:
+              "The user revealed a durable fact about themselves worth remembering across chats — name, role, tech stack, preferences, constraints, or ongoing projects. Facts about the topic being discussed do not count.",
+          },
+        });
+        if ((answers.memorable?.noul ?? 0) < 0.5) return;
+      } catch {
+        // A failed gate must not block memory — fall through to extraction.
+      }
+    }
     const res = await getClient().chat.completions.create({
       model: env.CHAT_MODEL,
       temperature: 0,

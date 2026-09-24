@@ -13,6 +13,7 @@ import {
   MAX_BRAND_ASSETS,
   buildBrandSummary,
   findAccessibleBrand,
+  findManageableBrand,
   isOwnStorageUrl,
   toBrandDto,
 } from "../lib/brand.js";
@@ -92,7 +93,7 @@ export async function brandRoutes(app: FastifyInstance) {
   /** Save questionnaire answers - the digest used in prompts is rebuilt here. */
   app.patch("/brands/:id", async (req) => {
     const { id } = req.params as { id: string };
-    const current = await findAccessibleBrand(req.userId, id);
+    const current = await findManageableBrand(req.userId, id);
     const body = parseBody(updateBrandSchema, req.body);
 
     const name = body.name?.trim() || current.name;
@@ -119,7 +120,7 @@ export async function brandRoutes(app: FastifyInstance) {
 
   app.delete("/brands/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    await findAccessibleBrand(req.userId, id);
+    await findManageableBrand(req.userId, id);
     await prisma.brand.delete({ where: { id } });
     return reply.code(204).send();
   });
@@ -127,7 +128,7 @@ export async function brandRoutes(app: FastifyInstance) {
   /** Attach an already-uploaded image (logo / product photo / reference). */
   app.post("/brands/:id/assets", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const brand = await findAccessibleBrand(req.userId, id);
+    const brand = await findManageableBrand(req.userId, id);
     const body = parseBody(createBrandAssetSchema, req.body);
     if (!isOwnStorageUrl(body.url)) {
       throw badRequest("assets must be uploaded through the app first");
@@ -155,7 +156,7 @@ export async function brandRoutes(app: FastifyInstance) {
 
   app.delete("/brands/:id/assets/:assetId", async (req, reply) => {
     const { id, assetId } = req.params as { id: string; assetId: string };
-    await findAccessibleBrand(req.userId, id);
+    await findManageableBrand(req.userId, id);
     const res = await prisma.brandAsset.deleteMany({
       where: { id: assetId, brandId: id },
     });

@@ -128,6 +128,19 @@ export async function findAccessibleBrand(userId: string, id: string) {
   return brand;
 }
 
+/**
+ * Brands a user may change or delete: their own, or any brand in a workspace
+ * they OWN. Plain members can read and use workspace brands but not alter them.
+ */
+export async function findManageableBrand(userId: string, id: string) {
+  const brand = await prisma.brand.findFirst({
+    where: { id, OR: [{ userId }, { workspace: { userId } }] },
+    include: BRAND_INCLUDE,
+  });
+  if (!brand) throw notFound("Brand not found");
+  return brand;
+}
+
 /** Only files we stored ourselves may be attached as brand assets. */
 export function isOwnStorageUrl(url: string): boolean {
   try {

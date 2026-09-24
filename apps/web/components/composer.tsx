@@ -17,7 +17,7 @@ import {
   Globe,
   Megaphone,
   Store,
-  Swords,
+  Square,
   Home,
   Loader2,
   Mic,
@@ -28,21 +28,22 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { DocumentDto, Quality, ThemeDto } from "@catgpt/types";
+import type { DocumentDto, GenerationDto, Quality, ThemeDto } from "@catgpt/types";
 import { apiFetch, ApiRequestError } from "@/lib/api";
 import { MAX_UPLOAD_MB } from "@/lib/config";
 import {
   useAddBrandAsset,
   useBrands,
+  useCancelGeneration,
   useCreateGeneration,
   useDocuments,
+  useGenerations,
   useThemes,
 } from "@/lib/hooks";
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
-import { KillBill } from "@/components/kill-bill";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -81,6 +82,14 @@ const QUALITY_LABEL: Record<Quality, string> = {
   high: "High · costly",
 };
 
+/** Rotating idle placeholders — quietly demo what the composer can do. */
+const PLACEHOLDERS = [
+  "Ask anything, or 'create an image of…'",
+  "Create an image of a neon diner at dusk…",
+  "Type /campaign to plan a product launch…",
+  "Drop a PDF or Word doc to ask about it…",
+];
+
 export function Composer() {
   const {
     armedTheme,
@@ -91,6 +100,7 @@ export function Composer() {
     select,
     activeConversationId,
     openConversation,
+    pendingTurn,
     setPendingTurn,
     resolvePendingTurn,
     clearPendingTurn,
@@ -112,7 +122,21 @@ export function Composer() {
   // One-shot "search the web for this message" toggle; time-sensitive
   // questions are also detected server-side without it.
   const [webSearch, setWebSearch] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
+  const cancel = useCancelGeneration();
+  // The in-flight generation for this chat — drives the Send -> Stop swap.
+  const { data: genPage } = useGenerations({
+    conversationId: activeConversationId,
+  });
+  const runningId = useMemo(() => {
+    const inFlight = (g: GenerationDto) =>
+      g.status === "pending" || g.status === "processing";
+    if (pendingTurn?.generationId) {
+      const g = genPage?.items.find((x) => x.id === pendingTurn.generationId);
+      // Not in the cached list yet = the POST just resolved; assume running.
+      if (!g || inFlight(g)) return pendingTurn.generationId;
+    }
+    return genPage?.items.find(inFlight)?.id ?? null;
+  }, [genPage, pendingTurn]);
 
   // Text handed over from another page (e.g. Brand -> "Build my sales strategy").
   useEffect(() => {
@@ -126,6 +150,9 @@ export function Composer() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [listening, setListening] = useState(false);
+  // Not-yet-final speech transcript, shown live while dictating.
+  const [interim, setInterim] = useState("");
+  const [phIndex, setPhIndex] = useState(0);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -171,15 +198,24 @@ export function Composer() {
         results: { isFinal: boolean; 0: { transcript: string } }[];
       };
       let final = "";
+      let interimText = "";
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         if (ev.results[i]!.isFinal) final += ev.results[i]![0]!.transcript;
+        else interimText += ev.results[i]![0]!.transcript;
       }
       if (final) {
         setValue((v) => (v ? v.replace(/\s+$/, "") + " " : "") + final.trim());
       }
+      setInterim(interimText);
     };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
+    rec.onerror = () => {
+      setListening(false);
+      setInterim("");
+    };
     rec.start();
     recRef.current = rec;
     setListening(true);
@@ -187,6 +223,12 @@ export function Composer() {
 
   // Stop dictation if the composer unmounts mid-recording.
   useEffect(() => () => recRef.current?.stop(), []);
+
+  // Cycle the idle placeholder every few seconds (skipped once typing).
+  useEffect(() => {
+    const t = setInterval(() => setPhIndex((i) => i + 1), 4000);
+    return () => clearInterval(t);
+  }, []);
 
   // Auto-grow the textarea: one line at rest, expands with content up to
   // ~7 lines (168px), then scrolls — same behavior as ChatGPT/Claude.
@@ -483,7 +525,7 @@ export function Composer() {
       />
 
       {conversationDocs && conversationDocs.length > 0 && (
-        <div className="mx-auto mb-1.5 flex max-w-3xl items-center gap-1.5 px-3 text-[11px] text-muted-foreground">
+        <div className="mx-auto mb-1.5 flex max-w-4xl items-center gap-1.5 px-3 text-[11px] text-muted-foreground">
           <FileText className="h-3 w-3 shrink-0" />
           <span className="truncate">
             {conversationDocs.map((d) => d.filename).join(" · ")} — answers
@@ -496,7 +538,7 @@ export function Composer() {
         <PopoverAnchor asChild>
           <div
             className={cn(
-              "mx-auto w-full max-w-3xl rounded-[28px] border bg-card px-2.5 py-2 shadow-lg transition-shadow focus-within:ring-1 focus-within:ring-ring",
+              "mx-auto w-full max-w-4xl rounded-[28px] border bg-card px-2.5 py-2 shadow-lg transition-shadow focus-within:ring-1 focus-within:ring-ring",
               dragging && "ring-1 ring-primary",
             )}
           >
@@ -586,11 +628,52 @@ export function Composer() {
               </div>
             )}
 
-            <div className="flex items-end gap-1">
+            {listening && (
+              <div className="flex items-center gap-2.5 px-3 pt-1 text-xs text-muted-foreground animate-fade-in">
+                <span className="flex h-3.5 shrink-0 items-center gap-[3px]">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <span
+                      key={i}
+                      className="h-3 w-[3px] animate-wave rounded-full bg-primary"
+                      style={{ animationDelay: `${i * 120}ms` }}
+                    />
+                  ))}
+                </span>
+                <span className="min-w-0 flex-1 truncate italic">
+                  {interim || "Listening…"}
+                </span>
+              </div>
+            )}
+
+            <Textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setMenuOpen(e.target.value.startsWith("/"));
+                setHighlight(0);
+              }}
+              onKeyDown={onKeyDown}
+              onPaste={(e) => {
+                if (e.clipboardData.files.length) {
+                  e.preventDefault();
+                  void uploadFiles(e.clipboardData.files);
+                }
+              }}
+              placeholder={
+                armedTheme
+                  ? `Create an image of… (${armedTheme.label} styling)`
+                  : PLACEHOLDERS[phIndex % PLACEHOLDERS.length]
+              }
+              rows={1}
+              className="max-h-[168px] min-h-[44px] w-full resize-none overflow-y-auto border-0 bg-transparent px-2.5 py-2 leading-6 shadow-none focus-visible:ring-0"
+            />
+
+            <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
                 size="icon"
-                className="mb-0.5 h-9 w-9 shrink-0 rounded-full text-muted-foreground"
+                className="h-9 w-9 shrink-0 rounded-full text-muted-foreground"
                 onClick={() => fileRef.current?.click()}
                 aria-label="Attach images or PDFs"
                 title="Attach images (edit refs) or PDFs (ask questions about them)"
@@ -603,7 +686,7 @@ export function Composer() {
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    "mb-0.5 h-9 w-9 shrink-0 rounded-full",
+                    "h-9 w-9 shrink-0 rounded-full",
                     listening
                       ? "text-destructive"
                       : "text-muted-foreground",
@@ -620,31 +703,34 @@ export function Composer() {
                 </Button>
               )}
 
-              <Textarea
-                ref={textareaRef}
-                value={value}
-                onChange={(e) => {
-                  setValue(e.target.value);
-                  setMenuOpen(e.target.value.startsWith("/"));
-                  setHighlight(0);
-                }}
-                onKeyDown={onKeyDown}
-                onPaste={(e) => {
-                  if (e.clipboardData.files.length) {
-                    e.preventDefault();
-                    void uploadFiles(e.clipboardData.files);
-                  }
-                }}
-                placeholder={
-                  armedTheme
-                    ? `Create an image of… (${armedTheme.label} styling) — / for themes`
-                    : "Ask anything, or 'create an image of…' — / for themes"
-                }
-                rows={1}
-                className="max-h-[168px] min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-2.5 leading-5 shadow-none focus-visible:ring-0"
-              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Model and image quality"
+                    title="Model — click to set image quality"
+                    className={cn(
+                      badgeVariants({ variant: "muted" }),
+                      "ml-1 hidden shrink-0 font-mono text-[10px] hover:bg-accent hover:text-foreground sm:inline-flex",
+                    )}
+                  >
+                    {providerLabel} · {quality}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>Image quality</DropdownMenuLabel>
+                  {(Object.keys(QUALITY_LABEL) as Quality[]).map((q) => (
+                    <DropdownMenuItem key={q} onClick={() => setQuality(q)}>
+                      {QUALITY_LABEL[q]}
+                      {q === quality && (
+                        <span className="ml-auto text-primary">●</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-              <div className="mb-0.5 flex shrink-0 items-center gap-1">
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 {brands && brands.length > 0 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -664,7 +750,7 @@ export function Composer() {
                         )}
                       >
                         <Store className="h-3.5 w-3.5 shrink-0" />
-                        <span className="hidden truncate sm:inline">
+                        <span className="hidden truncate lg:inline">
                           {activeBrand ? activeBrand.name : "Brand off"}
                         </span>
                       </button>
@@ -690,16 +776,6 @@ export function Composer() {
                 )}
                 <button
                   type="button"
-                  onClick={() => setVoiceOpen(true)}
-                  aria-label="Kill Bill voice conversation"
-                  title="Kill Bill - talk to the AI"
-                  className="flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <Swords className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Kill Bill</span>
-                </button>
-                <button
-                  type="button"
                   onClick={() => setWebSearch((v) => !v)}
                   aria-pressed={webSearch}
                   aria-label="Search the web for this message"
@@ -712,39 +788,38 @@ export function Composer() {
                   )}
                 >
                   <Globe className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Search</span>
+                  <span className="hidden lg:inline">Search</span>
                 </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="hidden rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:block">
-                      {QUALITY_LABEL[quality]}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>Quality tier</DropdownMenuLabel>
-                    {(Object.keys(QUALITY_LABEL) as Quality[]).map((q) => (
-                      <DropdownMenuItem key={q} onClick={() => setQuality(q)}>
-                        {QUALITY_LABEL[q]}
-                        {q === quality && (
-                          <span className="ml-auto text-primary">●</span>
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  size="icon"
-                  onClick={submit}
-                  disabled={!canSend}
-                  className="h-9 w-9 rounded-full"
-                  aria-label="Send"
-                >
-                  {create.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <ArrowUp />
-                  )}
-                </Button>
+                {runningId ? (
+                  <Button
+                    size="icon"
+                    onClick={() => cancel.mutate(runningId)}
+                    disabled={cancel.isPending}
+                    className="h-9 w-9 rounded-full"
+                    aria-label="Stop generating"
+                    title="Stop"
+                  >
+                    {cancel.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Square className="fill-current" />
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    size="icon"
+                    onClick={submit}
+                    disabled={!canSend}
+                    className="h-9 w-9 rounded-full"
+                    aria-label="Send"
+                  >
+                    {create.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <ArrowUp />
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -795,12 +870,7 @@ export function Composer() {
         </PopoverContent>
       </Popover>
 
-      {voiceOpen && <KillBill onClose={() => setVoiceOpen(false)} />}
-
-      <div className="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-2 text-center text-[11px] text-muted-foreground">
-        <Badge variant="muted" className="font-mono text-[10px]">
-          {providerLabel}
-        </Badge>
+      <div className="mx-auto mt-2 flex max-w-4xl items-center justify-center gap-2 text-center text-[11px] text-muted-foreground">
         <span className="hidden sm:inline">
           <kbd className="rounded border px-1 font-mono">/</kbd> themes &amp; /campaign · drop
           an image to edit or ask about it, or a PDF/Word doc to ask about ·{" "}

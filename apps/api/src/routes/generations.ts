@@ -10,7 +10,10 @@ import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
 import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
 import { toGenerationDto } from "../lib/serialize.js";
 import { enqueueGeneration } from "../services/queue.js";
-import { subscribeGenerationEvents } from "../services/events.js";
+import {
+  publishGenerationEvent,
+  subscribeGenerationEvents,
+} from "../services/events.js";
 import { classifyIntent, loadChatHistory } from "../services/chat.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
 import { storeFile } from "../services/storage.js";
@@ -18,6 +21,7 @@ import {
   assertImageQuota,
   getImageUsage,
   recordImageUsage,
+  refundImageUsage,
 } from "../lib/usage.js";
 import { isCampaignConversation, isCampaignPrompt } from "../services/campaign.js";
 import {
@@ -28,6 +32,7 @@ import {
 import type { BrandProfile } from "@catgpt/types";
 import { findWorkspaceForUser } from "../lib/workspace-access.js";
 import { env } from "../env.js";
+import { isTrustedImageUrl } from "../lib/urls.js";
 
 /**
  * Strict image gate — a prompt must explicitly ask to "create an image"
@@ -35,6 +40,8 @@ import { env } from "../env.js";
  * even with a theme armed; the theme only shapes image output, it is not
  * itself a request to generate.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const IMAGE_TRIGGER = /create\s+an?\s+image/i;
 
 /** Chat title from the first prompt — first line, capped at 60 chars. */
@@ -138,6 +145,10 @@ export async function generationRoutes(app: FastifyInstance) {
         ...(body.referenceImageUrls ?? []),
       ]),
     ];
+    // The server fetches these — only images uploaded through the app.
+    if (!userRefs.every(isTrustedImageUrl)) {
+      throw badRequest("reference images must be uploaded through the app");
+    }
 
     // Chat resolution order: explicit conversationId → inherit the parent's
     // chat → spin up a new conversation titled from the prompt.
@@ -304,18 +315,36 @@ export async function generationRoutes(app: FastifyInstance) {
             }),
         docs.length
           ? prisma.document.updateMany({
-              where: { id: { in: docs.map((d) => d.id) } },
+              // Workspace and brand documents keep their own home — linking
+              // them here would make deleting this chat delete them too.
+              where: {
+                id: { in: docs.map((d) => d.id) },
+                workspaceId: null,
+                brandId: null,
+              },
               data: { conversationId: chatId },
             })
           : null,
       ]);
       return created;
     })();
-    // Usage row and enqueue don't depend on each other.
-    await Promise.all([
-      kind === "image" ? recordImageUsage(req.userId, generation.id) : null,
-      enqueueGeneration(generation.id),
-    ]);
+    // Usage row and enqueue don't depend on each other. If either fails the
+    // user must not stay charged for a job that will never run.
+    try {
+      await Promise.all([
+        kind === "image" ? recordImageUsage(req.userId, generation.id) : null,
+        enqueueGeneration(generation.id),
+      ]);
+    } catch (err) {
+      await Promise.allSettled([
+        refundImageUsage(generation.id),
+        prisma.generation.update({
+          where: { id: generation.id },
+          data: { status: "failed", error: "Could not start the job" },
+        }),
+      ]);
+      throw err;
+    }
     return reply.code(202).send({
       generationId: generation.id,
       conversationId,
@@ -335,14 +364,15 @@ export async function generationRoutes(app: FastifyInstance) {
       cursor?: string;
       limit?: string;
     };
-    const limit = Math.min(Number(q.limit) || 30, 100);
+    const limit = Math.min(Math.max(Number(q.limit) || 30, 1), 100);
+    if (q.cursor && !UUID_RE.test(q.cursor)) throw badRequest("invalid cursor");
     const items = await prisma.generation.findMany({
       where: {
         userId: req.userId,
         ...(q.themeSlug ? { theme: { slug: q.themeSlug } } : {}),
         ...(q.conversationId ? { conversationId: q.conversationId } : {}),
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
       include: {
@@ -360,6 +390,25 @@ export async function generationRoutes(app: FastifyInstance) {
   app.get("/generations/:id", async (req) => {
     const { id } = req.params as { id: string };
     return toGenerationDto(await loadOwned(req, id));
+  });
+
+  /**
+   * Stop a running turn. Marks the row cancelled so a queued worker skips it
+   * and an in-flight worker aborts at its next check; the image quota is
+   * refunded either way (the ledger row only exists for image jobs).
+   */
+  app.post("/generations/:id/cancel", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    await loadOwned(req, id);
+    const { count } = await prisma.generation.updateMany({
+      where: { id, status: { in: ["pending", "processing"] } },
+      data: { status: "cancelled", error: "Stopped" },
+    });
+    if (count > 0) {
+      await refundImageUsage(id).catch(() => {});
+      publishGenerationEvent({ generationId: id, status: "cancelled" });
+    }
+    return reply.code(204).send();
   });
 
   app.delete("/generations/:id", async (req, reply) => {
@@ -388,6 +437,16 @@ export async function generationRoutes(app: FastifyInstance) {
       ? await prisma.theme.findUnique({ where: { id: parent.themeId } })
       : null;
     const parentMeta = (parent.metadata ?? {}) as Record<string, unknown>;
+    const brandId =
+      typeof parentMeta.brandId === "string" ? parentMeta.brandId : null;
+    const brand = brandId ? await loadBrandContext(brandId, req.userId) : null;
+    // The image being edited leads; extra references from the original carry over.
+    const extraRefs = Array.isArray(parentMeta.referenceImageUrls)
+      ? (parentMeta.referenceImageUrls as unknown[]).filter(
+          (u): u is string => typeof u === "string" && u !== referenceImageUrl,
+        )
+      : [];
+    const referenceImageUrls = [referenceImageUrl, ...extraRefs].slice(0, 10);
 
     const child = await prisma.generation.create({
       data: {
@@ -395,13 +454,23 @@ export async function generationRoutes(app: FastifyInstance) {
         themeId: parent.themeId,
         conversationId: parent.conversationId,
         prompt,
-        finalPrompt: buildFinalPrompt(theme, prompt),
+        finalPrompt:
+          buildFinalPrompt(theme, prompt) +
+          (brand
+            ? brandImageGuidance(
+                brand.name,
+                (brand.profile ?? {}) as BrandProfile,
+                brand.assets.some((a) => a.kind === "logo"),
+              )
+            : ""),
         provider: resolveProvider(theme, parent.provider),
         parentId: parent.id,
         metadata: {
           referenceImageUrl,
+          referenceImageUrls,
           quality: body.quality ?? parentMeta.quality ?? "low",
           size: parentMeta.size ?? "auto",
+          ...(brand ? { brandId: brand.id } : {}),
         },
       },
     });
@@ -475,7 +544,11 @@ export async function generationRoutes(app: FastifyInstance) {
       textResponse: generation.textResponse,
       error: generation.error,
     });
-    if (generation.status === "completed" || generation.status === "failed") {
+    if (
+      generation.status === "completed" ||
+      generation.status === "failed" ||
+      generation.status === "cancelled"
+    ) {
       reply.raw.end();
       return;
     }
@@ -483,7 +556,12 @@ export async function generationRoutes(app: FastifyInstance) {
     const heartbeat = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
     const unsubscribe = subscribeGenerationEvents(generation.id, (evt) => {
       send(evt);
-      if (evt.status === "completed" || evt.status === "failed") cleanup();
+      if (
+        evt.status === "completed" ||
+        evt.status === "failed" ||
+        evt.status === "cancelled"
+      )
+        cleanup();
     });
     const cleanup = () => {
       clearInterval(heartbeat);
