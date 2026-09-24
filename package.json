@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "start": "pnpm --filter @catgpt/db exec prisma generate && pnpm --filter @catgpt/db exec prisma migrate deploy && pnpm --filter @catgpt/api start",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "infra:up": "docker compose up -d",

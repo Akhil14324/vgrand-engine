@@ -1,11 +1,11 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
+    "builder": "RAILPACK",
     "buildCommand": "pnpm install --frozen-lockfile && pnpm db:generate"
   },
   "deploy": {
-    "startCommand": "pnpm --filter @catgpt/db exec prisma migrate deploy && pnpm --filter @catgpt/api start",
+    "startCommand": "pnpm --filter @catgpt/db exec prisma generate && pnpm --filter @catgpt/db exec prisma migrate deploy && pnpm --filter @catgpt/api start",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
