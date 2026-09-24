@@ -24,11 +24,17 @@ const DEV_USER = {
 let supabaseAuth: SupabaseClient | null = null;
 function getSupabase(): SupabaseClient | null {
   if (!env.supabaseConfigured) return null;
-  supabaseAuth ??= createClient(
-    env.SUPABASE_URL!,
-    env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
+  try {
+    supabaseAuth ??= createClient(
+      env.SUPABASE_URL!,
+      env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+  } catch (err) {
+    // A malformed SUPABASE_URL/key must not turn every request into a 500.
+    console.error("[auth] Supabase client init failed:", err);
+    return null;
+  }
   return supabaseAuth;
 }
 

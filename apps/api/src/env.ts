@@ -52,7 +52,19 @@ const envSchema = z.object({
   UPLOAD_DIR: opt(z.string().min(1)),
 });
 
-const parsed = envSchema.parse(process.env);
+/**
+ * Hosting dashboards make it easy to paste `KEY="value"` lines with the quotes
+ * (or stray whitespace) baked into the value, which silently breaks URLs and
+ * keys. Normalise before validating.
+ */
+const cleanEnv = Object.fromEntries(
+  Object.entries(process.env).map(([k, v]) => [
+    k,
+    v?.trim().replace(/^(["'])(.*)\1$/s, "$2").trim(),
+  ]),
+);
+
+const parsed = envSchema.parse(cleanEnv);
 
 export const env = {
   ...parsed,
