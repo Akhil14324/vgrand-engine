@@ -182,15 +182,18 @@ export async function generationRoutes(app: FastifyInstance) {
       if (ws.userId !== req.userId) throw forbidden();
     }
 
-    const generation = await prisma.$transaction(async (tx) => {
+    // Plain sequential writes, not an interactive $transaction: behind the
+    // Supabase transaction pooler (pgbouncer) interactive transactions time out
+    // with "Unable to start a transaction in the given time" under load.
+    const generation = await (async () => {
       if (conversationId) {
         // Bump recency so the chat floats to the top of the sidebar.
-        await tx.conversation.update({
+        await prisma.conversation.update({
           where: { id: conversationId },
           data: { updatedAt: new Date() },
         });
       } else {
-        const conversation = await tx.conversation.create({
+        const conversation = await prisma.conversation.create({
           data: {
             userId: req.userId,
             title: deriveTitle(body.prompt),
@@ -200,12 +203,12 @@ export async function generationRoutes(app: FastifyInstance) {
         conversationId = conversation.id;
       }
       if (docs.length) {
-        await tx.document.updateMany({
+        await prisma.document.updateMany({
           where: { id: { in: docs.map((d) => d.id) } },
           data: { conversationId },
         });
       }
-      return tx.generation.create({
+      return prisma.generation.create({
         data: {
           userId: req.userId,
           themeId: theme?.id ?? null,
@@ -234,7 +237,7 @@ export async function generationRoutes(app: FastifyInstance) {
           },
         },
       });
-    });
+    })();
     if (kind === "image") await recordImageUsage(req.userId, generation.id);
     await enqueueGeneration(generation.id);
     return reply.code(202).send({
