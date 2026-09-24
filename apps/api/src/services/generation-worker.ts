@@ -30,7 +30,12 @@ import {
   wantsWebSearch,
 } from "./chat.js";
 import type { WebSource } from "@catgpt/types";
-import { retrieveContext, runDocumentIngestion } from "./documents.js";
+import {
+  findScopeDocuments,
+  retrievePassages,
+  runDocumentIngestion,
+} from "./documents.js";
+import { evaluateSafe } from "./jev.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { refundImageUsage } from "../lib/usage.js";
 import { loadBrandContext } from "../lib/brand.js";
@@ -192,6 +197,32 @@ export async function runGeneration(generationId: string): Promise<void> {
     // textResponse out, over the same queue + SSE plumbing. Tokens stream
     // through delta events so the client renders as the model writes.
     if (generation.kind === "text") {
+      // Voice replies stay short and spoken: no campaign builder, no search.
+      const voice = meta.voice === true;
+      // One Jev call answers this turn's fuzzy routing questions — code
+      // execution, live-web need, doc need — replacing three regex guesses.
+      // It runs in parallel with the DB loads below, so it costs ~0ms of
+      // added latency; a null result (no key / API down) leaves every
+      // existing regex path untouched.
+      const turnEval = voice
+        ? Promise.resolve(null)
+        : evaluateSafe(generation.prompt.slice(0, 2000), {
+            wants_code: {
+              type: "noul",
+              instructions:
+                "The user wants code actually executed or run — producing real output — not just written, explained or reviewed.",
+            },
+            needs_web: {
+              type: "noul",
+              instructions:
+                "Answering well requires current or live information from the web — news, prices, scores, recent releases, current office-holders, today's weather or date.",
+            },
+            needs_docs: {
+              type: "noul",
+              instructions:
+                "Answering requires the user's own attached documents or files rather than general knowledge or casual conversation.",
+            },
+          });
       // One lookup serves both the RAG scope and the chat mode below —
       // a workspace conversation pulls every workspace doc and switches
       // to the grounded "analyze the workspace" system prompt.
@@ -220,21 +251,42 @@ export async function runGeneration(generationId: string): Promise<void> {
             (u): u is string => typeof u === "string",
           )
         : [];
+      const jev = await turnEval;
+
+      // Retrieval gate: casual turns in a doc-heavy chat ("thanks!", "make it
+      // blue") shouldn't pay for an embeddings call + vector query. Workspace
+      // and brand turns always retrieve — documents are their primary source.
+      // No Jev verdict = retrieve, exactly as before.
+      const scopeDocs = generation.conversationId
+        ? await findScopeDocuments({
+            conversationId: generation.conversationId,
+            workspaceId,
+            brandId: brand?.id ?? null,
+          }).catch(() => [])
+        : [];
+      const needsDocs =
+        workspaceId !== null ||
+        brand !== null ||
+        jev?.needs_docs == null ||
+        (jev.needs_docs.noul ?? 1) >= 0.3;
+
       // RAG + learned memory run in parallel — both are best-effort context.
       const [context, memories] = await Promise.all([
-        generation.conversationId
-          ? retrieveContext(generation.prompt, {
-              conversationId: generation.conversationId,
-              workspaceId,
-              brandId: brand?.id ?? null,
-            }).catch(() => [])
+        scopeDocs.length && needsDocs
+          ? retrievePassages(
+              generation.prompt,
+              scopeDocs.map((d) => d.id),
+            ).catch(() => [])
           : Promise.resolve([]),
         loadLearnedMemories(generation.userId).catch(() => []),
       ]);
 
       // "run this" / "/run" → real Python execution in OpenAI's sandbox
       // (non-streaming — runs take seconds; the reply is assembled once).
-      const codeRun = wantsCodeExecution(generation.prompt);
+      const codeRun = wantsCodeExecution(
+        generation.prompt,
+        jev?.wants_code == null ? null : (jev.wants_code.noul ?? 0) > 0.5,
+      );
       const onDelta = (delta: string) => {
         partialText += delta;
         publishGenerationEvent({
@@ -256,8 +308,6 @@ export async function runGeneration(generationId: string): Promise<void> {
       let searchError: string | null = null;
       let campaign = false;
       let creativesRequested = 0;
-      const voice = meta.voice === true;
-      // Voice replies stay short and spoken: no campaign builder, no search.
       if (!codeRun && !voice) {
         campaign =
           isCampaignPrompt(generation.prompt) ||
@@ -315,6 +365,10 @@ export async function runGeneration(generationId: string): Promise<void> {
           wantsWebSearch(generation.prompt, {
             forced: meta.webSearch === true,
             hasDocuments: context.length > 0,
+            jevSays:
+              jev?.needs_web == null
+                ? null
+                : (jev.needs_web.noul ?? 0) > 0.5,
           });
         if (useSearch) {
           let streamed = false;
@@ -381,6 +435,17 @@ export async function runGeneration(generationId: string): Promise<void> {
                   sources: sources.map((s) => ({ title: s.title, url: s.url })),
                 }
               : {}),
+            // The Jev verdicts that routed this turn — handy for debugging
+            // "why did/didn't it search?" from the feed's metadata.
+            ...(jev
+              ? {
+                  jev: {
+                    code: jev.wants_code?.noul ?? null,
+                    web: jev.needs_web?.noul ?? null,
+                    docs: jev.needs_docs?.noul ?? null,
+                  },
+                }
+              : {}),
             latencyMs: Date.now() - startedAt,
           },
         },
@@ -413,6 +478,23 @@ export async function runGeneration(generationId: string): Promise<void> {
         ],
       );
       return;
+    }
+
+    // Pre-flight: refuse clearly disallowed requests in ~200ms instead of
+    // waiting out a full provider call to be rejected. The threshold is
+    // deliberately high — photo edits and bold creative prompts must never
+    // false-positive. No verdict = proceed, same as before.
+    const screen = await evaluateSafe(generation.prompt.slice(0, 2000), {
+      disallowed: {
+        type: "noul",
+        instructions:
+          "This image request is for clearly unsafe or policy-violating content — explicit sexual material, graphic gore, hateful or extremist imagery, or instructions for illegal activity.",
+      },
+    });
+    if ((screen?.disallowed?.noul ?? 0) >= 0.85) {
+      throw new Error(
+        "this request looks like disallowed content, so no image was generated",
+      );
     }
 
     const result = await generateWithFallback(providerName, {

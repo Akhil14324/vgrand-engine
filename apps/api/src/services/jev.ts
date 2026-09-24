@@ -64,3 +64,21 @@ export async function evaluate(
   };
   return body.answers ?? {};
 }
+
+/**
+ * evaluate() that never throws: null when Jev is unconfigured or the call
+ * fails. Callers treat null as "no opinion" and keep their existing path —
+ * every Jev feature is additive, never a hard dependency.
+ */
+export async function evaluateSafe(
+  state: JevState,
+  questions: Record<string, JevQuestion>,
+): Promise<Record<string, JevAnswer> | null> {
+  if (!jevConfigured()) return null;
+  try {
+    return await evaluate(state, questions);
+  } catch (err) {
+    console.warn("[jev] evaluation failed:", (err as Error).message);
+    return null;
+  }
+}

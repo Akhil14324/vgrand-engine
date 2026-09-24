@@ -329,10 +329,15 @@ const CODE_FENCE = /```[\s\S]+?```/;
 
 /**
  * Should this turn actually execute code? Explicit `/run …` always counts;
- * otherwise a fenced code block plus a run verb ("run this", "execute it").
+ * a Jev verdict wins when present; otherwise a fenced code block plus a run
+ * verb ("run this", "execute it") decides.
  */
-export function wantsCodeExecution(prompt: string): boolean {
+export function wantsCodeExecution(
+  prompt: string,
+  jevSays: boolean | null = null,
+): boolean {
   if (RUN_PREFIX.test(prompt)) return true;
+  if (jevSays != null) return jevSays;
   return CODE_FENCE.test(prompt) && RUN_INTENT.test(prompt);
 }
 
@@ -403,14 +408,21 @@ const FRESHNESS_HINT =
  * toggle, a `/search` prefix) always count. Otherwise only time-sensitive
  * phrasing does — a regex, so ordinary chat pays zero extra latency and the
  * search tool (a few extra seconds) is used only when it earns its keep.
- * Turns grounded in the user's own documents never auto-search.
+ * Turns grounded in the user's own documents never auto-search. A Jev
+ * verdict (jevSays) replaces the regex when one was evaluated — it reads
+ * intent instead of matching keywords.
  */
 export function wantsWebSearch(
   prompt: string,
-  opts: { forced?: boolean; hasDocuments?: boolean } = {},
+  opts: {
+    forced?: boolean;
+    hasDocuments?: boolean;
+    jevSays?: boolean | null;
+  } = {},
 ): boolean {
   if (opts.forced || SEARCH_PREFIX.test(prompt)) return true;
   if (opts.hasDocuments) return false;
+  if (opts.jevSays != null) return opts.jevSays;
   return FRESHNESS_HINT.test(prompt);
 }
 

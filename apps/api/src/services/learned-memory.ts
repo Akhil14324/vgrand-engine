@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { prisma } from "@catgpt/db";
 import type { HistoryTurn } from "./chat.js";
-import { evaluate, jevConfigured } from "./jev.js";
+import { evaluateSafe } from "./jev.js";
 import { env } from "../env.js";
 
 /**
@@ -57,21 +57,16 @@ export async function rememberTurn(
       )
       .join("\n\n");
     // Jev gate: most turns contain nothing durable about the user — a cheap
-    // yes/no evaluation skips the extraction call entirely on those.
-    if (jevConfigured()) {
-      try {
-        const answers = await evaluate(transcript.slice(0, 8000), {
-          memorable: {
-            type: "noul",
-            instructions:
-              "The user revealed a durable fact about themselves worth remembering across chats — name, role, tech stack, preferences, constraints, or ongoing projects. Facts about the topic being discussed do not count.",
-          },
-        });
-        if ((answers.memorable?.noul ?? 0) < 0.5) return;
-      } catch {
-        // A failed gate must not block memory — fall through to extraction.
-      }
-    }
+    // yes/no evaluation skips the extraction call entirely on those. A null
+    // result (no key / API down) falls through to extraction, as before.
+    const gate = await evaluateSafe(transcript.slice(0, 8000), {
+      memorable: {
+        type: "noul",
+        instructions:
+          "The user revealed a durable fact about themselves worth remembering across chats — name, role, tech stack, preferences, constraints, or ongoing projects. Facts about the topic being discussed do not count.",
+      },
+    });
+    if (gate?.memorable != null && (gate.memorable.noul ?? 1) < 0.5) return;
     const res = await getClient().chat.completions.create({
       model: env.CHAT_MODEL,
       temperature: 0,
@@ -87,8 +82,31 @@ export async function rememberTurn(
 
     // Skip exact duplicates already remembered for this user.
     const existing = new Set(await loadLearnedMemories(userId));
-    const fresh = facts.filter((f) => !existing.has(f));
+    let fresh = facts.filter((f) => !existing.has(f));
     if (fresh.length === 0) return;
+
+    // Semantic pass: exact-match misses paraphrases ("likes dark mode" vs
+    // "prefers dark themes"). One noul per candidate, in parallel; a missing
+    // verdict keeps the fact, same as before.
+    if (existing.size) {
+      const prior = [...existing];
+      const checks = await Promise.all(
+        fresh.map((fact) =>
+          evaluateSafe(
+            { existing_memories: prior, candidate_fact: fact },
+            {
+              duplicate: {
+                type: "noul",
+                instructions:
+                  "The candidate fact is already covered — same meaning, different wording — by one of the existing memories.",
+              },
+            },
+          ),
+        ),
+      );
+      fresh = fresh.filter((_, i) => (checks[i]?.duplicate?.noul ?? 0) < 0.6);
+      if (fresh.length === 0) return;
+    }
 
     await prisma.memory.createMany({
       data: fresh.map((content) => ({
