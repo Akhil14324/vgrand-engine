@@ -106,6 +106,9 @@ export const authPlugin = fp(async (app) => {
     const supabase = getSupabase();
 
     if (supabase && token) {
+      // Fast path: local HS256 verification. If the secret is wrong/unset or the
+      // project uses asymmetric signing keys this fails — fall back to asking
+      // Supabase, which handles every signing setup.
       if (env.SUPABASE_JWT_SECRET) {
         const claims = await verifySupabaseJwt(token).catch(() => null);
         if (claims?.sub) {
@@ -121,22 +124,29 @@ export const authPlugin = fp(async (app) => {
           );
           return;
         }
-      } else {
-        const { data, error } = await supabase.auth.getUser(token);
-        if (!error && data.user) {
-          req.userId = data.user.id;
-          syncUser(
-            data.user.id,
-            data.user.email,
-            (data.user.user_metadata?.name as string | undefined) ??
-              (data.user.user_metadata?.full_name as string | undefined),
-            data.user.user_metadata?.avatar_url as string | undefined,
-          );
-          return;
-        }
       }
+      const { data, error } = await supabase.auth
+        .getUser(token)
+        .catch((err: Error) => ({ data: { user: null }, error: err }));
+      if (!error && data.user) {
+        req.userId = data.user.id;
+        syncUser(
+          data.user.id,
+          data.user.email,
+          (data.user.user_metadata?.name as string | undefined) ??
+            (data.user.user_metadata?.full_name as string | undefined),
+          data.user.user_metadata?.avatar_url as string | undefined,
+        );
+        return;
+      }
+      console.error(
+        "[auth] token rejected:",
+        error ? error.message : "no user returned",
+      );
       // Bad token: fall through — DEV_AUTH_BYPASS still rescues the request
       // when it's explicitly enabled; otherwise this 401s below.
+    } else if (token) {
+      console.error("[auth] token sent but Supabase client unavailable");
     }
 
     if (env.DEV_AUTH_BYPASS) {
