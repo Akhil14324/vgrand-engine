@@ -175,6 +175,8 @@ export const createGenerationSchema = z.object({
   documentIds: z.array(z.string().uuid()).max(4).optional(),
   /** Force a live web search for this turn (otherwise auto-detected). */
   webSearch: z.boolean().optional(),
+  /** Spoken conversation turn ("Kill Bill" voice mode): short spoken-style reply. */
+  voice: z.boolean().optional(),
   /** Answer/create as this brand (brand mode). Omit for a common answer. */
   brandId: z.string().uuid().optional(),
   parentId: z.string().uuid().optional(),

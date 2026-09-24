@@ -195,7 +195,9 @@ export async function runGeneration(generationId: string): Promise<void> {
       let searchError: string | null = null;
       let campaign = false;
       let creativesRequested = 0;
-      if (!codeRun) {
+      const voice = meta.voice === true;
+      // Voice replies stay short and spoken: no campaign builder, no search.
+      if (!codeRun && !voice) {
         campaign =
           isCampaignPrompt(generation.prompt) ||
           (generation.conversationId
@@ -247,6 +249,7 @@ export async function runGeneration(generationId: string): Promise<void> {
         );
       } else {
         const useSearch =
+          !voice &&
           visionImages.length === 0 &&
           wantsWebSearch(generation.prompt, {
             forced: meta.webSearch === true,
@@ -289,7 +292,7 @@ export async function runGeneration(generationId: string): Promise<void> {
             history,
             context,
             memories,
-            workspaceId ? "workspace" : "chat",
+            voice ? "voice" : workspaceId ? "workspace" : "chat",
             onDelta,
             brandSummary,
             visionImages,

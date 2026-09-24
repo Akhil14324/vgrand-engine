@@ -17,6 +17,7 @@ import {
   Globe,
   Megaphone,
   Store,
+  Swords,
   Home,
   Loader2,
   Mic,
@@ -38,6 +39,7 @@ import {
   useThemes,
 } from "@/lib/hooks";
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
+import { KillBill } from "@/components/kill-bill";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -109,6 +111,7 @@ export function Composer() {
   // One-shot "search the web for this message" toggle; time-sensitive
   // questions are also detected server-side without it.
   const [webSearch, setWebSearch] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   // Text handed over from another page (e.g. Brand -> "Build my sales strategy").
   useEffect(() => {
@@ -678,6 +681,16 @@ export function Composer() {
                 )}
                 <button
                   type="button"
+                  onClick={() => setVoiceOpen(true)}
+                  aria-label="Kill Bill voice conversation"
+                  title="Kill Bill - talk to the AI"
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Swords className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Kill Bill</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setWebSearch((v) => !v)}
                   aria-pressed={webSearch}
                   aria-label="Search the web for this message"
@@ -772,6 +785,8 @@ export function Composer() {
           })}
         </PopoverContent>
       </Popover>
+
+      {voiceOpen && <KillBill onClose={() => setVoiceOpen(false)} />}
 
       <div className="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-2 text-center text-[11px] text-muted-foreground">
         <Badge variant="muted" className="font-mono text-[10px]">

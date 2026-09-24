@@ -20,6 +20,7 @@ import { memoryRoutes } from "./routes/memories.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { documentRoutes } from "./routes/documents.js";
 import { brandRoutes } from "./routes/brands.js";
+import { voiceRoutes } from "./routes/voice.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -101,6 +102,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(uploadRoutes);
   await app.register(documentRoutes);
   await app.register(brandRoutes);
+  await app.register(voiceRoutes);
 
   return app;
 }

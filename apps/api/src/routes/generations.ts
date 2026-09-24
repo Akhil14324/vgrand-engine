@@ -182,7 +182,9 @@ export async function generationRoutes(app: FastifyInstance) {
     // Strict gate: an image only on explicit request — "create an image" in
     // the prompt, attached references, or a regenerate/edit chain (explicit
     // or inferred just above). Everything else is a text reply.
+    // Voice turns are always spoken text replies - never an image job.
     const kind =
+      !body.voice &&
       !visionOnly &&
       (userRefs.length > 0 ||
         effectiveParentId ||
@@ -291,6 +293,7 @@ export async function generationRoutes(app: FastifyInstance) {
             size: body.size ?? "auto",
             ...(body.webSearch ? { webSearch: true } : {}),
             ...(brand ? { brandId: brand.id } : {}),
+            ...(body.voice ? { voice: true } : {}),
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
           },
         },

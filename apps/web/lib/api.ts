@@ -16,6 +16,26 @@ export class ApiRequestError extends Error {
   }
 }
 
+/** Like apiFetch, but returns the raw response body (e.g. synthesized speech). */
+export async function apiFetchBlob(
+  path: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<Blob> {
+  const token = tokenGetter ? await tokenGetter() : null;
+  const headers: Record<string, string> = {
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let body = init.body;
+  if (init.json !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(init.json);
+  }
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers, body });
+  if (!res.ok) throw new ApiRequestError(res.status, `${res.status} ${res.statusText}`);
+  return res.blob();
+}
+
 export async function apiFetch<T>(
   path: string,
   init: RequestInit & { json?: unknown } = {},

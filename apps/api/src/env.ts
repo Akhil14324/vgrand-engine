@@ -28,6 +28,10 @@ const envSchema = z.object({
   CODE_MODEL: opt(z.string().min(1)),
   /** Campaign Builder strategy model - long, structured output needs a capable tier. */
   CAMPAIGN_MODEL: opt(z.string().min(1)),
+  /** Voice mode: speech-to-text, text-to-speech model and voice. */
+  VOICE_STT_MODEL: opt(z.string().min(1)),
+  VOICE_TTS_MODEL: opt(z.string().min(1)),
+  VOICE_TTS_VOICE: opt(z.string().min(1)),
   /** Quality for auto-generated campaign creatives (they carry on-image text). */
   CAMPAIGN_IMAGE_QUALITY: opt(z.enum(["low", "medium", "high"])),
   /** RAG: embeddings for PDF chunks + query vectors (same OpenAI key). */
@@ -77,6 +81,9 @@ export const env = {
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
   CODE_MODEL: parsed.CODE_MODEL ?? "gpt-4o",
   CAMPAIGN_MODEL: parsed.CAMPAIGN_MODEL ?? parsed.CODE_MODEL ?? "gpt-4o",
+  VOICE_STT_MODEL: parsed.VOICE_STT_MODEL ?? "gpt-4o-mini-transcribe",
+  VOICE_TTS_MODEL: parsed.VOICE_TTS_MODEL ?? "gpt-4o-mini-tts",
+  VOICE_TTS_VOICE: parsed.VOICE_TTS_VOICE ?? "alloy",
   CAMPAIGN_IMAGE_QUALITY: parsed.CAMPAIGN_IMAGE_QUALITY ?? "medium",
   EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",

@@ -168,10 +168,21 @@ const WORKSPACE_SYSTEM = `You are CatGPT working inside a Workspace — a curate
 
 Be direct and practical: no hedging, no disclaimers, no sugar-coating. When the user asks for a strategy, plan, or next move, give ONE concrete recommendation with reasoning — not a menu of open-ended options. Answer in well-formatted Markdown.`;
 
-export type ChatMode = "chat" | "workspace";
+const VOICE_SYSTEM = `You are CatGPT in a live VOICE conversation - your reply is read aloud, so write exactly how a friendly, sharp person would speak.
+- Keep it short: one to three sentences unless the user clearly asks for more detail.
+- Plain spoken language only: no Markdown, bullet points, headings, code, emojis, URLs or symbols. Say numbers and units naturally.
+- Get straight to the point; no preamble like "Sure!" every time, and never read out formatting.
+- The user's words come from speech recognition and may contain mistakes or mixed English and Telugu; silently infer the most likely meaning and answer it. Never ask them to repeat unless the audio is truly unintelligible.
+- If a question really needs a long answer (steps, code, a document), give a short spoken summary and say the full answer is in the chat.`;
+
+export type ChatMode = "chat" | "workspace" | "voice";
 
 const systemFor = (mode: ChatMode) =>
-  mode === "workspace" ? WORKSPACE_SYSTEM : CHAT_SYSTEM;
+  mode === "workspace"
+    ? WORKSPACE_SYSTEM
+    : mode === "voice"
+      ? VOICE_SYSTEM
+      : CHAT_SYSTEM;
 
 export function contextMessage(context: string[]) {
   if (context.length === 0) return [];
