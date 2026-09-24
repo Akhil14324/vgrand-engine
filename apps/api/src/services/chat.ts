@@ -341,6 +341,20 @@ export async function streamChatWithSearch(
       if (a.type === "url_citation" && a.url && !sources.has(a.url)) {
         sources.set(a.url, { url: a.url, title: a.title?.trim() || a.url });
       }
+    } else if (evt.type === "response.completed") {
+      // Citations are not always streamed as separate events - read them off
+      // the finished message too.
+      for (const item of evt.response.output ?? []) {
+        if (item.type !== "message") continue;
+        for (const part of item.content) {
+          if (part.type !== "output_text") continue;
+          for (const a of part.annotations ?? []) {
+            if (a.type === "url_citation" && !sources.has(a.url)) {
+              sources.set(a.url, { url: a.url, title: a.title?.trim() || a.url });
+            }
+          }
+        }
+      }
     } else if (evt.type === "response.failed" || evt.type === "error") {
       throw new Error("web search response failed");
     }

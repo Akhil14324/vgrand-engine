@@ -1,7 +1,7 @@
 import fp from "fastify-plugin";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { jwtVerify } from "jose";
+import { decodeJwt, jwtVerify } from "jose";
 import { prisma } from "@catgpt/db";
 import { env } from "../env.js";
 import { unauthorized } from "../lib/errors.js";
@@ -73,6 +73,32 @@ function syncUser(
   );
 }
 
+/**
+ * Tokens Supabase already vouched for. Asking auth.getUser on every request
+ * costs ~1.5s of network round-trip per API call (measured on prod), so a
+ * verified token is trusted for a few minutes - never past its own expiry.
+ * Trade-off: a token revoked at Supabase stays usable here for up to TTL.
+ */
+const TOKEN_CACHE_TTL_MS = 5 * 60_000;
+const TOKEN_CACHE_MAX = 5000;
+const verifiedTokens = new Map<string, { userId: string; until: number }>();
+
+function rememberToken(token: string, userId: string) {
+  let until = Date.now() + TOKEN_CACHE_TTL_MS;
+  try {
+    const exp = decodeJwt(token).exp;
+    if (exp) until = Math.min(until, exp * 1000);
+  } catch {
+    return; // not a decodable JWT - do not cache
+  }
+  if (verifiedTokens.size >= TOKEN_CACHE_MAX) {
+    const now = Date.now();
+    for (const [t, v] of verifiedTokens) if (v.until <= now) verifiedTokens.delete(t);
+    if (verifiedTokens.size >= TOKEN_CACHE_MAX) verifiedTokens.clear();
+  }
+  verifiedTokens.set(token, { userId, until });
+}
+
 let jwtSecret: Uint8Array | null = null;
 /**
  * In-process verification of a Supabase access token (HS256, signed with the
@@ -98,6 +124,11 @@ export const authPlugin = fp(async (app) => {
     const supabase = getSupabase();
 
     if (supabase && token) {
+      const hit = verifiedTokens.get(token);
+      if (hit && hit.until > Date.now()) {
+        req.userId = hit.userId;
+        return;
+      }
       // Fast path: local HS256 verification. If the secret is wrong/unset or the
       // project uses asymmetric signing keys this fails — fall back to asking
       // Supabase, which handles every signing setup.
@@ -114,6 +145,7 @@ export const authPlugin = fp(async (app) => {
             (meta?.name ?? meta?.full_name) as string | undefined,
             meta?.avatar_url as string | undefined,
           );
+          rememberToken(token, claims.sub);
           return;
         }
       }
@@ -129,6 +161,7 @@ export const authPlugin = fp(async (app) => {
             (data.user.user_metadata?.full_name as string | undefined),
           data.user.user_metadata?.avatar_url as string | undefined,
         );
+        rememberToken(token, data.user.id);
         return;
       }
       console.error(
