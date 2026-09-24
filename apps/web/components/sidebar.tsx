@@ -227,8 +227,8 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <NavRow icon={SquarePen} label="New chat" onClick={newChat} />
         <NavRow
           icon={LayoutGrid}
-          label="Library"
-          href="/boards"
+          label="Workspace"
+          href="/workspaces"
           onNavigate={onNavigate}
         />
         <button

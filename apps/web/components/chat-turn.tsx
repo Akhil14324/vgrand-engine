@@ -17,13 +17,14 @@ import { ActionRow } from "./generation-actions";
  */
 export function ChatTurn({ generation }: { generation: GenerationDto }) {
   const { select, selectedId } = useStudio();
-  const [lightbox, setLightbox] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const inFlight =
     generation.status === "pending" || generation.status === "processing";
   useGenerationStream(generation.id, inFlight);
 
   const image = generation.imageUrls[0];
   const meta = (generation.metadata ?? {}) as Record<string, unknown>;
+  const refImages = (meta.referenceImageUrls as string[] | undefined) ?? [];
   const active = selectedId === generation.id;
 
   return (
@@ -31,6 +32,24 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
       {/* User turn */}
       <div className="flex justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 sm:max-w-[70%]">
+          {refImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {refImages.map((url, i) => (
+                <button
+                  key={url}
+                  onClick={() => setLightboxUrl(url)}
+                  aria-label={`Preview reference ${i + 1}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={`reference ${i + 1}`}
+                    className="h-10 w-10 rounded-md object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
             {generation.prompt}
           </p>
@@ -47,12 +66,21 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
             )}
             {(
               meta.attachedDocuments as
-                | { id: string; filename: string }[]
+                | { id: string; filename: string; storageUrl?: string | null }[]
                 | undefined
             )?.map((d) => (
-              <Badge key={d.id} variant="outline" className="gap-1 text-[10px]">
-                <FileText className="h-2.5 w-2.5" />
-                {d.filename}
+              <Badge key={d.id} variant="outline" className="text-[10px]">
+                <button
+                  onClick={() =>
+                    d.storageUrl &&
+                    window.open(d.storageUrl, "_blank", "noopener")
+                  }
+                  className="flex items-center gap-1"
+                  aria-label={`Open ${d.filename}`}
+                >
+                  <FileText className="h-2.5 w-2.5" />
+                  {d.filename}
+                </button>
               </Badge>
             ))}
           </div>
@@ -86,7 +114,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
           <button
             onClick={() => {
               select(generation.id);
-              setLightbox(true);
+              setLightboxUrl(image);
             }}
             className={cn(
               "block max-w-md overflow-hidden rounded-xl border transition-shadow hover:shadow-lg",
@@ -120,11 +148,11 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
         </div>
       </div>
 
-      {/* Full-size preview */}
-      {lightbox && image && (
+      {/* Full-size preview — generated image or an attached reference */}
+      {lightboxUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-fade-in"
-          onClick={() => setLightbox(false)}
+          onClick={() => setLightboxUrl(null)}
         >
           <button
             className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 hover:text-white"
@@ -134,7 +162,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={image}
+            src={lightboxUrl}
             alt={generation.prompt}
             className="max-h-[90dvh] max-w-[92vw] rounded-lg object-contain"
             onClick={(e) => e.stopPropagation()}

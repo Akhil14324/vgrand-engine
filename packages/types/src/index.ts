@@ -78,20 +78,18 @@ export interface GenerationDto {
   createdAt: string;
 }
 
-export interface BoardItemDto {
-  id: string;
-  boardId: string;
-  generationId: string;
-  generation?: GenerationDto;
-  addedAt: string;
-}
-
-export interface BoardDto {
+/** A named collection of documents + chats — durable cross-chat RAG context. */
+export interface WorkspaceDto {
   id: string;
   userId: string;
   name: string;
-  items: BoardItemDto[];
+  documentCount: number;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDetailDto extends WorkspaceDto {
+  documents: DocumentDto[];
 }
 
 /** A chat — a group of generations, like a Claude/ChatGPT conversation. */
@@ -101,6 +99,8 @@ export interface ConversationDto {
   title: string;
   pinned: boolean;
   archived: boolean;
+  workspaceId: string | null;
+  workspace?: { id: string; name: string } | null;
   generationCount: number;
   /** Latest generation in the chat — thumbnail + context for the sidebar. */
   preview: {
@@ -126,12 +126,14 @@ export interface MemoryDto {
   createdAt: string;
 }
 
-/** An uploaded PDF attached to a chat, chunked + embedded for RAG. */
+/** An uploaded document attached to a chat, chunked + embedded for RAG. */
 export interface DocumentDto {
   id: string;
   userId: string;
   conversationId: string | null;
   filename: string;
+  /** Stored file location — lets the client open the original. */
+  storageUrl: string | null;
   pageCount: number;
   chunkCount: number;
   status: DocumentStatus;
@@ -161,6 +163,8 @@ export const createGenerationSchema = z.object({
   prompt: z.string().min(1).max(4000),
   /** Existing chat to append to. Omit to start a new conversation. */
   conversationId: z.string().uuid().optional(),
+  /** Workspace a brand-new conversation should live inside. */
+  workspaceId: z.string().uuid().optional(),
   provider: z.enum(PROVIDERS).optional(),
   quality: z.enum(QUALITIES).optional(),
   size: z.enum(IMAGE_SIZES).optional(),

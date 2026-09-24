@@ -103,6 +103,15 @@ You can:
 
 User messages often have typos, missing words, or mixed English/Telugu. Never comment on spelling or ask the user to rephrase — silently correct mistakes and answer the most likely meaning. If the interpretation isn't obvious, state your best guess briefly and answer it fully anyway — never end your reply with a clarifying question.`;
 
+const WORKSPACE_SYSTEM = `You are CatGPT working inside a Workspace — a curated set of documents the user assembled for analysis. The retrieved "Document context" below is your PRIMARY source: ground every answer in it first, quote filenames when relevant, and say plainly when the workspace doesn't cover something.
+
+Be direct and practical: no hedging, no disclaimers, no sugar-coating. When the user asks for a strategy, plan, or next move, give ONE concrete recommendation with reasoning — not a menu of open-ended options. Answer in well-formatted Markdown.`;
+
+export type ChatMode = "chat" | "workspace";
+
+const systemFor = (mode: ChatMode) =>
+  mode === "workspace" ? WORKSPACE_SYSTEM : CHAT_SYSTEM;
+
 function contextMessage(context: string[]) {
   if (context.length === 0) return [];
   return [
@@ -129,11 +138,12 @@ export async function answerChat(
   history: HistoryTurn[],
   context: string[] = [],
   memories: string[] = [],
+  mode: ChatMode = "chat",
 ): Promise<string> {
   const res = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
     messages: [
-      { role: "system", content: CHAT_SYSTEM },
+      { role: "system", content: systemFor(mode) },
       ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),
@@ -154,13 +164,14 @@ export async function streamChat(
   history: HistoryTurn[],
   context: string[] = [],
   memories: string[] = [],
+  mode: ChatMode = "chat",
   onDelta: (delta: string) => void = () => {},
 ): Promise<string> {
   const stream = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
     stream: true,
     messages: [
-      { role: "system", content: CHAT_SYSTEM },
+      { role: "system", content: systemFor(mode) },
       ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),

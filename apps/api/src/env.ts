@@ -43,6 +43,8 @@ const envSchema = z.object({
   SUPABASE_URL: opt(z.string().url()),
   SUPABASE_ANON_KEY: opt(z.string().min(1)),
   SUPABASE_SERVICE_ROLE_KEY: opt(z.string().min(1)),
+  /** Project JWT secret — enables in-process token verification (no getUser call). */
+  SUPABASE_JWT_SECRET: opt(z.string().min(1)),
   STORAGE_BUCKET: opt(z.string().min(1)),
 
   DEV_AUTH_BYPASS: bool,
@@ -63,7 +65,9 @@ export const env = {
   // Defaults on in dev only — production must opt in explicitly.
   DEV_AUTH_BYPASS:
     parsed.DEV_AUTH_BYPASS ?? parsed.NODE_ENV !== "production",
-  WORKER_INLINE: parsed.WORKER_INLINE ?? true,
+  // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults
+  // to a separate worker process (pnpm --filter @catgpt/api worker).
+  WORKER_INLINE: parsed.WORKER_INLINE ?? !Boolean(parsed.REDIS_URL),
   /** True only when REDIS_URL was explicitly provided — otherwise jobs run inline. */
   get redisConfigured(): boolean {
     return Boolean(parsed.REDIS_URL);
@@ -73,3 +77,13 @@ export const env = {
     return Boolean(this.SUPABASE_URL && this.SUPABASE_SERVICE_ROLE_KEY);
   },
 };
+
+// Boot-time guard: in production the bypass maps every request to one shared
+// dev identity — a data-isolation breach, not a convenience. Refuse to start
+// if it resolves to true, whether set explicitly or by default.
+if (parsed.NODE_ENV === "production" && env.DEV_AUTH_BYPASS) {
+  throw new Error(
+    "DEV_AUTH_BYPASS resolves to true with NODE_ENV=production. " +
+      "Set DEV_AUTH_BYPASS=false and configure Supabase auth before deploying.",
+  );
+}

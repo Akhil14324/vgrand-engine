@@ -10,7 +10,12 @@ import {
   type Quality,
   type ImageSize,
 } from "@catgpt/types";
-import { GENERATION_QUEUE, createRedisConnection } from "./queue.js";
+import {
+  GENERATION_QUEUE,
+  createRedisConnection,
+  type GenerationJob,
+  type IngestJob,
+} from "./queue.js";
 import { publishGenerationEvent } from "./events.js";
 import { storeImage } from "./storage.js";
 import {
@@ -20,7 +25,7 @@ import {
   stripRunPrefix,
   wantsCodeExecution,
 } from "./chat.js";
-import { retrieveContext } from "./documents.js";
+import { retrieveContext, runDocumentIngestion } from "./documents.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { env } from "../env.js";
 
@@ -43,7 +48,13 @@ export function startGenerationWorker(): Worker | null {
   }
   const worker = new Worker(
     GENERATION_QUEUE,
-    (job: Job<{ generationId: string }>) => runGeneration(job.data.generationId),
+    (job: Job<GenerationJob | IngestJob>) =>
+      job.name === "ingest-document"
+        ? runDocumentIngestion(
+            (job.data as IngestJob).documentId,
+            (job.data as IngestJob).mimeType,
+          )
+        : runGeneration((job.data as GenerationJob).generationId),
     { connection: createRedisConnection(), concurrency: 3 },
   );
   worker.on("error", (err) => console.error("[worker] error:", err));
@@ -111,16 +122,28 @@ export async function runGeneration(generationId: string): Promise<void> {
     // textResponse out, over the same queue + SSE plumbing. Tokens stream
     // through delta events so the client renders as the model writes.
     if (generation.kind === "text") {
-      const history = generation.conversationId
-        ? await loadChatHistory(generation.conversationId, generation.id)
-        : [];
+      // One lookup serves both the RAG scope and the chat mode below —
+      // a workspace conversation pulls every workspace doc and switches
+      // to the grounded "analyze the workspace" system prompt.
+      const [history, conversation] = await Promise.all([
+        generation.conversationId
+          ? loadChatHistory(generation.conversationId, generation.id)
+          : Promise.resolve([]),
+        generation.conversationId
+          ? prisma.conversation.findUnique({
+              where: { id: generation.conversationId },
+              select: { workspaceId: true },
+            })
+          : Promise.resolve(null),
+      ]);
+      const workspaceId = conversation?.workspaceId ?? null;
       // RAG + learned memory run in parallel — both are best-effort context.
       const [context, memories] = await Promise.all([
         generation.conversationId
-          ? retrieveContext(
-              generation.prompt,
-              generation.conversationId,
-            ).catch(() => [])
+          ? retrieveContext(generation.prompt, {
+              conversationId: generation.conversationId,
+              workspaceId,
+            }).catch(() => [])
           : Promise.resolve([]),
         loadLearnedMemories(generation.userId).catch(() => []),
       ]);
@@ -138,6 +161,7 @@ export async function runGeneration(generationId: string): Promise<void> {
             history,
             context,
             memories,
+            workspaceId ? "workspace" : "chat",
             (delta) =>
               publishGenerationEvent({
                 generationId,

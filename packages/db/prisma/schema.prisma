@@ -15,10 +15,25 @@ model User {
   avatarUrl     String?
   createdAt     DateTime       @default(now())
   generations   Generation[]
-  boards        Board[]
   memories      Memory[]
   conversations Conversation[]
   documents     Document[]
+  workspaces    Workspace[]
+}
+
+// A named collection of documents + chats — "analyze everything here" context
+// that persists across conversations (replaces the old Library/boards).
+model Workspace {
+  id            String         @id @default(uuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  documents     Document[]
+  conversations Conversation[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([userId, updatedAt(sort: Desc)])
 }
 
 // A "chat" — groups generations into a conversation you can revisit and
@@ -32,10 +47,13 @@ model Conversation {
   archived    Boolean      @default(false)
   generations Generation[]
   documents   Document[]
+  workspaceId String?
+  workspace   Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
   @@index([userId, updatedAt(sort: Desc)])
+  @@index([workspaceId])
 }
 
 model Theme {
@@ -72,7 +90,6 @@ model Generation {
   children       Generation[] @relation("GenerationChain")
   conversationId String? // chat this generation belongs to
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  boardItems     BoardItem[]
   shareLinks     ShareLink[]
   memories       Memory[]
   createdAt      DateTime    @default(now())
@@ -80,27 +97,6 @@ model Generation {
   @@index([userId, createdAt(sort: Desc)])
   @@index([themeId])
   @@index([conversationId, createdAt(sort: Desc)])
-}
-
-model Board {
-  id        String      @id @default(uuid())
-  userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  items     BoardItem[]
-  createdAt DateTime    @default(now())
-}
-
-model BoardItem {
-  id           String     @id @default(uuid())
-  boardId      String
-  board        Board      @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  generationId String
-  generation   Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
-  addedAt      DateTime   @default(now())
-
-  @@unique([boardId, generationId])
-  @@index([boardId])
 }
 
 model Memory {
@@ -127,6 +123,8 @@ model Document {
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversationId String? // linked when a generation references it
   conversation   Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  workspaceId    String? // durable home in a Workspace — survives chats
+  workspace      Workspace?      @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   filename       String
   storageUrl     String?
   pageCount      Int             @default(0)
@@ -138,6 +136,7 @@ model Document {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([conversationId])
+  @@index([workspaceId])
 }
 
 // One text chunk of a Document, embedded for cosine-similarity search.

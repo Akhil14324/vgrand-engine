@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  AlertCircle,
   ArrowUp,
   Building2,
   FileText,
@@ -55,6 +56,12 @@ const THEME_ICONS: Record<string, LucideIcon> = {
 
 const MAX_REFS = 10;
 
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+/** Files routed to /documents for RAG — PDFs and Word docs. */
+const isDocFile = (type: string) =>
+  type === "application/pdf" || type === DOCX_MIME;
+
 const QUALITY_LABEL: Record<Quality, string> = {
   low: "Draft · low",
   medium: "Medium",
@@ -71,6 +78,9 @@ export function Composer() {
     select,
     activeConversationId,
     openConversation,
+    setPendingTurn,
+    clearPendingTurn,
+    workspaceContextId,
   } = useStudio();
   const { data: themes } = useThemes();
   const create = useCreateGeneration();
@@ -84,6 +94,7 @@ export function Composer() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [listening, setListening] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<{ stop: () => void } | null>(null);
@@ -181,13 +192,21 @@ export function Composer() {
       const fmtMb = (b: number) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
 
       // Pre-validate so failures explain *why* instantly, before any upload.
+      const legacy = Array.from(files).filter(
+        (f) => f.type === "application/msword",
+      );
+      if (legacy.length) {
+        setUploadError(
+          "Legacy .doc isn't supported — please save as .docx and re-upload.",
+        );
+        return;
+      }
       const rejected = Array.from(files).filter(
-        (f) =>
-          !(f.type.startsWith("image/") || f.type === "application/pdf"),
+        (f) => !(f.type.startsWith("image/") || isDocFile(f.type)),
       );
       if (rejected.length) {
         setUploadError(
-          `"${rejected[0]!.name}" isn't supported — attach images or PDFs only.`,
+          `"${rejected[0]!.name}" isn't supported — attach images, PDFs, or Word docs only.`,
         );
         return;
       }
@@ -204,12 +223,12 @@ export function Composer() {
         .filter((f) => f.type.startsWith("image/"))
         .slice(0, Math.max(MAX_REFS - refImages.length, 0));
       const pdfs = list
-        .filter((f) => f.type === "application/pdf")
+        .filter((f) => isDocFile(f.type))
         .slice(0, Math.max(4 - docs.length, 0));
       const batch = [...images, ...pdfs];
       if (list.length > batch.length) {
         setUploadError(
-          `Some files were skipped — you can attach up to ${MAX_REFS} images and 4 PDFs per message.`,
+          `Some files were skipped — you can attach up to ${MAX_REFS} images and 4 documents per message.`,
         );
       }
       if (batch.length === 0) return;
@@ -219,7 +238,7 @@ export function Composer() {
           try {
             const form = new FormData();
             form.append("file", file);
-            if (file.type === "application/pdf") {
+            if (isDocFile(file.type)) {
               const doc = await apiFetch<DocumentDto>("/documents", {
                 method: "POST",
                 body: form,
@@ -252,11 +271,44 @@ export function Composer() {
     [refImages.length, docs.length],
   );
 
+  // Attached docs ingest async now — POST /documents returns "processing",
+  // so poll until each attached doc flips to ready/failed.
+  useEffect(() => {
+    if (!docs.some((d) => d.status === "processing")) return;
+    const t = setInterval(async () => {
+      try {
+        const { items } = await apiFetch<{ items: DocumentDto[] }>(
+          "/documents",
+        );
+        setDocs((prev) =>
+          prev.map((d) => items.find((x) => x.id === d.id) ?? d),
+        );
+      } catch {
+        // transient — next tick retries
+      }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [docs]);
+
   const submit = useCallback(() => {
     // A PDF on its own is a valid send — default to a summary request.
     const prompt =
       value.trim() || (docs.length ? "Summarize the attached document." : "");
     if (!prompt || prompt === "/" || create.isPending) return;
+
+    // Optimistic: the bubble appears the instant Send is hit — no waiting on
+    // the POST → GET round-trip to see your own message.
+    setPendingTurn({
+      tempId: crypto.randomUUID(),
+      prompt,
+      refImages: [...refImages],
+      docs: [...docs],
+      conversationId: activeConversationId,
+    });
+    setValue("");
+    setRefImages([]);
+    setDocs([]);
+
     create.mutate(
       {
         prompt,
@@ -265,18 +317,22 @@ export function Composer() {
         referenceImageUrls: refImages.length ? refImages : undefined,
         documentIds: docs.length ? docs.map((d) => d.id) : undefined,
         conversationId: activeConversationId ?? undefined,
+        // Only relevant on the first send — it gives the new conversation a
+        // durable workspace home (server ignores it on existing chats).
+        workspaceId: activeConversationId
+          ? undefined
+          : (workspaceContextId ?? undefined),
       },
       {
         onSuccess: (res) => {
-          setValue("");
-          setRefImages([]);
-          setDocs([]);
+          clearPendingTurn();
           openConversation(res.conversationId);
           select(res.generationId);
         },
+        onError: () => clearPendingTurn(),
       },
     );
-  }, [value, create, armedTheme, quality, refImages, docs, activeConversationId, openConversation, select]);
+  }, [value, create, armedTheme, quality, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -300,7 +356,12 @@ export function Composer() {
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.nativeEvent.isComposing &&
+      e.keyCode !== 229
+    ) {
       e.preventDefault();
       submit();
     }
@@ -341,7 +402,7 @@ export function Composer() {
       <input
         ref={fileRef}
         type="file"
-        accept="image/*,application/pdf"
+        accept={`image/*,application/pdf,${DOCX_MIME},application/msword,.doc,.docx`}
         multiple
         hidden
         onChange={(e) => {
@@ -389,8 +450,18 @@ export function Composer() {
                   </Badge>
                 )}
                 {refImages.map((url, i) => (
-                  <Badge key={url} variant="secondary" className="gap-1.5 pr-1">
-                    <ImageIcon className="h-3 w-3" /> reference {i + 1}
+                  <Badge key={url} variant="secondary" className="gap-1.5 py-0.5 pl-0.5 pr-1">
+                    <button
+                      onClick={() => setPreviewImage(url)}
+                      aria-label={`Preview reference ${i + 1}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt={`reference ${i + 1}`}
+                        className="h-7 w-7 rounded object-cover"
+                      />
+                    </button>
                     <button
                       onClick={() =>
                         setRefImages((prev) => prev.filter((u) => u !== url))
@@ -404,8 +475,32 @@ export function Composer() {
                 ))}
                 {docs.map((d) => (
                   <Badge key={d.id} variant="secondary" className="gap-1.5 pr-1">
-                    <FileText className="h-3 w-3" />
-                    <span className="max-w-40 truncate">{d.filename}</span>
+                    <button
+                      onClick={() =>
+                        d.storageUrl &&
+                        window.open(d.storageUrl, "_blank", "noopener")
+                      }
+                      className="flex items-center gap-1.5"
+                      aria-label={`Open ${d.filename}`}
+                      title={
+                        d.status === "failed"
+                          ? (d.error ?? `Couldn't read ${d.filename}`)
+                          : d.status === "processing"
+                            ? `Reading ${d.filename}…`
+                            : d.storageUrl
+                              ? `Open ${d.filename}`
+                              : d.filename
+                      }
+                    >
+                      {d.status === "processing" ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : d.status === "failed" ? (
+                        <AlertCircle className="h-3 w-3 text-destructive" />
+                      ) : (
+                        <FileText className="h-3 w-3" />
+                      )}
+                      <span className="max-w-40 truncate">{d.filename}</span>
+                    </button>
                     <button
                       onClick={() =>
                         setDocs((prev) => prev.filter((x) => x.id !== d.id))
@@ -557,7 +652,7 @@ export function Composer() {
         </Badge>
         <span className="hidden sm:inline">
           <kbd className="rounded border px-1 font-mono">/</kbd> themes · drop
-          an image to edit or a PDF to ask about ·{" "}
+          an image to edit or a PDF/Word doc to ask about ·{" "}
           <kbd className="rounded border px-1 font-mono">Enter</kbd> to send
         </span>
       </div>
@@ -565,6 +660,27 @@ export function Composer() {
         <p className="mt-1 text-center text-xs text-destructive">
           {uploadError ?? create.error?.message}
         </p>
+      )}
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-fade-in"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 hover:text-white"
+            aria-label="Close preview"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewImage}
+            alt="Reference preview"
+            className="max-h-[90dvh] max-w-[92vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       )}
     </div>
   );

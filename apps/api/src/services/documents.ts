@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import mammoth from "mammoth";
 import OpenAI from "openai";
 import { PDFParse } from "pdf-parse";
 import { Prisma, prisma } from "@catgpt/db";
@@ -71,30 +72,50 @@ export function chunkText(raw: string): string[] {
   return chunks;
 }
 
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
 /**
  * Extract text, chunk, embed, and persist chunks for a Document row.
- * Runs inline at upload time — batched embeddings keep typical PDFs under ~2s.
+ * Runs inline at upload time — batched embeddings keep typical files under ~2s.
+ * .docx goes through mammoth (no fixed page count — the returned pageCount is
+ * a rough ~500-words-per-page estimate for display only).
  */
 export async function ingestDocument(
   documentId: string,
   buffer: Buffer,
+  mimeType = "application/pdf",
 ): Promise<{ pageCount: number; chunkCount: number }> {
-  const parser = new PDFParse({ data: buffer });
-  let parsed: Awaited<ReturnType<typeof parser.getText>>;
-  try {
-    parsed = await parser.getText();
-  } finally {
-    await parser.destroy();
+  let text: string;
+  let pageCount: number;
+  if (mimeType === DOCX_MIME) {
+    const { value } = await mammoth.extractRawText({ buffer });
+    text = value;
+    // Estimate only — .docx has no fixed pagination.
+    pageCount = Math.max(1, Math.ceil(text.trim().split(/\s+/).length / 500));
+  } else {
+    const parser = new PDFParse({ data: buffer });
+    let parsed: Awaited<ReturnType<typeof parser.getText>>;
+    try {
+      parsed = await parser.getText();
+    } finally {
+      await parser.destroy();
+    }
+    if (parsed.total > env.MAX_PDF_PAGES) {
+      throw new Error(
+        `it has ${parsed.total} pages — the limit is ${env.MAX_PDF_PAGES} pages`,
+      );
+    }
+    text = parsed.text ?? "";
+    pageCount = parsed.total;
   }
-  if (parsed.total > env.MAX_PDF_PAGES) {
-    throw new Error(
-      `it has ${parsed.total} pages — the limit is ${env.MAX_PDF_PAGES} pages`,
-    );
-  }
-  const chunks = chunkText(parsed.text ?? "");
+
+  const chunks = chunkText(text);
   if (chunks.length === 0) {
     throw new Error(
-      "no text could be extracted — it looks like a scanned/image-only PDF",
+      mimeType === DOCX_MIME
+        ? "no text could be extracted — the document looks empty"
+        : "no text could be extracted — it looks like a scanned/image-only PDF",
     );
   }
 
@@ -123,20 +144,31 @@ export async function ingestDocument(
       .catch(() => {});
     throw err;
   }
-  return { pageCount: parsed.total, chunkCount: chunks.length };
+  return { pageCount, chunkCount: chunks.length };
 }
 
 /**
- * Top-K chunks across all ready documents linked to a conversation.
+ * Top-K chunks across all ready documents in scope: ones linked to this
+ * conversation OR everything in the conversation's workspace. The workspace
+ * branch is what makes "analyze all the Workspace data" automatic on every
+ * turn — no re-attaching needed.
  * Returns labeled passages for the chat system prompt, or [] when there's
  * nothing to retrieve (no docs, no key, or retrieval fails).
  */
 export async function retrieveContext(
   prompt: string,
-  conversationId: string,
+  scope: { conversationId: string | null; workspaceId: string | null },
 ): Promise<string[]> {
   const docs = await prisma.document.findMany({
-    where: { conversationId, status: "ready" },
+    where: {
+      status: "ready",
+      OR: [
+        ...(scope.conversationId
+          ? [{ conversationId: scope.conversationId }]
+          : []),
+        ...(scope.workspaceId ? [{ workspaceId: scope.workspaceId }] : []),
+      ],
+    },
     select: { id: true },
   });
   if (docs.length === 0) return [];
@@ -156,4 +188,45 @@ export async function retrieveContext(
     ORDER BY c."embedding" <=> ${literal}::vector
     LIMIT ${env.RAG_TOP_K}`;
   return rows.map((r) => `[${r.filename}] ${r.content}`);
+}
+
+/**
+ * Queued ingestion handler — the HTTP route stores the file and enqueues the
+ * job; this runs on the worker. Mirrors runGeneration()'s status lifecycle:
+ * processing -> ready | failed, persisted on the Document row.
+ */
+export async function runDocumentIngestion(
+  documentId: string,
+  mimeType: string,
+): Promise<void> {
+  const doc = await prisma.document.findUnique({ where: { id: documentId } });
+  if (!doc || doc.status !== "processing") return;
+  try {
+    // The upload was already persisted — fetch it back so the job payload
+    // stays small and storage works the same for Supabase and local files.
+    if (!doc.storageUrl) {
+      throw new Error("document has no stored file to ingest");
+    }
+    const res = await fetch(doc.storageUrl);
+    if (!res.ok) {
+      throw new Error(`couldn't fetch the stored file (${res.status})`);
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const { pageCount, chunkCount } = await ingestDocument(
+      documentId,
+      buffer,
+      mimeType,
+    );
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { status: "ready", pageCount, chunkCount },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "ingest failed";
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { status: "failed", error: message },
+    });
+    throw err;
+  }
 }

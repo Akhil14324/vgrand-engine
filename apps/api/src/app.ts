@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
 import { env } from "./env.js";
@@ -13,7 +14,7 @@ import { authPlugin } from "./plugins/auth.js";
 import { themeRoutes } from "./routes/themes.js";
 import { generationRoutes } from "./routes/generations.js";
 import { conversationRoutes } from "./routes/conversations.js";
-import { boardRoutes } from "./routes/boards.js";
+import { workspaceRoutes } from "./routes/workspaces.js";
 import { shareRoutes } from "./routes/share.js";
 import { memoryRoutes } from "./routes/memories.js";
 import { uploadRoutes } from "./routes/uploads.js";
@@ -54,6 +55,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     decorateReply: false,
   });
   await app.register(authPlugin);
+  // One heavy client (or a retry storm) shouldn't degrade everyone. userId
+  // isn't set until route preHandlers run, so unauth/early requests key on IP.
+  await app.register(rateLimit, {
+    max: 120,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => req.userId || req.ip,
+  });
 
   app.setErrorHandler((err: unknown, req, reply) => {
     if (err instanceof HttpError) {
@@ -86,7 +94,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(themeRoutes);
   await app.register(generationRoutes);
   await app.register(conversationRoutes);
-  await app.register(boardRoutes);
+  await app.register(workspaceRoutes);
   await app.register(shareRoutes);
   await app.register(memoryRoutes);
   await app.register(uploadRoutes);

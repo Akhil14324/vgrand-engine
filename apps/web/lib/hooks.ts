@@ -6,7 +6,6 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
-  BoardDto,
   ConversationDto,
   CreateGenerationRequest,
   DocumentDto,
@@ -18,6 +17,8 @@ import type {
   ShareLinkDto,
   ThemeDto,
   UpdateConversationRequest,
+  WorkspaceDetailDto,
+  WorkspaceDto,
 } from "@catgpt/types";
 import { apiFetch } from "./api";
 
@@ -155,7 +156,30 @@ export function useConversation(id: string | null) {
   });
 }
 
-/** Rename, pin, or archive a chat — one PATCH for all fields. */
+/** Mirrors the server ordering: pinned first, then most recently active. */
+const sortConversations = (items: ConversationDto[]) =>
+  [...items].sort(
+    (a, b) =>
+      Number(b.pinned) - Number(a.pinned) ||
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+
+type ConvoSnapshot = [readonly unknown[], Paginated<ConversationDto> | undefined][];
+
+/** Snapshot + rollback helpers shared by the two optimistic mutations. */
+const convoCaches = (qc: ReturnType<typeof useQueryClient>) =>
+  qc.getQueriesData<Paginated<ConversationDto>>({
+    queryKey: ["conversations"],
+  }) as ConvoSnapshot;
+
+const rollback = (
+  qc: ReturnType<typeof useQueryClient>,
+  snap?: ConvoSnapshot,
+) => {
+  for (const [key, data] of snap ?? []) qc.setQueryData(key, data);
+};
+
+/** Rename, pin, or archive a chat — one PATCH, applied optimistically. */
 export function useUpdateConversation() {
   const qc = useQueryClient();
   return useMutation({
@@ -164,6 +188,29 @@ export function useUpdateConversation() {
         method: "PATCH",
         json: body,
       }),
+    onMutate: async ({ id, ...body }) => {
+      await qc.cancelQueries({ queryKey: ["conversations"] });
+      const prev = convoCaches(qc);
+      // Find the conversation in whichever cached list holds it.
+      let convo: ConversationDto | undefined;
+      for (const [, data] of prev) {
+        convo = convo ?? data?.items.find((c) => c.id === id);
+      }
+      if (!convo) return { prev };
+      const patched = { ...convo, ...body };
+      const targetArchived = body.archived ?? convo.archived;
+      for (const [key, data] of prev) {
+        if (!data) continue;
+        const isArchivedList = key[1] === "archived";
+        // An archived-toggle moves the chat between the two lists.
+        const belongs = targetArchived === isArchivedList;
+        const items = data.items.filter((c) => c.id !== id);
+        if (belongs) items.push(patched);
+        qc.setQueryData(key, { ...data, items: sortConversations(items) });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => rollback(qc, ctx?.prev),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
   });
 }
@@ -173,6 +220,19 @@ export function useDeleteConversation() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<void>(`/conversations/${id}`, { method: "DELETE" }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["conversations"] });
+      const prev = convoCaches(qc);
+      for (const [key, data] of prev) {
+        if (!data) continue;
+        qc.setQueryData(key, {
+          ...data,
+          items: data.items.filter((c) => c.id !== id),
+        });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => rollback(qc, ctx?.prev),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["generations"] });
@@ -189,16 +249,16 @@ export function useShareGeneration() {
 
 /* -------------------------------- documents ------------------------------- */
 
-/** PDFs attached to a conversation — powers the doc chips on reopened chats. */
+/** Documents attached to a conversation — powers the doc chips on reopened chats. */
 export function useDocuments(conversationId: string | null) {
   return useQuery({
     queryKey: ["documents", conversationId],
     enabled: !!conversationId,
     queryFn: () =>
-      apiFetch<DocumentDto[]>(
+      apiFetch<{ items: DocumentDto[] }>(
         `/documents?conversationId=${conversationId}`,
       ),
-    select: (docs) => docs.filter((d) => d.status !== "failed"),
+    select: (d) => d.items.filter((doc) => doc.status !== "failed"),
   });
 }
 
@@ -210,51 +270,84 @@ export function useExportPdf() {
   });
 }
 
-/* --------------------------------- boards --------------------------------- */
+/* -------------------------------- workspaces ------------------------------ */
 
-export function useBoards() {
+export function useWorkspaces() {
   return useQuery({
-    queryKey: ["boards"],
-    queryFn: () => apiFetch<{ items: BoardDto[] }>("/boards"),
+    queryKey: ["workspaces"],
+    queryFn: () => apiFetch<{ items: WorkspaceDto[] }>("/workspaces"),
     select: (d) => d.items,
   });
 }
 
-export function useCreateBoard() {
+/** One workspace + its documents for the detail column. */
+export function useWorkspace(id: string | null) {
+  return useQuery({
+    queryKey: ["workspace", id],
+    enabled: !!id,
+    queryFn: () => apiFetch<WorkspaceDetailDto>(`/workspaces/${id}`),
+  });
+}
+
+/** Documents living in a workspace (same shape as the conversation variant). */
+export function useWorkspaceDocuments(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ["documents", "ws", workspaceId],
+    enabled: !!workspaceId,
+    queryFn: () =>
+      apiFetch<{ items: DocumentDto[] }>(
+        `/documents?workspaceId=${workspaceId}`,
+      ),
+    select: (d) => d.items,
+  });
+}
+
+export function useCreateWorkspace() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) =>
-      apiFetch<BoardDto>("/boards", { method: "POST", json: { name } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["boards"] }),
-  });
-}
-
-export function useSaveToBoard() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      boardId,
-      generationId,
-    }: {
-      boardId: string;
-      generationId: string;
-    }) =>
-      apiFetch(`/boards/${boardId}/items`, {
+      apiFetch<WorkspaceDto>("/workspaces", {
         method: "POST",
-        json: { generationId },
+        json: { name },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["boards"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workspaces"] }),
   });
 }
 
-export function useRemoveBoardItem() {
+export function useRenameWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ boardId, itemId }: { boardId: string; itemId: string }) =>
-      apiFetch<void>(`/boards/${boardId}/items/${itemId}`, {
-        method: "DELETE",
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiFetch<WorkspaceDto>(`/workspaces/${id}`, {
+        method: "PATCH",
+        json: { name },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["boards"] }),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      qc.invalidateQueries({ queryKey: ["workspace", id] });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/workspaces/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workspaces"] }),
+  });
+}
+
+export function useDeleteDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/documents/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["documents"] });
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      qc.invalidateQueries({ queryKey: ["workspace"] });
+    },
   });
 }
 

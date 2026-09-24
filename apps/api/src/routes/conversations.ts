@@ -11,6 +11,7 @@ const PREVIEW_INCLUDE = {
     orderBy: { createdAt: "desc" as const },
     select: { id: true, prompt: true, imageUrls: true, status: true },
   },
+  workspace: { select: { id: true, name: true } },
 };
 
 async function loadOwned(req: FastifyRequest, id: string) {

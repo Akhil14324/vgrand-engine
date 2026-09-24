@@ -93,6 +93,11 @@ export function StudioShell() {
             </div>
           )}
           <div className="min-w-0 flex-1 truncate text-center text-sm font-medium">
+            {conversation?.workspace ? (
+              <span className="mr-2 inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 align-middle text-[10px] font-normal text-primary">
+                {conversation.workspace.name}
+              </span>
+            ) : null}
             {conversation?.title}
           </div>
           <Button
@@ -101,7 +106,7 @@ export function StudioShell() {
             className="shrink-0 md:hidden"
             asChild
           >
-            <Link href="/boards" aria-label="Library">
+            <Link href="/workspaces" aria-label="Workspaces">
               <LayoutGrid />
             </Link>
           </Button>

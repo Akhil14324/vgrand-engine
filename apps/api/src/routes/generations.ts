@@ -11,6 +11,7 @@ import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
 import { toGenerationDto } from "../lib/serialize.js";
 import { enqueueGeneration } from "../services/queue.js";
 import { subscribeGenerationEvents } from "../services/events.js";
+import { classifyIntent, loadChatHistory } from "../services/chat.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
 import { storeFile } from "../services/storage.js";
 import { env } from "../env.js";
@@ -75,7 +76,10 @@ export async function generationRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
 
   /** Create a generation job. New ideas route to gpt-image-2.5-flare. */
-  app.post("/generations", async (req, reply) => {
+  app.post(
+    "/generations",
+    { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+    async (req, reply) => {
     const body = parseBody(createGenerationSchema, req.body);
 
     let theme = null;
@@ -95,11 +99,48 @@ export async function generationRoutes(app: FastifyInstance) {
       ]),
     ];
 
+    // Chat resolution order: explicit conversationId → inherit the parent's
+    // chat → spin up a new conversation titled from the prompt.
+    let conversationId =
+      body.conversationId ?? parent?.conversationId ?? null;
+    if (body.conversationId) {
+      await loadOwnedConversation(req, body.conversationId);
+    }
+
+    // In a chat that already produced an image, a follow-up like "now add a
+    // hat" is an edit of that image — but only when nothing else claimed the
+    // turn (no fresh upload, no explicit parent, no "create an image" trigger).
+    // The classifier only runs in this narrow branch, not on every message.
+    let effectiveParentId: string | null = body.parentId ?? null;
+    if (
+      conversationId &&
+      !body.parentId &&
+      userRefs.length === 0 &&
+      !IMAGE_TRIGGER.test(body.prompt)
+    ) {
+      const lastImage = await prisma.generation.findFirst({
+        where: { conversationId, kind: "image", status: "completed" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (lastImage && lastImage.imageUrls.length > 0) {
+        const intent = await classifyIntent(
+          body.prompt,
+          await loadChatHistory(conversationId),
+        );
+        if (intent === "image") {
+          effectiveParentId = lastImage.id;
+          // Seed refs from the image being edited — same path as an explicit
+          // user upload, so the edit mode/references plumbing is unchanged.
+          userRefs.push(...lastImage.imageUrls);
+        }
+      }
+    }
+
     // Strict gate: an image only on explicit request — "create an image" in
-    // the prompt, attached references, or a regenerate/edit chain. No
-    // classifier guesswork: everything else is a text reply.
+    // the prompt, attached references, or a regenerate/edit chain (explicit
+    // or inferred just above). Everything else is a text reply.
     const kind =
-      userRefs.length > 0 || body.parentId || IMAGE_TRIGGER.test(body.prompt)
+      userRefs.length > 0 || effectiveParentId || IMAGE_TRIGGER.test(body.prompt)
         ? ("image" as const)
         : ("text" as const);
 
@@ -112,24 +153,26 @@ export async function generationRoutes(app: FastifyInstance) {
           ].slice(0, 10)
         : [];
 
-    // Chat resolution order: explicit conversationId → inherit the parent's
-    // chat → spin up a new conversation titled from the prompt.
-    let conversationId =
-      body.conversationId ?? parent?.conversationId ?? null;
-    if (body.conversationId) {
-      await loadOwnedConversation(req, body.conversationId);
-    }
-
     // Attached PDFs must belong to the caller — they get linked to this chat
     // so every later turn retrieves their chunks automatically.
     const docs = body.documentIds?.length
       ? await prisma.document.findMany({
           where: { id: { in: body.documentIds }, userId: req.userId },
-          select: { id: true, filename: true },
+          select: { id: true, filename: true, storageUrl: true },
         })
       : [];
     if (body.documentIds?.length && docs.length !== body.documentIds.length) {
       throw badRequest("one or more attached documents were not found");
+    }
+
+    // A workspaceId only applies to conversations this request creates —
+    // it gives the new chat a durable workspace home from turn one.
+    if (body.workspaceId) {
+      const ws = await prisma.workspace.findUnique({
+        where: { id: body.workspaceId },
+      });
+      if (!ws) throw notFound("Workspace not found");
+      if (ws.userId !== req.userId) throw forbidden();
     }
 
     const generation = await prisma.$transaction(async (tx) => {
@@ -141,7 +184,11 @@ export async function generationRoutes(app: FastifyInstance) {
         });
       } else {
         const conversation = await tx.conversation.create({
-          data: { userId: req.userId, title: deriveTitle(body.prompt) },
+          data: {
+            userId: req.userId,
+            title: deriveTitle(body.prompt),
+            workspaceId: body.workspaceId ?? null,
+          },
         });
         conversationId = conversation.id;
       }
@@ -162,7 +209,7 @@ export async function generationRoutes(app: FastifyInstance) {
             kind === "image" ? buildFinalPrompt(theme, body.prompt) : body.prompt,
           provider:
             kind === "image" ? resolveProvider(theme, body.provider) : "openai",
-          parentId: body.parentId ?? null,
+          parentId: effectiveParentId,
           metadata: {
             referenceImageUrl: referenceImageUrls[0],
             referenceImageUrls,
@@ -171,6 +218,7 @@ export async function generationRoutes(app: FastifyInstance) {
                   attachedDocuments: docs.map((d) => ({
                     id: d.id,
                     filename: d.filename,
+                    storageUrl: d.storageUrl,
                   })),
                 }
               : {}),
@@ -341,8 +389,7 @@ export async function generationRoutes(app: FastifyInstance) {
     }
 
     const heartbeat = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
-    const unsubscribe = subscribeGenerationEvents((evt) => {
-      if (evt.generationId !== generation.id) return;
+    const unsubscribe = subscribeGenerationEvents(generation.id, (evt) => {
       send(evt);
       if (evt.status === "completed" || evt.status === "failed") cleanup();
     });

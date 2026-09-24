@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { FileText, Loader2 } from "lucide-react";
 import { useConversation, useGenerations } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import { ChatTurn } from "./chat-turn";
 
 /** Chat thread: oldest at top, newest at bottom, auto-scrolls like ChatGPT. */
 export function GenerationFeed() {
-  const { activeConversationId } = useStudio();
+  const { activeConversationId, pendingTurn } = useStudio();
   const { data, isLoading } = useGenerations({
     conversationId: activeConversationId,
   });
@@ -49,8 +51,57 @@ export function GenerationFeed() {
         ) : (
           items.map((g) => <ChatTurn key={g.id} generation={g} />)
         )}
+        {/* Optimistic turn — the user's bubble the instant they hit Send,
+            before the POST resolves and the real generation lands. */}
+        {pendingTurn &&
+          pendingTurn.conversationId === activeConversationId && (
+            <PendingTurnBubble />
+          )}
         <div ref={endRef} />
       </div>
     </ScrollArea>
+  );
+}
+
+/** Lightweight stand-in for a turn whose POST is still in flight. */
+function PendingTurnBubble() {
+  const { pendingTurn } = useStudio();
+  if (!pendingTurn) return null;
+  return (
+    <div className="flex flex-col gap-3 animate-fade-in">
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 sm:max-w-[70%]">
+          {pendingTurn.refImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {pendingTurn.refImages.map((url, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={url}
+                  src={url}
+                  alt={`reference ${i + 1}`}
+                  className="h-10 w-10 rounded-md object-cover"
+                />
+              ))}
+            </div>
+          )}
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+            {pendingTurn.prompt}
+          </p>
+          {pendingTurn.docs.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5">
+              {pendingTurn.docs.map((d) => (
+                <Badge key={d.id} variant="outline" className="gap-1 text-[10px]">
+                  <FileText className="h-2.5 w-2.5" />
+                  {d.filename}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Queued…
+      </div>
+    </div>
   );
 }

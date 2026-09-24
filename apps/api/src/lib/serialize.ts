@@ -1,20 +1,19 @@
 import type {
-  Board,
-  BoardItem,
   Conversation,
   Document,
   Generation,
   Memory,
   Theme,
+  Workspace,
 } from "@catgpt/db";
 import type {
-  BoardDto,
-  BoardItemDto,
   ConversationDto,
   DocumentDto,
   GenerationDto,
   MemoryDto,
   ThemeDto,
+  WorkspaceDetailDto,
+  WorkspaceDto,
 } from "@catgpt/types";
 
 type GenerationWithTheme = Generation & {
@@ -64,36 +63,11 @@ export function toGenerationDto(g: GenerationWithTheme): GenerationDto {
   };
 }
 
-export function toBoardItemDto(
-  item: BoardItem & { generation?: GenerationWithTheme | null },
-): BoardItemDto {
-  return {
-    id: item.id,
-    boardId: item.boardId,
-    generationId: item.generationId,
-    generation: item.generation
-      ? toGenerationDto(item.generation)
-      : undefined,
-    addedAt: item.addedAt.toISOString(),
-  };
-}
-
-export function toBoardDto(
-  board: Board & { items?: Array<BoardItem & { generation?: GenerationWithTheme | null }> },
-): BoardDto {
-  return {
-    id: board.id,
-    userId: board.userId,
-    name: board.name,
-    items: (board.items ?? []).map(toBoardItemDto),
-    createdAt: board.createdAt.toISOString(),
-  };
-}
-
 type ConversationWithPreview = Conversation & {
   generations?: Array<
     Pick<Generation, "id" | "prompt" | "imageUrls" | "status">
   >;
+  workspace?: Pick<Workspace, "id" | "name"> | null;
   _count?: { generations: number };
 };
 
@@ -105,6 +79,10 @@ export function toConversationDto(c: ConversationWithPreview): ConversationDto {
     title: c.title,
     pinned: c.pinned,
     archived: c.archived,
+    workspaceId: c.workspaceId,
+    workspace: c.workspace
+      ? { id: c.workspace.id, name: c.workspace.name }
+      : null,
     generationCount: c._count?.generations ?? c.generations?.length ?? 0,
     preview: last
       ? {
@@ -125,11 +103,34 @@ export function toDocumentDto(d: Document): DocumentDto {
     userId: d.userId,
     conversationId: d.conversationId,
     filename: d.filename,
+    storageUrl: d.storageUrl,
     pageCount: d.pageCount,
     chunkCount: d.chunkCount,
     status: d.status as DocumentDto["status"],
     error: d.error,
     createdAt: d.createdAt.toISOString(),
+  };
+}
+
+export function toWorkspaceDto(
+  w: Workspace & { _count?: { documents: number } },
+): WorkspaceDto {
+  return {
+    id: w.id,
+    userId: w.userId,
+    name: w.name,
+    documentCount: w._count?.documents ?? 0,
+    createdAt: w.createdAt.toISOString(),
+    updatedAt: w.updatedAt.toISOString(),
+  };
+}
+
+export function toWorkspaceDetailDto(
+  w: Workspace & { documents: Document[]; _count?: { documents: number } },
+): WorkspaceDetailDto {
+  return {
+    ...toWorkspaceDto(w),
+    documents: w.documents.map(toDocumentDto),
   };
 }
 

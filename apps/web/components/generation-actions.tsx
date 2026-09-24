@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  BookmarkPlus,
   Check,
   Copy,
   Download,
@@ -16,12 +15,9 @@ import {
 } from "lucide-react";
 import type { GenerationDto, Quality } from "@catgpt/types";
 import {
-  useBoards,
-  useCreateBoard,
   useDeleteGeneration,
   useExportPdf,
   useRegenerate,
-  useSaveToBoard,
   useShareGeneration,
 } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
@@ -35,13 +31,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -59,94 +48,6 @@ async function downloadImage(url: string, filename: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(a.href);
-}
-
-export function SaveToBoard({ generation }: { generation: GenerationDto }) {
-  const { data: boards } = useBoards();
-  const save = useSaveToBoard();
-  const createBoard = useCreateBoard();
-  const [open, setOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [savedTo, setSavedTo] = useState<string | null>(null);
-
-  const saveTo = (boardId: string) =>
-    save.mutate(
-      { boardId, generationId: generation.id },
-      {
-        onSuccess: () => {
-          setSavedTo(boardId);
-          setTimeout(() => setOpen(false), 500);
-        },
-      },
-    );
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Save to board">
-              <BookmarkPlus />
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent>Save to board</TooltipContent>
-      </Tooltip>
-      <PopoverContent className="w-60 p-2" align="end">
-        <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
-          Save to board
-        </div>
-        <div className="max-h-44 overflow-y-auto">
-          {(boards ?? []).map((b) => (
-            <button
-              key={b.id}
-              onClick={() => saveTo(b.id)}
-              className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-            >
-              <span className="truncate">{b.name}</span>
-              {savedTo === b.id ? (
-                <Check className="h-3.5 w-3.5 text-primary" />
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  {b.items.length}
-                </span>
-              )}
-            </button>
-          ))}
-          {boards?.length === 0 && (
-            <p className="px-2 py-2 text-xs text-muted-foreground">
-              No boards yet — create one below.
-            </p>
-          )}
-        </div>
-        <Separator className="my-1.5" />
-        <form
-          className="flex gap-1.5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const name = newName.trim();
-            if (!name) return;
-            createBoard.mutate(name, {
-              onSuccess: (board) => {
-                setNewName("");
-                saveTo(board.id);
-              },
-            });
-          }}
-        >
-          <Input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="New board…"
-            className="h-8 text-xs"
-          />
-          <Button type="submit" size="sm" variant="secondary">
-            Add
-          </Button>
-        </form>
-      </PopoverContent>
-    </Popover>
-  );
 }
 
 export function RegenerateButton({ generation }: { generation: GenerationDto }) {
@@ -345,7 +246,6 @@ export function ActionRow({
           </TooltipContent>
         </Tooltip>
       )}
-      {ready && <SaveToBoard generation={generation} />}
       {ready && (
         <Tooltip>
           <TooltipTrigger asChild>

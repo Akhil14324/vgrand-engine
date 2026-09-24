@@ -43,8 +43,8 @@ export default function manifest(): MetadataRoute.Manifest {
         icons: [{ src: "/icons/shortcut-96.png", sizes: "96x96" }],
       },
       {
-        name: "Boards",
-        url: "/boards",
+        name: "Workspaces",
+        url: "/workspaces",
         icons: [{ src: "/icons/shortcut-96.png", sizes: "96x96" }],
       },
     ],

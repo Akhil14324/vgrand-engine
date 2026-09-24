@@ -4,6 +4,16 @@ import { env } from "../env.js";
 
 export const GENERATION_QUEUE = "image-generation";
 
+/** Job payloads carried by the shared queue — discriminated by job name. */
+export interface GenerationJob {
+  generationId: string;
+}
+export interface IngestJob {
+  documentId: string;
+  mimeType: string;
+}
+export type QueueJob = GenerationJob | IngestJob;
+
 /** Shared by BullMQ Queue (server) and Worker. */
 export function createRedisConnection(): IORedis {
   const conn = new IORedis(env.REDIS_URL, {
@@ -22,10 +32,10 @@ export function createRedisConnection(): IORedis {
  * Created lazily — when REDIS_URL isn't configured we never touch Redis and
  * jobs run in-process instead.
  */
-let generationQueue: Queue<{ generationId: string }> | null = null;
-function getQueue(): Queue<{ generationId: string }> {
+let generationQueue: Queue<QueueJob> | null = null;
+function getQueue(): Queue<QueueJob> {
   if (!generationQueue) {
-    generationQueue = new Queue<{ generationId: string }>(GENERATION_QUEUE, {
+    generationQueue = new Queue<QueueJob>(GENERATION_QUEUE, {
       connection: createRedisConnection(),
       defaultJobOptions: {
         attempts: 1,
@@ -51,6 +61,28 @@ export async function enqueueGeneration(generationId: string) {
   }
   // jobId = generationId keeps the queue idempotent on retries/duplicate POSTs.
   await getQueue().add("generate", { generationId }, { jobId: generationId });
+}
+
+/**
+ * Document ingestion (PDF/DOCX → chunks + embeddings) goes through the same
+ * queue as image generation — off the request thread either way.
+ */
+export async function enqueueDocumentIngestion(
+  documentId: string,
+  mimeType: string,
+) {
+  if (!env.redisConfigured) {
+    const { runDocumentIngestion } = await import("./documents.js");
+    void runDocumentIngestion(documentId, mimeType).catch((err) =>
+      console.error(`[inline] document ${documentId} ingest failed:`, err),
+    );
+    return;
+  }
+  await getQueue().add(
+    "ingest-document",
+    { documentId, mimeType },
+    { jobId: `ingest-${documentId}` },
+  );
 }
 
 /** Queue depth for /health — shows whether jobs are piling up unconsumed. */

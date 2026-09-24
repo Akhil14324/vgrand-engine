@@ -1,7 +1,16 @@
 "use client";
 
 import { create } from "zustand";
-import type { Quality, ThemeDto } from "@catgpt/types";
+import type { DocumentDto, Quality, ThemeDto } from "@catgpt/types";
+
+/** Optimistic copy of a just-sent turn — renders before the server answers. */
+export interface PendingTurn {
+  tempId: string;
+  prompt: string;
+  refImages: string[];
+  docs: DocumentDto[];
+  conversationId: string | null;
+}
 
 interface StudioState {
   /** Theme armed via the `/` menu — attached to every send until cleared. */
@@ -29,6 +38,16 @@ interface StudioState {
   /** History filter — mirrors ?themeSlug= on GET /generations. */
   historyTheme: string | null;
   setHistoryTheme: (slug: string | null) => void;
+
+  /** Optimistic user bubble shown between Send and the POST resolving. */
+  pendingTurn: PendingTurn | null;
+  setPendingTurn: (t: PendingTurn) => void;
+  clearPendingTurn: () => void;
+
+  /** Workspace a brand-new chat should be created inside (set by "Open chat"
+   * on the workspaces page, consumed by the first send). */
+  workspaceContextId: string | null;
+  openWorkspaceChat: (workspaceId: string) => void;
 }
 
 export const useStudio = create<StudioState>((set) => ({
@@ -38,10 +57,20 @@ export const useStudio = create<StudioState>((set) => ({
 
   activeConversationId: null,
   // Opening a chat clears the detail selection so the panel falls back to
-  // the chat's latest generation.
-  openConversation: (id) => set({ activeConversationId: id, selectedId: null }),
+  // the chat's latest generation — and any pending workspace context.
+  openConversation: (id) =>
+    set({
+      activeConversationId: id,
+      selectedId: null,
+      workspaceContextId: null,
+    }),
   startNewChat: () =>
-    set({ activeConversationId: null, selectedId: null, armedTheme: null }),
+    set({
+      activeConversationId: null,
+      selectedId: null,
+      armedTheme: null,
+      workspaceContextId: null,
+    }),
 
   selectedId: null,
   select: (id) => set({ selectedId: id }),
@@ -55,4 +84,17 @@ export const useStudio = create<StudioState>((set) => ({
 
   historyTheme: null,
   setHistoryTheme: (slug) => set({ historyTheme: slug }),
+
+  pendingTurn: null,
+  setPendingTurn: (t) => set({ pendingTurn: t }),
+  clearPendingTurn: () => set({ pendingTurn: null }),
+
+  workspaceContextId: null,
+  openWorkspaceChat: (workspaceId) =>
+    set({
+      activeConversationId: null,
+      selectedId: null,
+      armedTheme: null,
+      workspaceContextId: workspaceId,
+    }),
 }));
