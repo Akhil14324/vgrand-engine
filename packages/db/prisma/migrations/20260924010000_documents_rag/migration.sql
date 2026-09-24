@@ -2,8 +2,11 @@
 -- pgvector/pgvector:pg16 image (see docker-compose.yml).
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Idempotent: the prod DB may already have some of these objects (a db push
+-- ran before migrations), so every statement converges instead of failing.
+
 -- CreateTable
-CREATE TABLE "Document" (
+CREATE TABLE IF NOT EXISTS "Document" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "conversationId" TEXT,
@@ -19,7 +22,7 @@ CREATE TABLE "Document" (
 );
 
 -- CreateTable
-CREATE TABLE "DocumentChunk" (
+CREATE TABLE IF NOT EXISTS "DocumentChunk" (
     "id" TEXT NOT NULL,
     "documentId" TEXT NOT NULL,
     "chunkIndex" INTEGER NOT NULL,
@@ -29,23 +32,39 @@ CREATE TABLE "DocumentChunk" (
     CONSTRAINT "DocumentChunk_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE INDEX "Document_userId_createdAt_idx" ON "Document"("userId", "createdAt" DESC);
+-- Converge columns in case a partially-different table was pushed earlier.
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "conversationId" TEXT;
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "storageUrl" TEXT;
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "pageCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "chunkCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'processing';
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "error" TEXT;
+ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE "DocumentChunk" ADD COLUMN IF NOT EXISTS "embedding" vector(1536);
 
 -- CreateIndex
-CREATE INDEX "Document_conversationId_idx" ON "Document"("conversationId");
+CREATE INDEX IF NOT EXISTS "Document_userId_createdAt_idx" ON "Document"("userId", "createdAt" DESC);
 
 -- CreateIndex
-CREATE INDEX "DocumentChunk_documentId_idx" ON "DocumentChunk"("documentId");
+CREATE INDEX IF NOT EXISTS "Document_conversationId_idx" ON "Document"("conversationId");
 
--- HNSW index for cosine-similarity retrieval (pgvector 0.5+; no-op cost on small tables)
-CREATE INDEX "DocumentChunk_embedding_hnsw_idx" ON "DocumentChunk" USING hnsw ("embedding" vector_cosine_ops);
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "DocumentChunk_documentId_idx" ON "DocumentChunk"("documentId");
 
--- AddForeignKey
-ALTER TABLE "Document" ADD CONSTRAINT "Document_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- HNSW index for cosine-similarity retrieval (pgvector 0.5+)
+CREATE INDEX IF NOT EXISTS "DocumentChunk_embedding_hnsw_idx" ON "DocumentChunk" USING hnsw ("embedding" vector_cosine_ops);
 
--- AddForeignKey
-ALTER TABLE "Document" ADD CONSTRAINT "Document_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "DocumentChunk" ADD CONSTRAINT "DocumentChunk_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "Document"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (guarded — ADD CONSTRAINT has no IF NOT EXISTS)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Document_userId_fkey') THEN
+    ALTER TABLE "Document" ADD CONSTRAINT "Document_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Document_conversationId_fkey') THEN
+    ALTER TABLE "Document" ADD CONSTRAINT "Document_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'DocumentChunk_documentId_fkey') THEN
+    ALTER TABLE "DocumentChunk" ADD CONSTRAINT "DocumentChunk_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "Document"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
