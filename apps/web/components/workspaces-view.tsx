@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type { DocumentDto } from "@catgpt/types";
+import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import {
   useCreateWorkspace,
@@ -38,6 +39,26 @@ const DOC_ACCEPT =
   "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,.doc,.docx";
 
 export function WorkspacesView() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && !user) router.replace("/login");
+  }, [loading, user, router]);
+
+  if (loading) {
+    return (
+      <div className="flex h-dvh items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!user) return null;
+
+  return <WorkspaceContent />;
+}
+
+function WorkspaceContent() {
   const router = useRouter();
   const qc = useQueryClient();
   const { data: workspaces } = useWorkspaces();
@@ -347,36 +368,43 @@ function DocRow({
   onDelete: () => void;
 }) {
   return (
-    <div className="group flex items-center gap-2.5 rounded-lg border bg-card/60 px-3 py-2">
-      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <button
-        onClick={() =>
-          doc.storageUrl && window.open(doc.storageUrl, "_blank", "noopener")
-        }
-        className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
-        aria-label={`Open ${doc.filename}`}
-      >
-        {doc.filename}
-      </button>
-      <Badge
-        variant={
-          doc.status === "ready"
-            ? "muted"
-            : doc.status === "failed"
-              ? "destructive"
-              : "secondary"
-        }
-        className="text-[10px]"
-      >
-        {doc.status}
-      </Badge>
-      <button
-        onClick={onDelete}
-        className="opacity-0 transition-opacity group-hover:opacity-100"
-        aria-label={`Delete ${doc.filename}`}
-      >
-        <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-      </button>
+    <div className="flex flex-col gap-1">
+      <div className="group flex items-center gap-2.5 rounded-lg border bg-card/60 px-3 py-2">
+        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <button
+          onClick={() =>
+            doc.storageUrl && window.open(doc.storageUrl, "_blank", "noopener")
+          }
+          className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+          aria-label={`Open ${doc.filename}`}
+        >
+          {doc.filename}
+        </button>
+        <Badge
+          variant={
+            doc.status === "ready"
+              ? "muted"
+              : doc.status === "failed"
+                ? "destructive"
+                : "secondary"
+          }
+          className="text-[10px]"
+        >
+          {doc.status}
+        </Badge>
+        <button
+          onClick={onDelete}
+          className="opacity-0 transition-opacity group-hover:opacity-100"
+          aria-label={`Delete ${doc.filename}`}
+        >
+          <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+        </button>
+      </div>
+      {doc.status === "failed" && doc.error && (
+        <p className="px-3 text-xs text-destructive" role="alert">
+          {doc.error}
+        </p>
+      )}
     </div>
   );
 }

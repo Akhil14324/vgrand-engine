@@ -303,6 +303,10 @@ export function useWorkspace(id: string | null) {
     queryKey: ["workspace", id],
     enabled: !!id,
     queryFn: () => apiFetch<WorkspaceDetailDto>(`/workspaces/${id}`),
+    refetchInterval: (query) =>
+      query.state.data?.documents.some((doc) => doc.status === "processing")
+        ? 2000
+        : false,
   });
 }
 
