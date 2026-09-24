@@ -1,19 +1,20 @@
 import { Worker, type Job } from "bullmq";
-import { prisma } from "@prompthub/db";
+import { prisma } from "@catgpt/db";
 import {
   generateWithFallback,
   type GenerationMode,
-} from "@prompthub/image-providers";
+} from "@catgpt/image-providers";
 import {
   PROVIDERS,
   type ProviderName,
   type Quality,
   type ImageSize,
-} from "@prompthub/types";
+} from "@catgpt/types";
 import { GENERATION_QUEUE, createRedisConnection } from "./queue.js";
 import { publishGenerationEvent } from "./events.js";
 import { storeImage } from "./storage.js";
-import { answerChat, loadChatHistory } from "./chat.js";
+import { loadChatHistory, streamChat } from "./chat.js";
+import { retrieveContext } from "./documents.js";
 import { env } from "../env.js";
 
 interface GenerationMetadata {
@@ -100,12 +101,32 @@ export async function runGeneration(generationId: string): Promise<void> {
 
   try {
     // Text turns skip the image pipeline entirely — chat completion in,
-    // textResponse out, over the same queue + SSE plumbing.
+    // textResponse out, over the same queue + SSE plumbing. Tokens stream
+    // through delta events so the client renders as the model writes.
     if (generation.kind === "text") {
       const history = generation.conversationId
         ? await loadChatHistory(generation.conversationId, generation.id)
         : [];
-      const text = await answerChat(generation.prompt, history);
+      // RAG: pull passages from PDFs attached to this conversation. Retrieval
+      // failure is non-fatal — the answer just goes out without doc context.
+      const context = generation.conversationId
+        ? await retrieveContext(
+            generation.prompt,
+            generation.conversationId,
+          ).catch(() => [])
+        : [];
+      const text = await streamChat(
+        generation.prompt,
+        history,
+        context,
+        (delta) =>
+          publishGenerationEvent({
+            generationId,
+            status: "processing",
+            kind: "text",
+            delta,
+          }),
+      );
       await prisma.generation.update({
         where: { id: generationId },
         data: {

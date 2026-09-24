@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, Loader2, X } from "lucide-react";
-import type { GenerationDto } from "@prompthub/types";
+import { AlertCircle, FileText, Loader2, X } from "lucide-react";
+import type { GenerationDto } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Markdown } from "./markdown";
 import { ActionRow } from "./generation-actions";
 
 /**
@@ -44,6 +45,16 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
                 edit
               </Badge>
             )}
+            {(
+              meta.attachedDocuments as
+                | { id: string; filename: string }[]
+                | undefined
+            )?.map((d) => (
+              <Badge key={d.id} variant="outline" className="gap-1 text-[10px]">
+                <FileText className="h-2.5 w-2.5" />
+                {d.filename}
+              </Badge>
+            ))}
           </div>
         </div>
       </div>
@@ -59,9 +70,12 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
           </div>
         ) : generation.kind === "text" ? (
           generation.textResponse ? (
-            <p className="max-w-[85%] whitespace-pre-wrap break-words text-sm leading-relaxed sm:max-w-[75%]">
-              {generation.textResponse}
-            </p>
+            <div className="max-w-[85%] sm:max-w-[75%]">
+              <Markdown>{generation.textResponse}</Markdown>
+              {inFlight && (
+                <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary/70 align-text-bottom" />
+              )}
+            </div>
           ) : (
             <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -2,18 +2,20 @@ import type {
   Board,
   BoardItem,
   Conversation,
+  Document,
   Generation,
   Memory,
   Theme,
-} from "@prompthub/db";
+} from "@catgpt/db";
 import type {
   BoardDto,
   BoardItemDto,
   ConversationDto,
+  DocumentDto,
   GenerationDto,
   MemoryDto,
   ThemeDto,
-} from "@prompthub/types";
+} from "@catgpt/types";
 
 type GenerationWithTheme = Generation & {
   theme?: Pick<Theme, "id" | "slug" | "label" | "icon"> | null;
@@ -114,6 +116,20 @@ export function toConversationDto(c: ConversationWithPreview): ConversationDto {
       : null,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
+  };
+}
+
+export function toDocumentDto(d: Document): DocumentDto {
+  return {
+    id: d.id,
+    userId: d.userId,
+    conversationId: d.conversationId,
+    filename: d.filename,
+    pageCount: d.pageCount,
+    chunkCount: d.chunkCount,
+    status: d.status as DocumentDto["status"],
+    error: d.error,
+    createdAt: d.createdAt.toISOString(),
   };
 }
 

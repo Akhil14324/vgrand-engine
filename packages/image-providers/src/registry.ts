@@ -1,4 +1,4 @@
-import type { ProviderName } from "@prompthub/types";
+import type { ProviderName } from "@catgpt/types";
 import type {
   GenerateParams,
   GenerateResult,

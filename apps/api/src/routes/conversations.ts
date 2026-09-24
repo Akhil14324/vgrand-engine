@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { prisma } from "@prompthub/db";
-import { updateConversationSchema } from "@prompthub/types";
+import { prisma } from "@catgpt/db";
+import { updateConversationSchema } from "@catgpt/types";
 import { forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toConversationDto } from "../lib/serialize.js";
 

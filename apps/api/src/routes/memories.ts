@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { prisma } from "@prompthub/db";
-import { createMemorySchema } from "@prompthub/types";
+import { prisma } from "@catgpt/db";
+import { createMemorySchema } from "@catgpt/types";
 import { forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toMemoryDto } from "../lib/serialize.js";
 

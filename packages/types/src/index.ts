@@ -30,6 +30,9 @@ export type MemoryType = (typeof MEMORY_TYPES)[number];
 export const GENERATION_KINDS = ["image", "text"] as const;
 export type GenerationKind = (typeof GENERATION_KINDS)[number];
 
+export const DOCUMENT_STATUSES = ["processing", "ready", "failed"] as const;
+export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
+
 /* ---------------------------------- DTOs ---------------------------------- */
 
 export interface ThemeStyleGuide {
@@ -123,6 +126,19 @@ export interface MemoryDto {
   createdAt: string;
 }
 
+/** An uploaded PDF attached to a chat, chunked + embedded for RAG. */
+export interface DocumentDto {
+  id: string;
+  userId: string;
+  conversationId: string | null;
+  filename: string;
+  pageCount: number;
+  chunkCount: number;
+  status: DocumentStatus;
+  error: string | null;
+  createdAt: string;
+}
+
 export interface ShareLinkDto {
   token: string;
   url: string;
@@ -151,6 +167,8 @@ export const createGenerationSchema = z.object({
   referenceImageUrl: z.string().url().optional(),
   /** Up to 10 reference images (edit mode). Merged with referenceImageUrl. */
   referenceImageUrls: z.array(z.string().url()).max(10).optional(),
+  /** Uploaded PDFs to attach to this chat — their chunks feed RAG answers. */
+  documentIds: z.array(z.string().uuid()).max(4).optional(),
   parentId: z.string().uuid().optional(),
 });
 export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;
@@ -227,6 +245,8 @@ export interface GenerationEvent {
   generationId: string;
   status: GenerationStatus;
   kind?: GenerationKind;
+  /** Incremental text token for streaming chat replies. */
+  delta?: string;
   imageUrls?: string[];
   textResponse?: string | null;
   error?: string | null;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
-import type { PublicShareDto } from "@prompthub/types";
+import type { PublicShareDto } from "@catgpt/types";
 import { API_URL } from "@/lib/config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,13 @@ export default async function SharePage({
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <div className="w-full max-w-2xl">
         <div className="mb-6 text-center">
-          <div className="font-display text-lg font-semibold tracking-tight">
-            PromptHub
-          </div>
-          <p className="text-xs text-muted-foreground">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/catgpt-logo.png"
+            alt="CatGPT"
+            className="mx-auto h-16 w-auto rounded-xl bg-white object-contain px-2 py-1"
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
             shared generation · {new Date(data.createdAt).toLocaleDateString()}
           </p>
         </div>

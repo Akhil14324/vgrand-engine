@@ -3,18 +3,19 @@
 # Redis backs the BullMQ generation queue.
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector build of PG16 — adds the `vector` extension for PDF RAG chunks.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: prompthub
-      POSTGRES_DB: prompthub
+      POSTGRES_PASSWORD: catgpt
+      POSTGRES_DB: catgpt
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d prompthub"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d catgpt"]
       interval: 5s
       timeout: 3s
       retries: 10

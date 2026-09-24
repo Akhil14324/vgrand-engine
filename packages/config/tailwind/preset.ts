@@ -3,7 +3,7 @@
  * app's globals.css so a single theme system can be reused across apps.
  * (Deliberately untyped — this package must not depend on tailwindcss.)
  */
-export const prompthubPreset = {
+export const catgptPreset = {
   darkMode: "class" as const,
   theme: {
     extend: {

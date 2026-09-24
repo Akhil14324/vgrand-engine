@@ -10,7 +10,7 @@ export async function uploadRoutes(app: FastifyInstance) {
     const file = await req.file();
     if (!file) throw badRequest("multipart field 'file' is required");
     if (!file.mimetype.startsWith("image/")) {
-      throw badRequest("only image uploads are allowed");
+      throw badRequest("only image files are supported on /uploads");
     }
     const buffer = await file.toBuffer();
     const url = await storeImage({

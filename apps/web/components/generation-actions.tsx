@@ -4,17 +4,20 @@ import { useState } from "react";
 import {
   BookmarkPlus,
   Check,
+  Copy,
   Download,
+  FileDown,
   Link2,
   Loader2,
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import type { GenerationDto, Quality } from "@prompthub/types";
+import type { GenerationDto, Quality } from "@catgpt/types";
 import {
   useBoards,
   useCreateBoard,
   useDeleteGeneration,
+  useExportPdf,
   useRegenerate,
   useSaveToBoard,
   useShareGeneration,
@@ -232,13 +235,71 @@ export function ActionRow({
 }) {
   const share = useShareGeneration();
   const del = useDeleteGeneration();
+  const exportPdf = useExportPdf();
   const { select, selectedId } = useStudio();
   const [copied, setCopied] = useState(false);
+  const [textCopied, setTextCopied] = useState(false);
   const ready =
     generation.status === "completed" && generation.imageUrls.length > 0;
+  const textReady =
+    generation.status === "completed" &&
+    generation.kind === "text" &&
+    Boolean(generation.textResponse);
 
   return (
     <div className={cn("flex items-center gap-0.5", className)}>
+      {textReady && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Copy reply"
+              onClick={() => {
+                void navigator.clipboard.writeText(generation.textResponse!);
+                setTextCopied(true);
+                setTimeout(() => setTextCopied(false), 1500);
+              }}
+            >
+              {textCopied ? <Check className="text-primary" /> : <Copy />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{textCopied ? "Copied" : "Copy reply"}</TooltipContent>
+        </Tooltip>
+      )}
+      {textReady && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Export as PDF"
+              disabled={exportPdf.isPending}
+              onClick={() =>
+                exportPdf.mutate(generation.id, {
+                  onSuccess: ({ url }) => {
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `prompthub-${generation.id}.pdf`;
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  },
+                })
+              }
+            >
+              {exportPdf.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <FileDown />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Export as PDF</TooltipContent>
+        </Tooltip>
+      )}
       {ready && <SaveToBoard generation={generation} />}
       {ready && (
         <Tooltip>
@@ -281,7 +342,7 @@ export function ActionRow({
               onClick={() =>
                 downloadImage(
                   generation.imageUrls[0]!,
-                  `prompthub-${generation.id}.png`,
+                  `catgpt-${generation.id}.png`,
                 )
               }
             >

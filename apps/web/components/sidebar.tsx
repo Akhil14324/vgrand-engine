@@ -28,7 +28,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { ConversationDto, GenerationDto } from "@prompthub/types";
+import type { ConversationDto, GenerationDto } from "@catgpt/types";
 import { useAuth } from "@/lib/auth";
 import { useStudio } from "@/lib/store";
 import {
@@ -167,12 +167,13 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex h-full min-h-0 flex-col text-sidebar-foreground">
       {/* Header — wordmark + search */}
       <div className="flex items-center justify-between px-3 pb-1 pt-3">
-        <Link
-          href="/"
-          onClick={onNavigate}
-          className="font-display text-lg font-semibold tracking-tight"
-        >
-          PromptHub
+        <Link href="/" onClick={onNavigate} aria-label="CatGPT home">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/catgpt-logo.png"
+            alt="CatGPT"
+            className="h-9 w-auto rounded-lg bg-white object-contain px-1.5 py-0.5"
+          />
         </Link>
         <div className="flex items-center gap-0.5">
           <Button

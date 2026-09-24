@@ -17,6 +17,7 @@ import { boardRoutes } from "./routes/boards.js";
 import { shareRoutes } from "./routes/share.js";
 import { memoryRoutes } from "./routes/memories.js";
 import { uploadRoutes } from "./routes/uploads.js";
+import { documentRoutes } from "./routes/documents.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -36,7 +37,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
   await app.register(multipart, {
-    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    limits: { fileSize: env.MAX_UPLOAD_MB * 1024 * 1024, files: 1 },
   });
   // Serves locally stored images when Supabase Storage isn't configured.
   await mkdir(path.resolve(env.UPLOAD_DIR), { recursive: true });
@@ -89,6 +90,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(shareRoutes);
   await app.register(memoryRoutes);
   await app.register(uploadRoutes);
+  await app.register(documentRoutes);
 
   return app;
 }

@@ -1,0 +1,143 @@
+import { randomUUID } from "node:crypto";
+import OpenAI from "openai";
+import { PDFParse } from "pdf-parse";
+import { Prisma, prisma } from "@catgpt/db";
+import { env } from "../env.js";
+
+/**
+ * PDF ingestion + RAG retrieval.
+ *  - pdf-parse extracts text locally (no external API).
+ *  - Chunks are embedded in batches via OpenAI embeddings (same OPENAI_API_KEY)
+ *    and stored in pgvector — retrieval is one cosine-distance query.
+ */
+
+let client: OpenAI | null = null;
+
+function getClient(): OpenAI {
+  if (!env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+  client ??= new OpenAI({
+    apiKey: env.OPENAI_API_KEY,
+    baseURL: env.OPENAI_BASE_URL || undefined,
+  });
+  return client;
+}
+
+/** Embed many strings in batches — a single API call per batch keeps ingest fast. */
+async function embedTexts(texts: string[]): Promise<number[][]> {
+  const BATCH = 128;
+  const out: number[][] = new Array(texts.length);
+  for (let i = 0; i < texts.length; i += BATCH) {
+    const batch = texts.slice(i, i + BATCH);
+    const res = await getClient().embeddings.create({
+      model: env.EMBEDDING_MODEL,
+      // Pinned to the vector(1536) column — guards against model swaps.
+      dimensions: 1536,
+      input: batch,
+    });
+    for (const d of res.data) out[i + d.index] = d.embedding;
+  }
+  return out;
+}
+
+/** Split on paragraph/sentence boundaries, targeting ~RAG_CHUNK_CHARS per chunk. */
+export function chunkText(raw: string): string[] {
+  const size = env.RAG_CHUNK_CHARS;
+  const overlap = env.RAG_CHUNK_OVERLAP;
+  const text = raw.replace(/\s+/g, " ").trim();
+  if (!text) return [];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + size, text.length);
+    if (end < text.length) {
+      // Walk back to the last sentence/paragraph break so chunks don't cut mid-thought.
+      const slice = text.slice(start, end);
+      const lastBreak = Math.max(
+        slice.lastIndexOf(". "),
+        slice.lastIndexOf("? "),
+        slice.lastIndexOf("! "),
+        slice.lastIndexOf("; "),
+      );
+      if (lastBreak > size * 0.4) end = start + lastBreak + 1;
+    }
+    chunks.push(text.slice(start, end).trim());
+    // Tail reached — sliding further only re-slices the same ending.
+    if (end >= text.length) break;
+    start = Math.max(end - overlap, start + 1);
+  }
+  return chunks;
+}
+
+/**
+ * Extract text, chunk, embed, and persist chunks for a Document row.
+ * Runs inline at upload time — batched embeddings keep typical PDFs under ~2s.
+ */
+export async function ingestDocument(
+  documentId: string,
+  buffer: Buffer,
+): Promise<{ pageCount: number; chunkCount: number }> {
+  const parser = new PDFParse({ data: buffer });
+  let parsed: Awaited<ReturnType<typeof parser.getText>>;
+  try {
+    parsed = await parser.getText();
+  } finally {
+    await parser.destroy();
+  }
+  if (parsed.total > env.MAX_PDF_PAGES) {
+    throw new Error(
+      `it has ${parsed.total} pages — the limit is ${env.MAX_PDF_PAGES} pages`,
+    );
+  }
+  const chunks = chunkText(parsed.text ?? "");
+  if (chunks.length === 0) {
+    throw new Error(
+      "no text could be extracted — it looks like a scanned/image-only PDF",
+    );
+  }
+
+  const vectors = await embedTexts(chunks);
+  await prisma.$transaction(async (tx) => {
+    for (let i = 0; i < chunks.length; i++) {
+      const literal = `[${vectors[i]!.join(",")}]`;
+      await tx.$executeRaw`
+        INSERT INTO "DocumentChunk" ("id", "documentId", "chunkIndex", "content", "embedding")
+        VALUES (${randomUUID()}, ${documentId}, ${i}, ${chunks[i]!}, ${literal}::vector)`;
+    }
+  });
+  return { pageCount: parsed.total, chunkCount: chunks.length };
+}
+
+/**
+ * Top-K chunks across all ready documents linked to a conversation.
+ * Returns labeled passages for the chat system prompt, or [] when there's
+ * nothing to retrieve (no docs, no key, or retrieval fails).
+ */
+export async function retrieveContext(
+  prompt: string,
+  conversationId: string,
+): Promise<string[]> {
+  const docs = await prisma.document.findMany({
+    where: { conversationId, status: "ready" },
+    select: { id: true },
+  });
+  if (docs.length === 0) return [];
+
+  const [vec] = await embedTexts([prompt.slice(0, 2000)]);
+  if (!vec) return [];
+  const literal = `[${vec.join(",")}]`;
+
+  const rows = await prisma.$queryRaw<
+    Array<{ content: string; filename: string }>
+  >`
+    SELECT c."content", d."filename"
+    FROM "DocumentChunk" c
+    JOIN "Document" d ON d."id" = c."documentId"
+    WHERE c."documentId" IN (${Prisma.join(docs.map((d) => d.id))})
+      AND c."embedding" IS NOT NULL
+    ORDER BY c."embedding" <=> ${literal}::vector
+    LIMIT ${env.RAG_TOP_K}`;
+  return rows.map((r) => `[${r.filename}] ${r.content}`);
+}

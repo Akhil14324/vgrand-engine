@@ -1,9 +1,9 @@
-import type { Theme } from "@prompthub/db";
+import type { Theme } from "@catgpt/db";
 import {
   PROVIDERS,
   type ProviderName,
   type ThemeStyleGuide,
-} from "@prompthub/types";
+} from "@catgpt/types";
 import { env } from "../env.js";
 
 /**

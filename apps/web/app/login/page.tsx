@@ -46,10 +46,13 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="font-display text-2xl font-semibold tracking-tight">
-            PromptHub
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/catgpt-logo.png"
+            alt="CatGPT"
+            className="mx-auto h-24 w-auto rounded-2xl bg-white object-contain p-2"
+          />
+          <p className="mt-2 text-sm text-muted-foreground">
             Themed AI image generation studio
           </p>
         </div>

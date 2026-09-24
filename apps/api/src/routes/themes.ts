@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { prisma, type Prisma } from "@prompthub/db";
-import { createThemeSchema, updateThemeSchema } from "@prompthub/types";
+import { prisma, type Prisma } from "@catgpt/db";
+import { createThemeSchema, updateThemeSchema } from "@catgpt/types";
 import { notFound, parseBody } from "../lib/errors.js";
 import { toThemeDto } from "../lib/serialize.js";
 

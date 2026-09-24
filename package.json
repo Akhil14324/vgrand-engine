@@ -1,5 +1,5 @@
 {
-  "name": "prompthub",
+  "name": "catgpt",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.4",
@@ -13,11 +13,11 @@
     "lint": "turbo lint",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
-    "db:generate": "pnpm --filter @prompthub/db generate",
-    "db:migrate": "pnpm --filter @prompthub/db migrate",
-    "db:push": "pnpm --filter @prompthub/db push",
-    "db:seed": "pnpm --filter @prompthub/db seed",
-    "db:studio": "pnpm --filter @prompthub/db studio"
+    "db:generate": "pnpm --filter @catgpt/db generate",
+    "db:migrate": "pnpm --filter @catgpt/db migrate",
+    "db:push": "pnpm --filter @catgpt/db push",
+    "db:seed": "pnpm --filter @catgpt/db seed",
+    "db:studio": "pnpm --filter @catgpt/db studio"
   },
   "devDependencies": {
     "turbo": "^2.5.5",

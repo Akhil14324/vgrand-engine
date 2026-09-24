@@ -1,5 +1,5 @@
 {
-  "name": "@prompthub/image-providers",
+  "name": "@catgpt/image-providers",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,11 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prompthub/types": "workspace:*",
+    "@catgpt/types": "workspace:*",
     "openai": "^5.0.0"
   },
   "devDependencies": {
-    "@prompthub/config": "workspace:*",
+    "@catgpt/config": "workspace:*",
     "@types/node": "^22.15.0",
     "typescript": "^5.8.3"
   }

@@ -1,7 +1,9 @@
 import type { Config } from "tailwindcss";
-import { prompthubPreset } from "@prompthub/config/tailwind/preset";
+import typography from "@tailwindcss/typography";
+import { catgptPreset } from "@catgpt/config/tailwind/preset";
 
 export default {
-  presets: [prompthubPreset],
+  presets: [catgptPreset],
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
+  plugins: [typography],
 } satisfies Config;

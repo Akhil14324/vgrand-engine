@@ -1,15 +1,60 @@
 "use client";
 
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import type { GenerationEvent } from "@prompthub/types";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import type {
+  GenerationDto,
+  GenerationEvent,
+  Paginated,
+} from "@catgpt/types";
 import { API_URL } from "./config";
 import { useAuth } from "./auth";
 
 /**
+ * In-flight stream buffers. The generations list polls every 4s while a turn
+ * is pending — the DB row has textResponse=null mid-stream, so a refetch would
+ * wipe accumulated tokens. Buffering here makes the stream survive refetches.
+ */
+const streamBuffers = new Map<string, string>();
+
+function cachedText(qc: QueryClient, generationId: string): string | null {
+  const single = qc.getQueryData<GenerationDto>(["generation", generationId]);
+  if (single?.textResponse) return single.textResponse;
+  const lists = qc.getQueriesData<Paginated<GenerationDto>>({
+    queryKey: ["generations"],
+  });
+  for (const [, data] of lists) {
+    const hit = data?.items.find((g) => g.id === generationId);
+    if (hit?.textResponse) return hit.textResponse;
+  }
+  return null;
+}
+
+/** Append a streamed token to every cached copy of the generation. */
+function appendDelta(qc: QueryClient, generationId: string, delta: string) {
+  const acc =
+    (streamBuffers.get(generationId) ?? cachedText(qc, generationId) ?? "") +
+    delta;
+  streamBuffers.set(generationId, acc);
+
+  const apply = (g: GenerationDto): GenerationDto =>
+    g.id === generationId ? { ...g, textResponse: acc } : g;
+
+  qc.setQueryData<GenerationDto>(["generation", generationId], (old) =>
+    old ? apply(old) : old,
+  );
+  qc.setQueriesData<Paginated<GenerationDto>>(
+    { queryKey: ["generations"] },
+    (old) =>
+      old ? { ...old, items: old.items.map(apply) } : old,
+  );
+}
+
+/**
  * Streams /generations/:id/events while a generation is pending/processing so
- * cards flip from shimmer to image without polling. EventSource can't set
- * headers, so the token travels as ?token= (the API accepts both).
+ * cards flip from shimmer to image without polling — and chat replies render
+ * token-by-token via delta events. EventSource can't set headers, so the
+ * token travels as ?token= (the API accepts both).
  */
 export function useGenerationStream(
   id: string | null | undefined,
@@ -30,10 +75,15 @@ export function useGenerationStream(
       es.onmessage = (msg) => {
         try {
           const evt = JSON.parse(msg.data) as GenerationEvent;
-          qc.invalidateQueries({ queryKey: ["generation", id] });
-          qc.invalidateQueries({ queryKey: ["generations"] });
-          qc.invalidateQueries({ queryKey: ["conversations"] });
+          if (evt.delta) {
+            appendDelta(qc, evt.generationId, evt.delta);
+          } else {
+            qc.invalidateQueries({ queryKey: ["generation", id] });
+            qc.invalidateQueries({ queryKey: ["generations"] });
+            qc.invalidateQueries({ queryKey: ["conversations"] });
+          }
           if (evt.status === "completed" || evt.status === "failed") {
+            streamBuffers.delete(evt.generationId);
             es?.close();
           }
         } catch {

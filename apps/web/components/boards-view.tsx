@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, FolderPlus, Trash2 } from "lucide-react";
-import type { BoardDto } from "@prompthub/types";
+import type { BoardDto } from "@catgpt/types";
 import { useBoards, useCreateBoard, useRemoveBoardItem } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";

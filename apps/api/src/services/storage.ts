@@ -54,6 +54,7 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/jpg": "jpg",
   "image/webp": "webp",
+  "application/pdf": "pdf",
 };
 
 export interface StoreImageInput {
@@ -99,3 +100,6 @@ export async function storeImage(input: StoreImageInput): Promise<string> {
   await writeFile(filePath, buffer);
   return `${env.API_PUBLIC_URL}/uploads/${key}`;
 }
+
+/** Generic-byte alias — same store, clearer name for non-image files (PDFs). */
+export const storeFile = storeImage;

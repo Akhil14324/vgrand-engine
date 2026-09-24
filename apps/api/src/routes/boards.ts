@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { prisma, Prisma } from "@prompthub/db";
-import { addBoardItemSchema, createBoardSchema } from "@prompthub/types";
+import { prisma, Prisma } from "@catgpt/db";
+import { addBoardItemSchema, createBoardSchema } from "@catgpt/types";
 import { forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toBoardDto, toBoardItemDto } from "../lib/serialize.js";
 

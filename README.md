@@ -1,19 +1,23 @@
-# PromptHub — Themed AI Image Generation Studio
+# CatGPT — Themed AI Image Generation Studio
 
-ChatGPT-style studio for themed image generation. Type `/` in the composer to
-arm a theme template (`/restaurant`, `/infra`, …), describe your idea, and a
-themed prompt template is merged with it before hitting the image model.
-Generations can be saved to boards, shared via public links, and browsed in a
-per-user history/memory feed.
+ChatGPT-style studio for themed image generation **and general chat**. Type `/`
+in the composer to arm a theme template (`/restaurant`, `/infra`, …), describe
+your idea, and a themed prompt template is merged with it before hitting the
+image model. Non-image prompts get streaming Markdown replies (coding help,
+Q&A, assessments). Drop a **PDF** into the composer to ask questions about it —
+text is chunked, embedded, and retrieved per-turn (RAG); any reply can be
+exported as a PDF. Generations can be saved to boards, shared via public links,
+and browsed in a per-user history/memory feed.
 
 ## Stack
 
 | Layer   | Tech                                                        |
 | ------- | ----------------------------------------------------------- |
 | web     | Next.js 15 (App Router), Tailwind, Zustand, React Query     |
-| api     | Fastify 5, BullMQ, Redis, SSE for live generation status    |
-| db      | Prisma → Postgres (Supabase-compatible)                     |
+| api     | Fastify 5, BullMQ, Redis, SSE for live status + streamed chat tokens |
+| db      | Prisma → Postgres + pgvector (Supabase-compatible)          |
 | images  | OpenAI `gpt-image-2.5-flare` (drafts) + `gpt-image-2.5-sunburst` (edits); Flux & Ideogram adapters ready |
+| chat    | `CHAT_MODEL` streaming replies; `text-embedding-3-small` for PDF RAG — same OpenAI key |
 | storage | Supabase Storage, or local `./uploads` fallback in dev      |
 | auth    | Supabase Auth (email + Google), or `DEV_AUTH_BYPASS` locally |
 
@@ -78,11 +82,15 @@ packages/config      shared tsconfig + tailwind preset
 ## API surface
 
 ```
-POST /generations            {themeSlug?, prompt, provider?, quality?, size?, referenceImageUrl?, parentId?}
-GET  /generations            ?themeSlug=&cursor=&limit=
+POST /generations            {themeSlug?, prompt, provider?, quality?, size?, referenceImageUrl?, documentIds?, parentId?}
+GET  /generations            ?themeSlug=&conversationId=&cursor=&limit=
 GET  /generations/:id        DELETE /generations/:id
 POST /generations/:id/regenerate   {prompt?, quality?}
+POST /generations/:id/pdf          export a text reply as a downloadable PDF
 GET  /generations/:id/events       SSE stream (token via ?token= for EventSource)
+
+POST /documents              multipart PDF → extract + embed chunks (RAG)
+GET  /documents              ?conversationId=    DELETE /documents/:id
 
 GET  /themes                 GET /themes/:slug    POST /themes   PUT /themes/:id
 POST /boards                 GET /boards          POST /boards/:id/items   DELETE /boards/:id/items/:itemId
@@ -95,7 +103,7 @@ GET  /health
 ## Notes
 
 - Workspace packages ship as TypeScript source — the API runs under `tsx` and
-  Next transpiles `@prompthub/types`. If you outgrow that, add a `tsc` build
+  Next transpiles `@catgpt/types`. If you outgrow that, add a `tsc` build
   per package and point `exports` at `dist`.
 - `ApiKey`/BYO-key support is intentionally skipped (shared server-side key
   model). The schema + `/me/api-keys` endpoints are easy to add back if the

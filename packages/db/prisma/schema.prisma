@@ -18,6 +18,7 @@ model User {
   boards        Board[]
   memories      Memory[]
   conversations Conversation[]
+  documents     Document[]
 }
 
 // A "chat" — groups generations into a conversation you can revisit and
@@ -30,6 +31,7 @@ model Conversation {
   pinned      Boolean      @default(false)
   archived    Boolean      @default(false)
   generations Generation[]
+  documents   Document[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -115,6 +117,40 @@ model Memory {
   createdAt   DateTime    @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
+}
+
+// An uploaded PDF attached to a chat — text is extracted, chunked, and
+// embedded into DocumentChunk rows for RAG retrieval.
+model Document {
+  id             String          @id @default(uuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String? // linked when a generation references it
+  conversation   Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  filename       String
+  storageUrl     String?
+  pageCount      Int             @default(0)
+  chunkCount     Int             @default(0)
+  status         String          @default("processing") // processing | ready | failed
+  error          String?
+  chunks         DocumentChunk[]
+  createdAt      DateTime        @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([conversationId])
+}
+
+// One text chunk of a Document, embedded for cosine-similarity search.
+// `embedding` is pgvector — Prisma can't read it, so inserts/queries use raw SQL.
+model DocumentChunk {
+  id         String                      @id @default(uuid())
+  documentId String
+  document   Document                    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  content    String                      @db.Text
+  embedding  Unsupported("vector(1536)")?
+
+  @@index([documentId])
 }
 
 model ShareLink {

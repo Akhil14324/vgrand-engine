@@ -1,18 +1,27 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { prisma } from "@prompthub/db";
+import { prisma } from "@catgpt/db";
 import {
   createGenerationSchema,
   regenerateGenerationSchema,
   type GenerationEvent,
   type ThemeStyleGuide,
-} from "@prompthub/types";
+} from "@catgpt/types";
 import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
 import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
 import { toGenerationDto } from "../lib/serialize.js";
 import { enqueueGeneration } from "../services/queue.js";
 import { subscribeGenerationEvents } from "../services/events.js";
-import { classifyIntent, loadChatHistory } from "../services/chat.js";
+import { renderMarkdownPdf } from "../services/pdf-export.js";
+import { storeFile } from "../services/storage.js";
 import { env } from "../env.js";
+
+/**
+ * Strict image gate — a prompt must explicitly ask to "create an image"
+ * (anywhere in the text) to produce one. Everything else is a chat reply,
+ * even with a theme armed; the theme only shapes image output, it is not
+ * itself a request to generate.
+ */
+const IMAGE_TRIGGER = /create\s+an?\s+image/i;
 
 /** Chat title from the first prompt — first line, capped at 60 chars. */
 function deriveTitle(prompt: string): string {
@@ -79,15 +88,29 @@ export async function generationRoutes(app: FastifyInstance) {
       }
     }
     const parent = body.parentId ? await loadOwned(req, body.parentId) : null;
-    // Theme brand references come first — they're the base the edit keeps;
-    // any user-attached refs are extra guidance on top.
-    const referenceImageUrls = [
+    const userRefs = [
       ...new Set([
-        ...themeReferenceUrls(req, theme),
         ...(body.referenceImageUrl ? [body.referenceImageUrl] : []),
         ...(body.referenceImageUrls ?? []),
       ]),
-    ].slice(0, 10);
+    ];
+
+    // Strict gate: an image only on explicit request — "create an image" in
+    // the prompt, attached references, or a regenerate/edit chain. No
+    // classifier guesswork: everything else is a text reply.
+    const kind =
+      userRefs.length > 0 || body.parentId || IMAGE_TRIGGER.test(body.prompt)
+        ? ("image" as const)
+        : ("text" as const);
+
+    // Theme brand references come first — they're the base the edit keeps;
+    // any user-attached refs are extra guidance on top.
+    const referenceImageUrls =
+      kind === "image"
+        ? [
+            ...new Set([...themeReferenceUrls(req, theme), ...userRefs]),
+          ].slice(0, 10)
+        : [];
 
     // Chat resolution order: explicit conversationId → inherit the parent's
     // chat → spin up a new conversation titled from the prompt.
@@ -97,17 +120,17 @@ export async function generationRoutes(app: FastifyInstance) {
       await loadOwnedConversation(req, body.conversationId);
     }
 
-    // Explicit opt-ins always make an image; ambiguous prompts get classified
-    // so questions ("what is a linked list?") get a text reply, not an image.
-    const explicitImage = Boolean(
-      theme || referenceImageUrls.length > 0 || body.parentId,
-    );
-    const kind = explicitImage
-      ? ("image" as const)
-      : await classifyIntent(
-          body.prompt,
-          conversationId ? await loadChatHistory(conversationId) : [],
-        );
+    // Attached PDFs must belong to the caller — they get linked to this chat
+    // so every later turn retrieves their chunks automatically.
+    const docs = body.documentIds?.length
+      ? await prisma.document.findMany({
+          where: { id: { in: body.documentIds }, userId: req.userId },
+          select: { id: true, filename: true },
+        })
+      : [];
+    if (body.documentIds?.length && docs.length !== body.documentIds.length) {
+      throw badRequest("one or more attached documents were not found");
+    }
 
     const generation = await prisma.$transaction(async (tx) => {
       if (conversationId) {
@@ -121,6 +144,12 @@ export async function generationRoutes(app: FastifyInstance) {
           data: { userId: req.userId, title: deriveTitle(body.prompt) },
         });
         conversationId = conversation.id;
+      }
+      if (docs.length) {
+        await tx.document.updateMany({
+          where: { id: { in: docs.map((d) => d.id) } },
+          data: { conversationId },
+        });
       }
       return tx.generation.create({
         data: {
@@ -137,6 +166,14 @@ export async function generationRoutes(app: FastifyInstance) {
           metadata: {
             referenceImageUrl: referenceImageUrls[0],
             referenceImageUrls,
+            ...(docs.length
+              ? {
+                  attachedDocuments: docs.map((d) => ({
+                    id: d.id,
+                    filename: d.filename,
+                  })),
+                }
+              : {}),
             quality: body.quality ?? "low",
             size: body.size ?? "auto",
           },
@@ -241,6 +278,36 @@ export async function generationRoutes(app: FastifyInstance) {
       conversationId: child.conversationId,
       status: "pending",
     });
+  });
+
+  /**
+   * Export a text reply as a downloadable PDF. Rendered server-side with a
+   * lightweight markdown layout; the URL is cached in metadata so repeat
+   * clicks return instantly.
+   */
+  app.post("/generations/:id/pdf", async (req) => {
+    const { id } = req.params as { id: string };
+    const generation = await loadOwned(req, id);
+    const text = generation.textResponse;
+    if (!text) {
+      throw badRequest("Generation has no text response to export");
+    }
+    const meta = (generation.metadata ?? {}) as Record<string, unknown>;
+    if (typeof meta.pdfUrl === "string") return { url: meta.pdfUrl };
+
+    const title =
+      generation.prompt.split("\n")[0]!.slice(0, 90) || "CatGPT export";
+    const buffer = await renderMarkdownPdf(title, text);
+    const url = await storeFile({
+      buffer,
+      mimeType: "application/pdf",
+      keyPrefix: `exports/${req.userId}`,
+    });
+    await prisma.generation.update({
+      where: { id },
+      data: { metadata: { ...meta, pdfUrl: url } },
+    });
+    return { url };
   });
 
   /** SSE stream for the live "generating..." state. Token may come via ?token=. */

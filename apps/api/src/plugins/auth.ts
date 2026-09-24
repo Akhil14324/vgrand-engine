@@ -1,7 +1,7 @@
 import fp from "fastify-plugin";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { prisma } from "@prompthub/db";
+import { prisma } from "@catgpt/db";
 import { env } from "../env.js";
 import { unauthorized } from "../lib/errors.js";
 
@@ -16,7 +16,7 @@ declare module "fastify" {
 
 const DEV_USER = {
   id: "dev-user",
-  email: "dev@prompthub.local",
+  email: "dev@catgpt.local",
   name: "Dev User",
 };
 

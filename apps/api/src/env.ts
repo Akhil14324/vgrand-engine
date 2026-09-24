@@ -24,6 +24,14 @@ const envSchema = z.object({
   OPENAI_BASE_URL: opt(z.string().url()),
   /** Chat + intent-classification model — cheap tier, not the image models. */
   CHAT_MODEL: opt(z.string().min(1)),
+  /** RAG: embeddings for PDF chunks + query vectors (same OpenAI key). */
+  EMBEDDING_MODEL: opt(z.string().min(1)),
+  MAX_PDF_PAGES: z.coerce.number().int().positive().default(200),
+  /** Multipart cap — applies to reference images and PDF uploads. */
+  MAX_UPLOAD_MB: z.coerce.number().int().positive().default(25),
+  RAG_TOP_K: z.coerce.number().int().positive().default(6),
+  RAG_CHUNK_CHARS: z.coerce.number().int().positive().default(1200),
+  RAG_CHUNK_OVERLAP: z.coerce.number().int().nonnegative().default(150),
   DEFAULT_IMAGE_PROVIDER: opt(z.enum(["openai", "flux", "ideogram"])),
   FLUX_API_KEY: opt(z.string().min(1)),
   FLUX_MODEL_ENDPOINT: opt(z.string().min(1)),
@@ -46,6 +54,7 @@ export const env = {
   ...parsed,
   REDIS_URL: parsed.REDIS_URL ?? "redis://localhost:6379",
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
+  EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
   // Defaults on in dev only — production must opt in explicitly.

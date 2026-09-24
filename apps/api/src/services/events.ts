@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
 import IORedis from "ioredis";
-import type { GenerationEvent } from "@prompthub/types";
+import type { GenerationEvent } from "@catgpt/types";
 import { env } from "../env.js";
 
-const CHANNEL = "prompthub:generation-events";
+const CHANNEL = "catgpt:generation-events";
 
 let pub: IORedis | null = null;
 

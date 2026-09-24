@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Quality, ThemeDto } from "@prompthub/types";
+import type { Quality, ThemeDto } from "@catgpt/types";
 
 interface StudioState {
   /** Theme armed via the `/` menu — attached to every send until cleared. */

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { prisma } from "@prompthub/db";
+import { prisma } from "@catgpt/db";
 import { forbidden, notFound } from "../lib/errors.js";
 import { env } from "../env.js";
 

@@ -35,7 +35,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const DEV_USER: AuthUser = {
   id: "dev-user",
-  email: "dev@prompthub.local",
+  email: "dev@catgpt.local",
   name: "Dev User",
 };
 

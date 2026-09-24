@@ -1,4 +1,4 @@
-import type { ImageSize, ProviderName, Quality } from "@prompthub/types";
+import type { ImageSize, ProviderName, Quality } from "@catgpt/types";
 
 /** "draft" = fresh generation (flare), "edit" = iterate on a reference (sunburst). */
 export type GenerationMode = "draft" | "edit";

@@ -44,9 +44,12 @@ export function StudioShell() {
   if (loading) {
     return (
       <div className="flex h-dvh items-center justify-center">
-        <div className="font-display text-lg text-muted-foreground">
-          PromptHub
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/catgpt-logo.png"
+          alt="CatGPT"
+          className="h-14 w-auto rounded-xl bg-white object-contain px-2 py-1"
+        />
       </div>
     );
   }

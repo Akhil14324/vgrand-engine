@@ -17,7 +17,7 @@ import type {
   ShareLinkDto,
   ThemeDto,
   UpdateConversationRequest,
-} from "@prompthub/types";
+} from "@catgpt/types";
 import { apiFetch } from "./api";
 
 /* --------------------------------- themes --------------------------------- */
@@ -174,6 +174,14 @@ export function useShareGeneration() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<ShareLinkDto>(`/share/${id}`, { method: "POST" }),
+  });
+}
+
+/** Render a text reply to PDF server-side; returns the file URL. */
+export function useExportPdf() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ url: string }>(`/generations/${id}/pdf`, { method: "POST" }),
   });
 }
 

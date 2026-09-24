@@ -1,5 +1,5 @@
 {
-  "name": "@prompthub/api",
+  "name": "@catgpt/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,9 @@
     "@fastify/cors": "^11.0.1",
     "@fastify/multipart": "^9.0.3",
     "@fastify/static": "^8.2.0",
-    "@prompthub/db": "workspace:*",
-    "@prompthub/image-providers": "workspace:*",
-    "@prompthub/types": "workspace:*",
+    "@catgpt/db": "workspace:*",
+    "@catgpt/image-providers": "workspace:*",
+    "@catgpt/types": "workspace:*",
     "@supabase/supabase-js": "^2.49.8",
     "bullmq": "^5.52.0",
     "dotenv": "^16.5.0",
@@ -23,12 +23,15 @@
     "fastify-plugin": "^5.0.1",
     "ioredis": "^5.6.1",
     "openai": "^5.0.0",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.2",
     "tsx": "^4.19.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@prompthub/config": "workspace:*",
+    "@catgpt/config": "workspace:*",
     "@types/node": "^22.15.0",
+    "@types/pdfkit": "^0.17.6",
     "typescript": "^5.8.3"
   }
 }

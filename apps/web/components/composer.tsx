@@ -12,6 +12,7 @@ import {
 import {
   ArrowUp,
   Building2,
+  FileText,
   Home,
   Image as ImageIcon,
   Loader2,
@@ -21,8 +22,9 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { Quality, ThemeDto } from "@prompthub/types";
-import { apiFetch } from "@/lib/api";
+import type { DocumentDto, Quality, ThemeDto } from "@catgpt/types";
+import { apiFetch, ApiRequestError } from "@/lib/api";
+import { MAX_UPLOAD_MB } from "@/lib/config";
 import { useCreateGeneration, useThemes } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -75,7 +77,9 @@ export function Composer() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [refImages, setRefImages] = useState<string[]>([]);
+  const [docs, setDocs] = useState<DocumentDto[]>([]);
   const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -110,13 +114,46 @@ export function Composer() {
     [armTheme],
   );
 
-  // Uploads run in parallel, one request per file; capped at MAX_REFS total.
+  // Uploads run in parallel, one request per file. Images go to /uploads
+  // (reference/edit), PDFs to /documents (RAG). Caps: 10 images, 4 docs.
   const uploadFiles = useCallback(
     async (files: FileList | File[]) => {
-      const images = Array.from(files).filter((f) =>
-        f.type.startsWith("image/"),
+      setUploadError(null);
+      const maxBytes = MAX_UPLOAD_MB * 1024 * 1024;
+      const fmtMb = (b: number) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
+
+      // Pre-validate so failures explain *why* instantly, before any upload.
+      const rejected = Array.from(files).filter(
+        (f) =>
+          !(f.type.startsWith("image/") || f.type === "application/pdf"),
       );
-      const batch = images.slice(0, Math.max(MAX_REFS - refImages.length, 0));
+      if (rejected.length) {
+        setUploadError(
+          `"${rejected[0]!.name}" isn't supported — attach images or PDFs only.`,
+        );
+        return;
+      }
+      const oversized = Array.from(files).filter((f) => f.size > maxBytes);
+      if (oversized.length) {
+        setUploadError(
+          `"${oversized[0]!.name}" is ${fmtMb(oversized[0]!.size)} — the upload limit is ${MAX_UPLOAD_MB} MB.`,
+        );
+        return;
+      }
+
+      const list = Array.from(files);
+      const images = list
+        .filter((f) => f.type.startsWith("image/"))
+        .slice(0, Math.max(MAX_REFS - refImages.length, 0));
+      const pdfs = list
+        .filter((f) => f.type === "application/pdf")
+        .slice(0, Math.max(4 - docs.length, 0));
+      const batch = [...images, ...pdfs];
+      if (list.length > batch.length) {
+        setUploadError(
+          `Some files were skipped — you can attach up to ${MAX_REFS} images and 4 PDFs per message.`,
+        );
+      }
       if (batch.length === 0) return;
       setUploading((n) => n + batch.length);
       await Promise.all(
@@ -124,26 +161,43 @@ export function Composer() {
           try {
             const form = new FormData();
             form.append("file", file);
-            const res = await apiFetch<{ url: string }>("/uploads", {
-              method: "POST",
-              body: form,
-            });
-            setRefImages((prev) =>
-              prev.length < MAX_REFS ? [...prev, res.url] : prev,
+            if (file.type === "application/pdf") {
+              const doc = await apiFetch<DocumentDto>("/documents", {
+                method: "POST",
+                body: form,
+              });
+              setDocs((prev) => (prev.length < 4 ? [...prev, doc] : prev));
+            } else {
+              const res = await apiFetch<{ url: string }>("/uploads", {
+                method: "POST",
+                body: form,
+              });
+              setRefImages((prev) =>
+                prev.length < MAX_REFS ? [...prev, res.url] : prev,
+              );
+            }
+          } catch (err) {
+            // Surface the reason — one bad file shouldn't drop the batch.
+            setUploadError(
+              err instanceof ApiRequestError && err.status === 413
+                ? `"${file.name}" exceeds the ${MAX_UPLOAD_MB} MB upload limit.`
+                : err instanceof Error
+                  ? err.message
+                  : "Upload failed",
             );
-          } catch {
-            // One failed file shouldn't drop the rest of the batch.
           } finally {
             setUploading((n) => n - 1);
           }
         }),
       );
     },
-    [refImages.length],
+    [refImages.length, docs.length],
   );
 
   const submit = useCallback(() => {
-    const prompt = value.trim();
+    // A PDF on its own is a valid send — default to a summary request.
+    const prompt =
+      value.trim() || (docs.length ? "Summarize the attached document." : "");
     if (!prompt || prompt === "/" || create.isPending) return;
     create.mutate(
       {
@@ -151,18 +205,20 @@ export function Composer() {
         themeSlug: armedTheme?.slug,
         quality,
         referenceImageUrls: refImages.length ? refImages : undefined,
+        documentIds: docs.length ? docs.map((d) => d.id) : undefined,
         conversationId: activeConversationId ?? undefined,
       },
       {
         onSuccess: (res) => {
           setValue("");
           setRefImages([]);
+          setDocs([]);
           openConversation(res.conversationId);
           select(res.generationId);
         },
       },
     );
-  }, [value, create, armedTheme, quality, refImages, activeConversationId, openConversation, select]);
+  }, [value, create, armedTheme, quality, refImages, docs, activeConversationId, openConversation, select]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -205,7 +261,11 @@ export function Composer() {
       ? "gpt-image-2.5-sunburst"
       : "gpt-image-2.5-flare";
 
-  const canSend = Boolean(value.trim()) && value !== "/" && !create.isPending;
+  const canSend =
+    (Boolean(value.trim()) || docs.length > 0) &&
+    value !== "/" &&
+    !create.isPending &&
+    uploading === 0;
 
   return (
     <div
@@ -223,7 +283,7 @@ export function Composer() {
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,application/pdf"
         multiple
         hidden
         onChange={(e) => {
@@ -240,7 +300,7 @@ export function Composer() {
               dragging && "ring-1 ring-primary",
             )}
           >
-            {(armedTheme || refImages.length > 0 || uploading > 0) && (
+            {(armedTheme || refImages.length > 0 || docs.length > 0 || uploading > 0) && (
               <div className="flex flex-wrap items-center gap-2 px-2 pb-1.5 pt-0.5">
                 {armedTheme && (
                   <Badge variant="default" className="gap-1.5 pr-1">
@@ -274,6 +334,21 @@ export function Composer() {
                     </button>
                   </Badge>
                 ))}
+                {docs.map((d) => (
+                  <Badge key={d.id} variant="secondary" className="gap-1.5 pr-1">
+                    <FileText className="h-3 w-3" />
+                    <span className="max-w-40 truncate">{d.filename}</span>
+                    <button
+                      onClick={() =>
+                        setDocs((prev) => prev.filter((x) => x.id !== d.id))
+                      }
+                      className="rounded-full p-0.5 hover:bg-accent"
+                      aria-label={`Remove ${d.filename}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
               </div>
             )}
 
@@ -283,8 +358,8 @@ export function Composer() {
                 size="icon"
                 className="mb-0.5 h-9 w-9 shrink-0 rounded-full text-muted-foreground"
                 onClick={() => fileRef.current?.click()}
-                aria-label="Attach reference images"
-                title="Attach up to 10 reference images (edit mode)"
+                aria-label="Attach images or PDFs"
+                title="Attach images (edit refs) or PDFs (ask questions about them)"
               >
                 <Plus />
               </Button>
@@ -306,8 +381,8 @@ export function Composer() {
                 }}
                 placeholder={
                   armedTheme
-                    ? `Describe your ${armedTheme.label.toLowerCase()} idea…`
-                    : "Ask anything, or describe an image — / for themes"
+                    ? `Create an image of… (${armedTheme.label} styling) — / for themes`
+                    : "Ask anything, or 'create an image of…' — / for themes"
                 }
                 rows={1}
                 className="max-h-[168px] min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-2.5 leading-5 shadow-none focus-visible:ring-0"
@@ -392,13 +467,13 @@ export function Composer() {
         </Badge>
         <span className="hidden sm:inline">
           <kbd className="rounded border px-1 font-mono">/</kbd> themes · drop
-          an image to edit ·{" "}
-          <kbd className="rounded border px-1 font-mono">Enter</kbd> to generate
+          an image to edit or a PDF to ask about ·{" "}
+          <kbd className="rounded border px-1 font-mono">Enter</kbd> to send
         </span>
       </div>
-      {create.isError && (
+      {(create.isError || uploadError) && (
         <p className="mt-1 text-center text-xs text-destructive">
-          {create.error.message}
+          {uploadError ?? create.error?.message}
         </p>
       )}
     </div>
