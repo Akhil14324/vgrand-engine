@@ -26,6 +26,10 @@ const envSchema = z.object({
   CHAT_MODEL: opt(z.string().min(1)),
   /** Model for code_interpreter runs — needs a capable tier (mini lacks it). */
   CODE_MODEL: opt(z.string().min(1)),
+  /** Campaign Builder strategy model - long, structured output needs a capable tier. */
+  CAMPAIGN_MODEL: opt(z.string().min(1)),
+  /** Quality for auto-generated campaign creatives (they carry on-image text). */
+  CAMPAIGN_IMAGE_QUALITY: opt(z.enum(["low", "medium", "high"])),
   /** RAG: embeddings for PDF chunks + query vectors (same OpenAI key). */
   EMBEDDING_MODEL: opt(z.string().min(1)),
   MAX_PDF_PAGES: z.coerce.number().int().positive().default(200),
@@ -72,6 +76,8 @@ export const env = {
   REDIS_URL: parsed.REDIS_URL ?? "redis://localhost:6379",
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
   CODE_MODEL: parsed.CODE_MODEL ?? "gpt-4o",
+  CAMPAIGN_MODEL: parsed.CAMPAIGN_MODEL ?? parsed.CODE_MODEL ?? "gpt-4o",
+  CAMPAIGN_IMAGE_QUALITY: parsed.CAMPAIGN_IMAGE_QUALITY ?? "medium",
   EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",

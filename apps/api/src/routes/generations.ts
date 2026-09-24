@@ -19,6 +19,7 @@ import {
   getImageUsage,
   recordImageUsage,
 } from "../lib/usage.js";
+import { isCampaignConversation, isCampaignPrompt } from "../services/campaign.js";
 import { env } from "../env.js";
 
 /**
@@ -117,11 +118,15 @@ export async function generationRoutes(app: FastifyInstance) {
     // turn (no fresh upload, no explicit parent, no "create an image" trigger).
     // The classifier only runs in this narrow branch, not on every message.
     let effectiveParentId: string | null = body.parentId ?? null;
+    // Campaign chats never take this path: "make 5 more images" there means
+    // new campaign creatives, not an edit of the last image.
     if (
       conversationId &&
       !body.parentId &&
       userRefs.length === 0 &&
-      !IMAGE_TRIGGER.test(body.prompt)
+      !IMAGE_TRIGGER.test(body.prompt) &&
+      !isCampaignPrompt(body.prompt) &&
+      !(await isCampaignConversation(conversationId))
     ) {
       const lastImage = await prisma.generation.findFirst({
         where: { conversationId, kind: "image", status: "completed" },

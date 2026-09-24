@@ -32,6 +32,13 @@ import type { WebSource } from "@catgpt/types";
 import { retrieveContext, runDocumentIngestion } from "./documents.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { refundImageUsage } from "../lib/usage.js";
+import {
+  isCampaignConversation,
+  isCampaignPrompt,
+  spawnCreatives,
+  streamCampaign,
+  stripCampaignPrefix,
+} from "./campaign.js";
 import { env } from "../env.js";
 
 interface GenerationMetadata {
@@ -172,7 +179,50 @@ export async function runGeneration(generationId: string): Promise<void> {
       let searched = false;
       let searchError: string | null = null;
       let searchTrace: Record<string, number> | null = null;
-      if (codeRun) {
+      let campaign = false;
+      if (!codeRun) {
+        campaign =
+          isCampaignPrompt(generation.prompt) ||
+          (generation.conversationId
+            ? await isCampaignConversation(generation.conversationId)
+            : false);
+      }
+      if (campaign) {
+        // Campaign mode: interview -> full sales plan -> image creatives.
+        const userPrompt = stripCampaignPrefix(generation.prompt);
+        const reply = await streamCampaign(
+          userPrompt,
+          history,
+          context,
+          memories,
+          onDelta,
+        );
+        text = reply.text;
+        // Creatives are queued BEFORE this turn is marked completed, so the
+        // client's refetch on completion already sees them and keeps polling.
+        if (reply.creativeCount > 0 && generation.conversationId) {
+          try {
+            const note = await spawnCreatives({
+              userId: generation.userId,
+              conversationId: generation.conversationId,
+              history,
+              userPrompt,
+              reply: reply.text,
+              requested: reply.creativeCount,
+            });
+            if (note) {
+              text += note;
+              onDelta(note);
+            }
+          } catch (err) {
+            console.error("[worker] campaign creatives failed:", err);
+            const note =
+              "\n\n> The image creatives could not be started. Ask me to generate them again.";
+            text += note;
+            onDelta(note);
+          }
+        }
+      } else if (codeRun) {
         text = await runWithCodeInterpreter(
           stripRunPrefix(generation.prompt) || generation.prompt,
           history,
@@ -229,10 +279,15 @@ export async function runGeneration(generationId: string): Promise<void> {
         data: {
           status: "completed",
           textResponse: text,
-          model: codeRun ? env.CODE_MODEL : env.CHAT_MODEL,
+          model: codeRun
+            ? env.CODE_MODEL
+            : campaign
+              ? env.CAMPAIGN_MODEL
+              : env.CHAT_MODEL,
           metadata: {
             ...meta,
             ...(codeRun ? { codeRun: true } : {}),
+            ...(campaign ? { campaign: true } : {}),
             ...(searchError ? { searchError: searchError.slice(0, 300) } : {}),
             ...(searchTrace ? { searchTrace } : {}),
             ...(searched

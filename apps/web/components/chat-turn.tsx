@@ -29,6 +29,9 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
   const active = selectedId === generation.id;
   const sources = (meta.sources as WebSource[] | undefined) ?? [];
   const searching = meta.searching === true;
+  const creative = meta.campaignCreative as
+    | { index: number; total: number; title?: string }
+    | undefined;
 
   return (
     <div className="flex flex-col gap-3 animate-fade-in">
@@ -53,9 +56,18 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
               ))}
             </div>
           )}
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-            {generation.prompt}
-          </p>
+          {creative ? (
+            <p className="text-sm leading-relaxed">
+              <span className="font-medium">
+                Campaign creative {creative.index}/{creative.total}
+              </span>
+              {creative.title ? " — " + creative.title : ""}
+            </p>
+          ) : (
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              {generation.prompt}
+            </p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5">
             {generation.theme && (
               <Badge variant="default" className="text-[10px]">

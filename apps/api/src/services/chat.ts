@@ -36,7 +36,7 @@ export async function loadChatHistory(
 
 let client: OpenAI | null = null;
 
-function getClient(): OpenAI {
+export function getClient(): OpenAI {
   if (!env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
@@ -47,7 +47,7 @@ function getClient(): OpenAI {
   return client;
 }
 
-function toMessages(history: HistoryTurn[]) {
+export function toMessages(history: HistoryTurn[]) {
   return history.flatMap((t) => [
     { role: "user" as const, content: t.prompt },
     {
@@ -112,7 +112,7 @@ export type ChatMode = "chat" | "workspace";
 const systemFor = (mode: ChatMode) =>
   mode === "workspace" ? WORKSPACE_SYSTEM : CHAT_SYSTEM;
 
-function contextMessage(context: string[]) {
+export function contextMessage(context: string[]) {
   if (context.length === 0) return [];
   return [
     {
@@ -122,7 +122,7 @@ function contextMessage(context: string[]) {
   ];
 }
 
-function memoryMessage(memories: string[]) {
+export function memoryMessage(memories: string[]) {
   if (memories.length === 0) return [];
   return [
     {

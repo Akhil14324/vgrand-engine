@@ -15,6 +15,7 @@ import {
   Building2,
   FileText,
   Globe,
+  Megaphone,
   Home,
   Loader2,
   Mic,
@@ -61,6 +62,8 @@ const DOCX_MIME =
 /** Files routed to /documents for RAG — PDFs and Word docs. */
 const isDocFile = (type: string) =>
   type === "application/pdf" || type === DOCX_MIME;
+
+type MenuItem = { type: "campaign" } | { type: "theme"; theme: ThemeDto };
 
 const QUALITY_LABEL: Record<Quality, string> = {
   low: "Draft · low",
@@ -170,18 +173,29 @@ export function Composer() {
   useEffect(autosize, [value, autosize]);
 
   const slashQuery = value.startsWith("/") ? value.slice(1) : null;
-  const filtered = useMemo(() => {
-    if (slashQuery === null || !themes) return [];
+  const filtered = useMemo<MenuItem[]>(() => {
+    if (slashQuery === null) return [];
     const q = slashQuery.toLowerCase();
-    return themes.filter(
-      (t) => t.slug.startsWith(q) || t.label.toLowerCase().includes(q),
-    );
+    const items: MenuItem[] = [];
+    // /campaign is a command, not a theme — offered only while it is still
+    // being typed (no space yet), so "/campaign sell honey" doesn't reopen it.
+    if (!/\s/.test(q) && "campaign".startsWith(q)) items.push({ type: "campaign" });
+    for (const t of themes ?? []) {
+      if (t.slug.startsWith(q) || t.label.toLowerCase().includes(q)) {
+        items.push({ type: "theme", theme: t });
+      }
+    }
+    return items;
   }, [slashQuery, themes]);
 
   const pick = useCallback(
-    (theme: ThemeDto) => {
-      armTheme(theme);
-      setValue("");
+    (item: MenuItem) => {
+      if (item.type === "campaign") {
+        setValue("/campaign ");
+      } else {
+        armTheme(item.theme);
+        setValue("");
+      }
       setMenuOpen(false);
       setHighlight(0);
       textareaRef.current?.focus();
@@ -641,15 +655,22 @@ export function Composer() {
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-            Themes
+            Commands &amp; themes
           </div>
-          {filtered.map((t, i) => {
-            const Icon = (t.icon && THEME_ICONS[t.icon]) || Sparkles;
+          {filtered.map((item, i) => {
+            const isCampaign = item.type === "campaign";
+            const t = item.type === "theme" ? item.theme : null;
+            const Icon = isCampaign
+              ? Megaphone
+              : (t?.icon && THEME_ICONS[t.icon]) || Sparkles;
+            const description = isCampaign
+              ? "Plan a sales campaign — strategy, metrics, copy and creatives"
+              : t?.description;
             return (
               <button
-                key={t.id}
+                key={isCampaign ? "campaign" : t!.id}
                 onMouseEnter={() => setHighlight(i)}
-                onClick={() => pick(t)}
+                onClick={() => pick(item)}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm",
                   i === highlight && "bg-accent",
@@ -657,10 +678,12 @@ export function Composer() {
               >
                 <Icon className="h-4 w-4 text-muted-foreground" />
                 <div className="min-w-0">
-                  <div className="font-medium">/{t.slug}</div>
-                  {t.description && (
+                  <div className="font-medium">
+                    /{isCampaign ? "campaign" : t!.slug}
+                  </div>
+                  {description && (
                     <div className="truncate text-xs text-muted-foreground">
-                      {t.description}
+                      {description}
                     </div>
                   )}
                 </div>
@@ -675,7 +698,7 @@ export function Composer() {
           {providerLabel}
         </Badge>
         <span className="hidden sm:inline">
-          <kbd className="rounded border px-1 font-mono">/</kbd> themes · drop
+          <kbd className="rounded border px-1 font-mono">/</kbd> themes &amp; /campaign · drop
           an image to edit or a PDF/Word doc to ask about ·{" "}
           <kbd className="rounded border px-1 font-mono">Enter</kbd> to send
         </span>
