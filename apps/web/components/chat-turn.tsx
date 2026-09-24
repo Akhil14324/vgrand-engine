@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, FileText, Loader2, X } from "lucide-react";
-import type { GenerationDto } from "@catgpt/types";
+import { AlertCircle, FileText, Globe, Loader2, X } from "lucide-react";
+import type { GenerationDto, WebSource } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "./markdown";
 import { ActionRow } from "./generation-actions";
+import { SourceChips } from "./source-chips";
 
 /**
  * One chat turn: the user's prompt bubble (right) + the assistant reply
@@ -26,6 +27,8 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
   const meta = (generation.metadata ?? {}) as Record<string, unknown>;
   const refImages = (meta.referenceImageUrls as string[] | undefined) ?? [];
   const active = selectedId === generation.id;
+  const sources = (meta.sources as WebSource[] | undefined) ?? [];
+  const searching = meta.searching === true;
 
   return (
     <div className="flex flex-col gap-3 animate-fade-in">
@@ -103,11 +106,20 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
               {inFlight && (
                 <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary/70 align-text-bottom" />
               )}
+              {!inFlight && sources.length > 0 && <SourceChips sources={sources} />}
             </div>
           ) : (
             <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {generation.status === "processing" ? "Answering…" : "Queued…"}
+              {searching ? (
+                <Globe className="h-3.5 w-3.5 animate-pulse text-primary" />
+              ) : (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              )}
+              {searching
+                ? "Searching the web…"
+                : generation.status === "processing"
+                  ? "Answering…"
+                  : "Queued…"}
             </div>
           )
         ) : image ? (

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { prisma } from "@catgpt/db";
-import type { GenerationKind } from "@catgpt/types";
+import type { GenerationKind, WebSource } from "@catgpt/types";
 import { env } from "../env.js";
 
 /**
@@ -259,4 +259,92 @@ export async function runWithCodeInterpreter(
   }
   if (!parts.length) throw new Error("code interpreter returned nothing");
   return parts.join("\n\n");
+}
+
+/* ------------------------------- web search ------------------------------- */
+
+const SEARCH_PREFIX = /^\/search\b/i;
+const FRESHNESS_HINT =
+  /\b(today|tonight|tomorrow|yesterday|latest|current(?:ly)?|right now|news|breaking|recent(?:ly)?|this (?:week|month|year)|upcoming|trending|live|20(?:2[5-9]|3\d))\b|\b(price of|stock|share price|weather|forecast|score|exchange rate|release date|who won|who is the (?:current )?(?:ceo|president|prime minister)|look up|search (?:for|the web)|google)\b/i;
+
+/**
+ * Should this turn hit the live web? Explicit opt-ins (the composer's Search
+ * toggle, a `/search` prefix) always count. Otherwise only time-sensitive
+ * phrasing does — a regex, so ordinary chat pays zero extra latency and the
+ * search tool (a few extra seconds) is used only when it earns its keep.
+ * Turns grounded in the user's own documents never auto-search.
+ */
+export function wantsWebSearch(
+  prompt: string,
+  opts: { forced?: boolean; hasDocuments?: boolean } = {},
+): boolean {
+  if (opts.forced || SEARCH_PREFIX.test(prompt)) return true;
+  if (opts.hasDocuments) return false;
+  return FRESHNESS_HINT.test(prompt);
+}
+
+export function stripSearchPrefix(prompt: string): string {
+  return prompt.replace(SEARCH_PREFIX, "").trim();
+}
+
+const SEARCH_SYSTEM = `${CHAT_SYSTEM}
+
+You have a live web search tool. Use it for anything time-sensitive or that you cannot answer confidently from memory (news, prices, scores, recent releases, current office-holders). Search once, precisely; do not search for things you already know. Ground the answer in what you found, state dates when they matter, and mention the source site by name in the sentence. If results conflict or are thin, say so.`;
+
+export interface SearchReply {
+  text: string;
+  sources: WebSource[];
+}
+
+/**
+ * Streaming answer with the Responses API's built-in web_search tool.
+ * Tokens flow through onDelta exactly like streamChat; onSearching fires when
+ * the model decides to search (drives the "Searching the web..." state);
+ * citations are collected and de-duplicated by URL. `search_context_size:
+ * "low"` keeps searches fast and cheap.
+ */
+export async function streamChatWithSearch(
+  prompt: string,
+  history: HistoryTurn[],
+  context: string[] = [],
+  memories: string[] = [],
+  onDelta: (delta: string) => void = () => {},
+  onSearching: () => void = () => {},
+): Promise<SearchReply> {
+  const stream = await getClient().responses.create({
+    model: env.CHAT_MODEL,
+    stream: true,
+    tools: [{ type: "web_search", search_context_size: "low" }],
+    input: [
+      { role: "developer", content: SEARCH_SYSTEM },
+      ...memoryMessage(memories),
+      ...contextMessage(context),
+      ...toMessages(history),
+      { role: "user", content: prompt },
+    ],
+  });
+
+  let text = "";
+  const sources = new Map<string, WebSource>();
+  for await (const evt of stream) {
+    if (evt.type === "response.web_search_call.searching") {
+      onSearching();
+    } else if (evt.type === "response.output_text.delta") {
+      text += evt.delta;
+      onDelta(evt.delta);
+    } else if (evt.type === "response.output_text.annotation.added") {
+      const a = evt.annotation as {
+        type?: string;
+        url?: string;
+        title?: string;
+      };
+      if (a.type === "url_citation" && a.url && !sources.has(a.url)) {
+        sources.set(a.url, { url: a.url, title: a.title?.trim() || a.url });
+      }
+    } else if (evt.type === "response.failed" || evt.type === "error") {
+      throw new Error("web search response failed");
+    }
+  }
+  if (!text.trim()) throw new Error("web search returned an empty response");
+  return { text, sources: [...sources.values()] };
 }
