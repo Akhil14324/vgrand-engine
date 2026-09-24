@@ -167,13 +167,21 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex h-full min-h-0 flex-col text-sidebar-foreground">
       {/* Header — wordmark + search */}
       <div className="flex items-center justify-between px-3 pb-1 pt-3">
-        <Link href="/" onClick={onNavigate} aria-label="CatGPT home">
+        <Link
+          href="/"
+          onClick={onNavigate}
+          aria-label="CatGPT home"
+          className="flex items-center gap-2"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/catgpt-logo.png"
             alt="CatGPT"
             className="h-9 w-auto rounded-lg bg-white object-contain px-1.5 py-0.5"
           />
+          <span className="font-display text-lg font-semibold tracking-tight">
+            CatGPT
+          </span>
         </Link>
         <div className="flex items-center gap-0.5">
           <Button

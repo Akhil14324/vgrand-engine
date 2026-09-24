@@ -2,27 +2,37 @@
 
 import { useEffect, useRef, useState } from "react";
 
+const SPLASH_KEY = "catgpt:splash-played";
+
 /**
- * Opening splash — plays the launch video on every fresh page load while the
- * app mounts and data loads underneath it. When the video ends, the overlay
- * fades out and the already-loaded app is revealed.
+ * Opening splash — plays the launch video once per fresh app open (new tab or
+ * PWA launch). sessionStorage survives page refreshes but clears when the tab
+ * closes, so reloads skip straight to the app.
  *
- * Shows on mount only: full page loads / PWA launches replay it, in-app
- * client-side navigations do not.
+ * Renders nothing until the effect decides — server and client output stay
+ * identical (no hydration mismatch, no flash on refresh).
  */
 export function Splash() {
+  const [ready, setReady] = useState(false);
   const [fading, setFading] = useState(false);
   const [gone, setGone] = useState(false);
   const started = useRef(false);
 
-  // If the video never starts (autoplay blocked / decode error), don't trap
-  // the user — bail out shortly after mount instead.
   useEffect(() => {
+    if (sessionStorage.getItem(SPLASH_KEY)) return;
+    sessionStorage.setItem(SPLASH_KEY, "1");
+    setReady(true);
+  }, []);
+
+  // If the video never starts (autoplay blocked / decode error), don't trap
+  // the user — bail out shortly after it should have begun.
+  useEffect(() => {
+    if (!ready) return;
     const t = setTimeout(() => {
       if (!started.current) setFading(true);
     }, 2500);
     return () => clearTimeout(t);
-  }, []);
+  }, [ready]);
 
   useEffect(() => {
     if (!fading) return;
@@ -30,7 +40,7 @@ export function Splash() {
     return () => clearTimeout(t);
   }, [fading]);
 
-  if (gone) return null;
+  if (!ready || gone) return null;
 
   return (
     <div

@@ -145,7 +145,7 @@ function Hero() {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-10">
       <h1 className="text-center font-display text-2xl font-medium tracking-tight md:text-3xl">
-        Ready when you are.
+        Cat is waiting for you.
       </h1>
       <div className="mt-7 w-full">
         <Composer />
