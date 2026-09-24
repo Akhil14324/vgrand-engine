@@ -3,6 +3,9 @@ import { prisma } from "@catgpt/db";
 import { updateConversationSchema } from "@catgpt/types";
 import { forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toConversationDto } from "../lib/serialize.js";
+import { loadTranscript, transcriptMarkdown } from "../lib/transcript.js";
+import { renderMarkdownPdf } from "../services/pdf-export.js";
+import { storeFile } from "../services/storage.js";
 
 const PREVIEW_INCLUDE = {
   _count: { select: { generations: true } },
@@ -101,6 +104,30 @@ export async function conversationRoutes(app: FastifyInstance) {
       include: PREVIEW_INCLUDE,
     });
     return toConversationDto(conversation);
+  });
+
+  /** Whole chat as Markdown text (client saves it as a .md file). */
+  app.get("/conversations/:id/export", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const conversation = await loadOwned(req, id);
+    const md = transcriptMarkdown(conversation.title, await loadTranscript(id));
+    return reply
+      .header("Content-Type", "text/markdown; charset=utf-8")
+      .send(md);
+  });
+
+  /** Whole chat as a PDF; returns the stored file's URL. */
+  app.post("/conversations/:id/pdf", async (req) => {
+    const { id } = req.params as { id: string };
+    const conversation = await loadOwned(req, id);
+    const md = transcriptMarkdown(conversation.title, await loadTranscript(id));
+    const buffer = await renderMarkdownPdf(conversation.title.slice(0, 90), md);
+    const url = await storeFile({
+      buffer,
+      mimeType: "application/pdf",
+      keyPrefix: `exports/${req.userId}`,
+    });
+    return { url };
   });
 
   /** Delete a chat and its generations (cascade). */

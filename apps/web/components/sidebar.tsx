@@ -44,6 +44,7 @@ import {
   useUpdateConversation,
 } from "@/lib/hooks";
 import { ImageUsage } from "@/components/image-usage";
+import { InstallButton } from "@/components/pwa";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -425,6 +426,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <p className="truncate text-sm">{user?.name ?? user?.email}</p>
           <ImageUsage />
         </div>
+        <InstallButton />
         <Button
           variant="ghost"
           size="icon"

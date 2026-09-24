@@ -90,18 +90,19 @@ model Workspace {
 // A "chat" — groups generations into a conversation you can revisit and
 // continue, like Claude/ChatGPT history.
 model Conversation {
-  id          String       @id @default(uuid())
+  id          String              @id @default(uuid())
   userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String // auto-derived from the first prompt
-  pinned      Boolean      @default(false)
-  archived    Boolean      @default(false)
+  pinned      Boolean             @default(false)
+  archived    Boolean             @default(false)
   generations Generation[]
   documents   Document[]
+  shares      ConversationShare[]
   workspaceId String?
-  workspace   Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  workspace   Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([workspaceId])
@@ -204,6 +205,17 @@ model DocumentChunk {
   embedding  Unsupported("vector(1536)")?
 
   @@index([documentId])
+}
+
+// Public read-only link to a whole chat (text + images), revocable.
+model ConversationShare {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  token          String       @unique
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
 }
 
 model ShareLink {

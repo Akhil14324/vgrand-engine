@@ -403,3 +403,21 @@ export interface BrandDto {
   createdAt: string;
   updatedAt: string;
 }
+
+/* ------------------------------ shared chats ------------------------------ */
+
+export interface PublicChatTurn {
+  id: string;
+  prompt: string;
+  kind: GenerationKind;
+  textResponse: string | null;
+  imageUrls: string[];
+  createdAt: string;
+}
+
+/** Read-only view of a chat behind a public share link. */
+export interface PublicChatDto {
+  title: string;
+  createdAt: string;
+  turns: PublicChatTurn[];
+}

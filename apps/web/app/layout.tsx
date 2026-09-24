@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Splash } from "@/components/splash";
+import { PwaRegister } from "@/components/pwa";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -17,9 +18,9 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "CatGPT — Themed AI Image Studio",
+  title: "CatGPT — AI Chat & Image Studio",
   description:
-    "Generate themed marketing images with prompt templates, boards, and shareable links.",
+    "Chat with AI, plan sales campaigns, and create on-brand images — installable on your phone or desktop.",
   applicationName: "CatGPT",
   appleWebApp: {
     capable: true,
@@ -46,6 +47,7 @@ export default function RootLayout({
         <Providers>
           {children}
           <Splash />
+          <PwaRegister />
         </Providers>
       </body>
     </html>

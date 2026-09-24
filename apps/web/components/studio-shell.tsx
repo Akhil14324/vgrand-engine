@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { ChatMenu } from "@/components/chat-menu";
 import { useConversation, useThemes } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,9 @@ export function StudioShell() {
             ) : null}
             {conversation?.title}
           </div>
+          {activeConversationId && conversation && (
+            <ChatMenu conversationId={activeConversationId} title={conversation.title} />
+          )}
           <Button
             variant="ghost"
             size="icon"

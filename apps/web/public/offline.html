@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#17161c" />
+  <title>CatGPT - offline</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; align-items: center; justify-content: center; background: #17161c; color: #ececf1; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 22rem; padding: 1.5rem; text-align: center; }
+    img { width: 5rem; height: auto; border-radius: 1rem; background: #fff; padding: .25rem; }
+    h1 { font-size: 1.25rem; margin: 1.25rem 0 .5rem; }
+    p { margin: 0 0 1.25rem; color: #a1a1aa; line-height: 1.5; font-size: .95rem; }
+    button { background: #ececf1; color: #17161c; border: 0; border-radius: .6rem; padding: .65rem 1.2rem; font-size: .95rem; font-weight: 600; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/catgpt-logo.png" alt="CatGPT" />
+    <h1>You are offline</h1>
+    <p>CatGPT needs an internet connection to chat and create images. Your chats are safe - reconnect and pick up where you left off.</p>
+    <button onclick="location.reload()">Try again</button>
+  </main>
+</body>
+</html>
