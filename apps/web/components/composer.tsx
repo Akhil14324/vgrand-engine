@@ -14,6 +14,7 @@ import {
   ArrowUp,
   Building2,
   FileText,
+  Globe,
   Home,
   Loader2,
   Mic,
@@ -89,6 +90,9 @@ export function Composer() {
   const [highlight, setHighlight] = useState(0);
   const [refImages, setRefImages] = useState<string[]>([]);
   const [docs, setDocs] = useState<DocumentDto[]>([]);
+  // One-shot "search the web for this message" toggle; time-sensitive
+  // questions are also detected server-side without it.
+  const [webSearch, setWebSearch] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -310,6 +314,7 @@ export function Composer() {
     setValue("");
     setRefImages([]);
     setDocs([]);
+    setWebSearch(false);
 
     create.mutate(
       {
@@ -318,6 +323,7 @@ export function Composer() {
         quality,
         referenceImageUrls: refImages.length ? refImages : undefined,
         documentIds: docs.length ? docs.map((d) => d.id) : undefined,
+        webSearch: webSearch || undefined,
         conversationId: activeConversationId ?? undefined,
         // Only relevant on the first send — it gives the new conversation a
         // durable workspace home (server ignores it on existing chats).
@@ -334,7 +340,7 @@ export function Composer() {
         onError: () => clearPendingTurn(),
       },
     );
-  }, [value, create, armedTheme, quality, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, clearPendingTurn, workspaceContextId]);
+  }, [value, create, armedTheme, quality, webSearch, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -576,6 +582,22 @@ export function Composer() {
               />
 
               <div className="mb-0.5 flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setWebSearch((v) => !v)}
+                  aria-pressed={webSearch}
+                  aria-label="Search the web for this message"
+                  title="Search the web"
+                  className={cn(
+                    "flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs transition-colors hover:bg-accent",
+                    webSearch
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Globe className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Search</span>
+                </button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button className="hidden rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:block">

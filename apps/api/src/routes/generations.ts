@@ -234,6 +234,7 @@ export async function generationRoutes(app: FastifyInstance) {
               : {}),
             quality: body.quality ?? "low",
             size: body.size ?? "auto",
+            ...(body.webSearch ? { webSearch: true } : {}),
           },
         },
       });

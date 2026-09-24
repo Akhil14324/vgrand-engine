@@ -50,6 +50,21 @@ function appendDelta(qc: QueryClient, generationId: string, delta: string) {
   );
 }
 
+/** Flag a turn as "searching the web" until its first answer token lands. */
+function markSearching(qc: QueryClient, generationId: string) {
+  const apply = (g: GenerationDto): GenerationDto =>
+    g.id === generationId
+      ? { ...g, metadata: { ...(g.metadata ?? {}), searching: true } }
+      : g;
+  qc.setQueryData<GenerationDto>(["generation", generationId], (old) =>
+    old ? apply(old) : old,
+  );
+  qc.setQueriesData<Paginated<GenerationDto>>(
+    { queryKey: ["generations"] },
+    (old) => (old ? { ...old, items: old.items.map(apply) } : old),
+  );
+}
+
 /** Show a progressive preview while the final image still renders — the
  * partial lands in imageUrls[0] so the card displays it instantly. */
 function applyPartialImage(qc: QueryClient, generationId: string, dataUrl: string) {
@@ -96,6 +111,8 @@ export function useGenerationStream(
             appendDelta(qc, evt.generationId, evt.delta);
           } else if (evt.partialImage) {
             applyPartialImage(qc, evt.generationId, evt.partialImage);
+          } else if (evt.searching) {
+            markSearching(qc, evt.generationId);
           } else {
             qc.invalidateQueries({ queryKey: ["generation", id] });
             qc.invalidateQueries({ queryKey: ["generations"] });

@@ -173,6 +173,8 @@ export const createGenerationSchema = z.object({
   referenceImageUrls: z.array(z.string().url()).max(10).optional(),
   /** Uploaded PDFs to attach to this chat — their chunks feed RAG answers. */
   documentIds: z.array(z.string().uuid()).max(4).optional(),
+  /** Force a live web search for this turn (otherwise auto-detected). */
+  webSearch: z.boolean().optional(),
   parentId: z.string().uuid().optional(),
 });
 export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;
@@ -245,10 +247,19 @@ export interface ApiError {
 }
 
 /** SSE payload pushed on /generations/:id/events */
+/** A web page the answer was grounded on (web search citations). */
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
 export interface GenerationEvent {
   generationId: string;
   status: GenerationStatus;
   kind?: GenerationKind;
+  /** True while a live web search is running (before the answer streams). */
+  searching?: boolean;
+  sources?: WebSource[];
   /** Incremental text token for streaming chat replies. */
   delta?: string;
   /** Progressive preview (data URL) pushed while an image renders. */

@@ -22,9 +22,13 @@ import {
   loadChatHistory,
   runWithCodeInterpreter,
   streamChat,
+  streamChatWithSearch,
   stripRunPrefix,
+  stripSearchPrefix,
   wantsCodeExecution,
+  wantsWebSearch,
 } from "./chat.js";
+import type { WebSource } from "@catgpt/types";
 import { retrieveContext, runDocumentIngestion } from "./documents.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { refundImageUsage } from "../lib/usage.js";
@@ -152,25 +156,70 @@ export async function runGeneration(generationId: string): Promise<void> {
       // "run this" / "/run" → real Python execution in OpenAI's sandbox
       // (non-streaming — runs take seconds; the reply is assembled once).
       const codeRun = wantsCodeExecution(generation.prompt);
-      const text = codeRun
-        ? await runWithCodeInterpreter(
-            stripRunPrefix(generation.prompt) || generation.prompt,
-            history,
-          )
-        : await streamChat(
+      const onDelta = (delta: string) =>
+        publishGenerationEvent({
+          generationId,
+          status: "processing",
+          kind: "text",
+          delta,
+        });
+
+      // Live web search only when asked for or clearly time-sensitive - the
+      // normal path stays untouched (no added latency). If the search path
+      // fails before answering, fall back to a plain reply instead of erroring.
+      let text = "";
+      let sources: WebSource[] = [];
+      let searched = false;
+      if (codeRun) {
+        text = await runWithCodeInterpreter(
+          stripRunPrefix(generation.prompt) || generation.prompt,
+          history,
+        );
+      } else {
+        const useSearch = wantsWebSearch(generation.prompt, {
+          forced: meta.webSearch === true,
+          hasDocuments: context.length > 0,
+        });
+        if (useSearch) {
+          let streamed = false;
+          try {
+            const reply = await streamChatWithSearch(
+              stripSearchPrefix(generation.prompt) || generation.prompt,
+              history,
+              context,
+              memories,
+              (d) => {
+                streamed = true;
+                onDelta(d);
+              },
+              () =>
+                publishGenerationEvent({
+                  generationId,
+                  status: "processing",
+                  kind: "text",
+                  searching: true,
+                }),
+            );
+            text = reply.text;
+            sources = reply.sources;
+            searched = true;
+          } catch (err) {
+            // Tokens already reached the client, so we cannot restart cleanly.
+            if (streamed) throw err;
+            console.error("[worker] web search failed, answering without it:", err);
+          }
+        }
+        if (!searched) {
+          text = await streamChat(
             generation.prompt,
             history,
             context,
             memories,
             workspaceId ? "workspace" : "chat",
-            (delta) =>
-              publishGenerationEvent({
-                generationId,
-                status: "processing",
-                kind: "text",
-                delta,
-              }),
+            onDelta,
           );
+        }
+      }
       await prisma.generation.update({
         where: { id: generationId },
         data: {
@@ -180,6 +229,12 @@ export async function runGeneration(generationId: string): Promise<void> {
           metadata: {
             ...meta,
             ...(codeRun ? { codeRun: true } : {}),
+            ...(searched
+              ? {
+                  webSearched: true,
+                  sources: sources.map((s) => ({ title: s.title, url: s.url })),
+                }
+              : {}),
             latencyMs: Date.now() - startedAt,
           },
         },
@@ -189,6 +244,7 @@ export async function runGeneration(generationId: string): Promise<void> {
         status: "completed",
         kind: "text",
         textResponse: text,
+        ...(searched ? { sources } : {}),
       });
       // Fire-and-forget: mine the turn for durable user facts (ChatGPT memory).
       void rememberTurn(
