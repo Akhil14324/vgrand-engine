@@ -5,6 +5,7 @@ import { badRequest, forbidden, notFound } from "../lib/errors.js";
 import { toDocumentDto } from "../lib/serialize.js";
 import { enqueueDocumentIngestion } from "../services/queue.js";
 import { storeFile } from "../services/storage.js";
+import { MAX_BRAND_DOCUMENTS, findAccessibleBrand } from "../lib/brand.js";
 
 /**
  * PDF/DOCX uploads for RAG. The file is stored, then ingestion (text
@@ -42,6 +43,20 @@ export async function documentRoutes(app: FastifyInstance) {
       .success
       ? (workspaceField!.value as string)
       : null;
+    // Optional brandId field - the file becomes part of that brand's durable
+    // knowledge base, retrieved automatically whenever brand mode is on.
+    const brandField = file.fields["brandId"] as { value?: string } | undefined;
+    const brandId = z.string().uuid().safeParse(brandField?.value).success
+      ? (brandField!.value as string)
+      : null;
+    if (brandId) {
+      const brand = await findAccessibleBrand(req.userId, brandId);
+      if (brand._count.documents >= MAX_BRAND_DOCUMENTS) {
+        throw badRequest(
+          `a brand can hold up to ${MAX_BRAND_DOCUMENTS} documents - remove one first`,
+        );
+      }
+    }
     if (workspaceId) {
       const ws = await prisma.workspace.findUnique({
         where: { id: workspaceId },
@@ -57,7 +72,7 @@ export async function documentRoutes(app: FastifyInstance) {
     });
 
     const doc = await prisma.document.create({
-      data: { userId: req.userId, filename, storageUrl, workspaceId },
+      data: { userId: req.userId, filename, storageUrl, workspaceId, brandId },
     });
     await enqueueDocumentIngestion(doc.id, file.mimetype);
     return reply.code(201).send(toDocumentDto(doc));
@@ -68,12 +83,14 @@ export async function documentRoutes(app: FastifyInstance) {
     const q = req.query as {
       conversationId?: string;
       workspaceId?: string;
+      brandId?: string;
     };
     const docs = await prisma.document.findMany({
       where: {
         userId: req.userId,
         ...(q.conversationId ? { conversationId: q.conversationId } : {}),
         ...(q.workspaceId ? { workspaceId: q.workspaceId } : {}),
+        ...(q.brandId ? { brandId: q.brandId } : {}),
       },
       orderBy: { createdAt: "desc" },
       take: 50,

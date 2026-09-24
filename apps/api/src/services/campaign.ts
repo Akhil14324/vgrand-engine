@@ -3,6 +3,13 @@ import { env } from "../env.js";
 import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
 import { getImageUsage, recordImageUsage } from "../lib/usage.js";
 import {
+  brandImageGuidance,
+  brandReferenceUrls,
+  loadBrandContext,
+} from "../lib/brand.js";
+import type { BrandProfile } from "@catgpt/types";
+import {
+  brandMessage,
   getClient,
   memoryMessage,
   contextMessage,
@@ -143,12 +150,23 @@ export async function streamCampaign(
   context: string[],
   memories: string[],
   onDelta: (delta: string) => void,
+  brand: string | null = null,
 ): Promise<CampaignReply> {
   const stream = await getClient().chat.completions.create({
     model: env.CAMPAIGN_MODEL,
     stream: true,
     messages: [
       { role: "system", content: CAMPAIGN_SYSTEM },
+      ...brandMessage(brand),
+      ...(brand
+        ? [
+            {
+              role: "system" as const,
+              content:
+                "A Brand Profile is provided above. Treat every fact in it as already answered in the interview: do not ask about it again. Ask only about what is genuinely missing (at most 3 questions), or go straight to the campaign if it is enough.",
+            },
+          ]
+        : []),
       ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),
@@ -226,8 +244,20 @@ export async function spawnCreatives(params: {
   userPrompt: string;
   reply: string;
   requested: number;
+  brandId?: string | null;
 }): Promise<string | null> {
   const { userId, conversationId, requested } = params;
+  const brand = params.brandId
+    ? await loadBrandContext(params.brandId, userId)
+    : null;
+  const brandRefs = brand ? brandReferenceUrls(brand.assets) : [];
+  const guidance = brand
+    ? brandImageGuidance(
+        brand.name,
+        (brand.profile ?? {}) as BrandProfile,
+        brand.assets.some((a) => a.kind === "logo"),
+      )
+    : "";
   const usage = await getImageUsage(userId);
   const count = Math.min(requested, usage.remaining);
   if (count <= 0) {
@@ -247,11 +277,15 @@ export async function spawnCreatives(params: {
         conversationId,
         kind: "image",
         prompt: brief.prompt,
-        finalPrompt: buildFinalPrompt(null, brief.prompt),
+        finalPrompt: buildFinalPrompt(null, brief.prompt) + guidance,
         provider: resolveProvider(null),
         metadata: {
           quality: env.CAMPAIGN_IMAGE_QUALITY,
           size: "auto",
+          ...(brandRefs.length
+            ? { referenceImageUrl: brandRefs[0], referenceImageUrls: brandRefs }
+            : {}),
+          ...(params.brandId ? { brandId: params.brandId } : {}),
           campaignCreative: {
             index: i + 1,
             total: briefs.length,

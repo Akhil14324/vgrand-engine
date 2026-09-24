@@ -142,6 +142,20 @@ export function memoryMessage(memories: string[]) {
   ];
 }
 
+/**
+ * Brand mode: the compact brand digest (never the raw files - those are
+ * retrieved as passages on demand). Off = a normal, common answer.
+ */
+export function brandMessage(brand: string | null) {
+  if (!brand) return [];
+  return [
+    {
+      role: "system" as const,
+      content: `The user has switched on BRAND MODE. Answer as the marketing and sales assistant for this brand, using its facts, audience, voice and goals below. Ground advice in these facts, write copy in the brand's tone, and say plainly when something is not covered instead of inventing brand details.\n\n${brand}`,
+    },
+  ];
+}
+
 /** Non-streaming reply (kept for callers that need the full string at once). */
 export async function answerChat(
   prompt: string,
@@ -176,12 +190,14 @@ export async function streamChat(
   memories: string[] = [],
   mode: ChatMode = "chat",
   onDelta: (delta: string) => void = () => {},
+  brand: string | null = null,
 ): Promise<string> {
   const stream = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
     stream: true,
     messages: [
       { role: "system", content: systemFor(mode) },
+      ...brandMessage(brand),
       ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),
@@ -320,6 +336,7 @@ export async function streamChatWithSearch(
   memories: string[] = [],
   onDelta: (delta: string) => void = () => {},
   onSearching: () => void = () => {},
+  brand: string | null = null,
 ): Promise<SearchReply> {
   const stream = await getClient().responses.create({
     model: env.CHAT_MODEL,
@@ -330,6 +347,7 @@ export async function streamChatWithSearch(
     tools: [{ type: "web_search", search_context_size: "low" }],
     input: [
       { role: "developer", content: SEARCH_SYSTEM },
+      ...brandMessage(brand),
       ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),

@@ -20,6 +20,12 @@ import {
   recordImageUsage,
 } from "../lib/usage.js";
 import { isCampaignConversation, isCampaignPrompt } from "../services/campaign.js";
+import {
+  brandImageGuidance,
+  brandReferenceUrls,
+  loadBrandContext,
+} from "../lib/brand.js";
+import type { BrandProfile } from "@catgpt/types";
 import { env } from "../env.js";
 
 /**
@@ -97,6 +103,13 @@ export async function generationRoutes(app: FastifyInstance) {
         throw notFound(`Theme "/${body.themeSlug}" not found`);
       }
     }
+    // Brand mode: usable only if it is the caller's own brand (or one in a
+    // workspace they own). Loaded once, narrowly - no assets/docs unless needed.
+    const brand = body.brandId
+      ? await loadBrandContext(body.brandId, req.userId)
+      : null;
+    if (body.brandId && !brand) throw notFound("Brand not found");
+
     const parent = body.parentId ? await loadOwned(req, body.parentId) : null;
     const userRefs = [
       ...new Set([
@@ -158,10 +171,15 @@ export async function generationRoutes(app: FastifyInstance) {
 
     // Theme brand references come first — they're the base the edit keeps;
     // any user-attached refs are extra guidance on top.
+    const brandRefs = brand && kind === "image" ? brandReferenceUrls(brand.assets) : [];
     const referenceImageUrls =
       kind === "image"
         ? [
-            ...new Set([...themeReferenceUrls(req, theme), ...userRefs]),
+            ...new Set([
+              ...brandRefs,
+              ...themeReferenceUrls(req, theme),
+              ...userRefs,
+            ]),
           ].slice(0, 10)
         : [];
 
@@ -221,7 +239,16 @@ export async function generationRoutes(app: FastifyInstance) {
           kind,
           prompt: body.prompt,
           finalPrompt:
-            kind === "image" ? buildFinalPrompt(theme, body.prompt) : body.prompt,
+            kind === "image"
+              ? buildFinalPrompt(theme, body.prompt) +
+                (brand
+                  ? brandImageGuidance(
+                      brand.name,
+                      (brand.profile ?? {}) as BrandProfile,
+                      brand.assets.some((a) => a.kind === "logo"),
+                    )
+                  : "")
+              : body.prompt,
           provider:
             kind === "image" ? resolveProvider(theme, body.provider) : "openai",
           parentId: effectiveParentId,
@@ -240,6 +267,7 @@ export async function generationRoutes(app: FastifyInstance) {
             quality: body.quality ?? "low",
             size: body.size ?? "auto",
             ...(body.webSearch ? { webSearch: true } : {}),
+            ...(brand ? { brandId: brand.id } : {}),
           },
         },
       });

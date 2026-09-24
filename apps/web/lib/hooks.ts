@@ -6,7 +6,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  BrandAssetDto,
+  BrandDto,
   ConversationDto,
+  CreateBrandAssetRequest,
+  CreateBrandRequest,
   CreateGenerationRequest,
   DocumentDto,
   GenerationDto,
@@ -16,6 +20,7 @@ import type {
   RegenerateGenerationRequest,
   ShareLinkDto,
   ThemeDto,
+  UpdateBrandRequest,
   UpdateConversationRequest,
   WorkspaceDetailDto,
   WorkspaceDto,
@@ -388,5 +393,84 @@ export function useDeleteMemory() {
     mutationFn: (id: string) =>
       apiFetch<void>(`/memories/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["memories"] }),
+  });
+}
+
+/* --------------------------------- brands --------------------------------- */
+
+export function useBrands() {
+  return useQuery({
+    queryKey: ["brands"],
+    queryFn: () => apiFetch<{ items: BrandDto[] }>("/brands"),
+    select: (d) => d.items,
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateBrand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateBrandRequest) =>
+      apiFetch<BrandDto>("/brands", { method: "POST", json: body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+export function useUpdateBrand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdateBrandRequest & { id: string }) =>
+      apiFetch<BrandDto>(`/brands/${id}`, { method: "PATCH", json: body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+export function useDeleteBrand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/brands/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+export function useAddBrandAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      brandId,
+      ...body
+    }: CreateBrandAssetRequest & { brandId: string }) =>
+      apiFetch<BrandAssetDto>(`/brands/${brandId}/assets`, {
+        method: "POST",
+        json: body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+export function useDeleteBrandAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ brandId, assetId }: { brandId: string; assetId: string }) =>
+      apiFetch<void>(`/brands/${brandId}/assets/${assetId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+/** Documents in a brand's knowledge base; polls while any is still ingesting. */
+export function useBrandDocuments(brandId: string | null) {
+  return useQuery({
+    queryKey: ["documents", "brand", brandId],
+    enabled: !!brandId,
+    queryFn: () =>
+      apiFetch<{ items: DocumentDto[] }>(`/documents?brandId=${brandId}`),
+    select: (d) => d.items,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((doc) => doc.status === "processing")
+        ? 2000
+        : false,
   });
 }

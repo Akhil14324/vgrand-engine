@@ -13,6 +13,7 @@ import {
   Home,
   Layers,
   LayoutGrid,
+  Store,
   LogOut,
   MoreHorizontal,
   PanelLeftClose,
@@ -230,6 +231,12 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           icon={LayoutGrid}
           label="Workspace"
           href="/workspaces"
+          onNavigate={onNavigate}
+        />
+        <NavRow
+          icon={Store}
+          label="Brand"
+          href="/brand"
           onNavigate={onNavigate}
         />
         <button

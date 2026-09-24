@@ -32,6 +32,7 @@ import type { WebSource } from "@catgpt/types";
 import { retrieveContext, runDocumentIngestion } from "./documents.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { refundImageUsage } from "../lib/usage.js";
+import { loadBrandContext } from "../lib/brand.js";
 import {
   isCampaignConversation,
   isCampaignPrompt,
@@ -149,12 +150,20 @@ export async function runGeneration(generationId: string): Promise<void> {
           : Promise.resolve(null),
       ]);
       const workspaceId = conversation?.workspaceId ?? null;
+      // Brand mode (toggle on): the compact digest goes into the prompt and the
+      // brand's documents join retrieval. Toggle off = brandId absent = common answer.
+      const brandId = typeof meta.brandId === "string" ? meta.brandId : null;
+      const brand = brandId
+        ? await loadBrandContext(brandId, generation.userId)
+        : null;
+      const brandSummary = brand?.summary?.trim() || null;
       // RAG + learned memory run in parallel — both are best-effort context.
       const [context, memories] = await Promise.all([
         generation.conversationId
           ? retrieveContext(generation.prompt, {
               conversationId: generation.conversationId,
               workspaceId,
+              brandId: brand?.id ?? null,
             }).catch(() => [])
           : Promise.resolve([]),
         loadLearnedMemories(generation.userId).catch(() => []),
@@ -196,6 +205,7 @@ export async function runGeneration(generationId: string): Promise<void> {
           context,
           memories,
           onDelta,
+          brandSummary,
         );
         text = reply.text;
         creativesRequested = reply.creativeCount;
@@ -210,6 +220,7 @@ export async function runGeneration(generationId: string): Promise<void> {
               userPrompt,
               reply: reply.text,
               requested: reply.creativeCount,
+              brandId: brand?.id ?? null,
             });
             if (note) {
               text += note;
@@ -252,6 +263,7 @@ export async function runGeneration(generationId: string): Promise<void> {
                   kind: "text",
                   searching: true,
                 }),
+              brandSummary,
             );
             text = reply.text;
             sources = reply.sources;
@@ -271,6 +283,7 @@ export async function runGeneration(generationId: string): Promise<void> {
             memories,
             workspaceId ? "workspace" : "chat",
             onDelta,
+            brandSummary,
           );
         }
       }

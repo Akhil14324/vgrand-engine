@@ -11,13 +11,21 @@ function hostOf(url: string): string {
 
 /** Citations under a web-searched answer — each opens the source in a new tab. */
 export function SourceChips({ sources }: { sources: WebSource[] }) {
+  // Search often returns several pages from one site - show each site once.
+  const seen = new Set<string>();
+  const unique = sources.filter((s) => {
+    const host = hostOf(s.url);
+    if (seen.has(host)) return false;
+    seen.add(host);
+    return true;
+  });
   return (
     <div className="mt-3 flex flex-wrap items-center gap-1.5">
       <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
         <Globe className="h-3 w-3" />
         Sources
       </span>
-      {sources.slice(0, 6).map((s) => (
+      {unique.slice(0, 6).map((s) => (
         <a
           key={s.url}
           href={s.url}

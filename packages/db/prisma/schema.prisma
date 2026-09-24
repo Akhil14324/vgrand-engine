@@ -20,6 +20,42 @@ model User {
   documents     Document[]
   workspaces    Workspace[]
   imageUsage    ImageUsage[]
+  brands        Brand[]
+}
+
+// A brand profile: guided questionnaire answers + a compact digest that is
+// injected into prompts, plus uploaded assets and documents. A user has one
+// personal brand (workspaceId null); a workspace can hold many brands, kept
+// separate like channels in one server.
+model Brand {
+  id          String       @id @default(uuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  category    String?
+  profile     Json         @default("{}")
+  summary     String       @default("") @db.Text // compact digest used in prompts
+  assets      BrandAsset[]
+  documents   Document[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model BrandAsset {
+  id        String   @id @default(uuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  kind      String // logo | product | reference
+  url       String
+  label     String?
+  createdAt DateTime @default(now())
+
+  @@index([brandId])
 }
 
 // Permanent per-image ledger behind the daily quota. No relation to
@@ -44,6 +80,7 @@ model Workspace {
   name          String
   documents     Document[]
   conversations Conversation[]
+  brands        Brand[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -56,7 +93,7 @@ model Conversation {
   id          String       @id @default(uuid())
   userId      String
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title       String       // auto-derived from the first prompt
+  title       String // auto-derived from the first prompt
   pinned      Boolean      @default(false)
   archived    Boolean      @default(false)
   generations Generation[]
@@ -84,29 +121,29 @@ model Theme {
 }
 
 model Generation {
-  id           String      @id @default(uuid())
-  userId       String
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  themeId      String?
-  theme        Theme?      @relation(fields: [themeId], references: [id])
-  kind         String      @default("image") // "image" | "text" — text = chat reply, no image
-  prompt       String      @db.Text // raw user idea
-  finalPrompt  String      @db.Text // template + user idea, what was actually sent
-  textResponse String?     @db.Text // assistant reply for kind="text"
-  provider     String // "openai" | "flux" | "ideogram"
-  model        String? // "gpt-image-2.5-flare" etc.
-  imageUrls    String[] // storage URLs (1+ per generation)
-  status       String      @default("pending") // pending | processing | completed | failed
-  error        String?
-  metadata     Json? // size, quality, seed, cost, latency
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  themeId        String?
+  theme          Theme?        @relation(fields: [themeId], references: [id])
+  kind           String        @default("image") // "image" | "text" — text = chat reply, no image
+  prompt         String        @db.Text // raw user idea
+  finalPrompt    String        @db.Text // template + user idea, what was actually sent
+  textResponse   String?       @db.Text // assistant reply for kind="text"
+  provider       String // "openai" | "flux" | "ideogram"
+  model          String? // "gpt-image-2.5-flare" etc.
+  imageUrls      String[] // storage URLs (1+ per generation)
+  status         String        @default("pending") // pending | processing | completed | failed
+  error          String?
+  metadata       Json? // size, quality, seed, cost, latency
   parentId       String? // for "regenerate/edit" chains
-  parent         Generation? @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
-  children       Generation[] @relation("GenerationChain")
+  parent         Generation?   @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Generation[]  @relation("GenerationChain")
   conversationId String? // chat this generation belongs to
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   shareLinks     ShareLink[]
   memories       Memory[]
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime      @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([themeId])
@@ -139,6 +176,8 @@ model Document {
   conversation   Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   workspaceId    String? // durable home in a Workspace — survives chats
   workspace      Workspace?      @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  brandId        String? // durable home in a Brand's knowledge base
+  brand          Brand?          @relation(fields: [brandId], references: [id], onDelete: Cascade)
   filename       String
   storageUrl     String?
   pageCount      Int             @default(0)
@@ -151,16 +190,17 @@ model Document {
   @@index([userId, createdAt(sort: Desc)])
   @@index([conversationId])
   @@index([workspaceId])
+  @@index([brandId])
 }
 
 // One text chunk of a Document, embedded for cosine-similarity search.
 // `embedding` is pgvector — Prisma can't read it, so inserts/queries use raw SQL.
 model DocumentChunk {
-  id         String                      @id @default(uuid())
+  id         String                       @id @default(uuid())
   documentId String
-  document   Document                    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document   Document                     @relation(fields: [documentId], references: [id], onDelete: Cascade)
   chunkIndex Int
-  content    String                      @db.Text
+  content    String                       @db.Text
   embedding  Unsupported("vector(1536)")?
 
   @@index([documentId])

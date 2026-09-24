@@ -175,6 +175,8 @@ export const createGenerationSchema = z.object({
   documentIds: z.array(z.string().uuid()).max(4).optional(),
   /** Force a live web search for this turn (otherwise auto-detected). */
   webSearch: z.boolean().optional(),
+  /** Answer/create as this brand (brand mode). Omit for a common answer. */
+  brandId: z.string().uuid().optional(),
   parentId: z.string().uuid().optional(),
 });
 export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;
@@ -267,4 +269,135 @@ export interface GenerationEvent {
   imageUrls?: string[];
   textResponse?: string | null;
   error?: string | null;
+}
+
+/* ---------------------------------- brands --------------------------------- */
+
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "use a hex colour like #C0392B");
+
+/**
+ * Answers to the guided brand questionnaire. Everything is optional so the
+ * kit is useful after the first section; the more filled in, the better the
+ * strategy. Amounts are numbers in the user's own currency.
+ */
+export const brandProfileSchema = z.object({
+  description: z.string().max(1200).optional(),
+  location: z.string().max(200).optional(),
+  stage: z.string().max(100).optional(),
+  offer: z.string().max(800).optional(),
+  avgPrice: z.number().nonnegative().optional(),
+  avgCost: z.number().nonnegative().optional(),
+  customers: z.string().max(800).optional(),
+  painPoints: z.string().max(800).optional(),
+  differentiator: z.string().max(800).optional(),
+  channels: z.array(z.string().max(40)).max(12).optional(),
+  monthlyOrders: z.number().nonnegative().optional(),
+  monthlyRevenue: z.number().nonnegative().optional(),
+  goalRevenue: z.number().nonnegative().optional(),
+  goalDays: z.number().int().positive().max(365).optional(),
+  monthlyBudget: z.number().nonnegative().optional(),
+  problems: z.string().max(1000).optional(),
+  competitors: z.string().max(600).optional(),
+  colors: z.array(hexColor).max(6).optional(),
+  tagline: z.string().max(160).optional(),
+  tone: z.string().max(300).optional(),
+});
+export type BrandProfile = z.infer<typeof brandProfileSchema>;
+
+export const BRAND_ASSET_KINDS = ["logo", "product", "reference"] as const;
+export type BrandAssetKind = (typeof BRAND_ASSET_KINDS)[number];
+
+export const createBrandSchema = z.object({
+  name: z.string().min(1).max(120),
+  category: z.string().max(120).optional(),
+  /** Omit for the user's personal brand; set to add a brand inside a workspace. */
+  workspaceId: z.string().uuid().optional(),
+  profile: brandProfileSchema.optional(),
+});
+export type CreateBrandRequest = z.infer<typeof createBrandSchema>;
+
+export const updateBrandSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  category: z.string().max(120).optional(),
+  profile: brandProfileSchema.optional(),
+});
+export type UpdateBrandRequest = z.infer<typeof updateBrandSchema>;
+
+export const createBrandAssetSchema = z.object({
+  url: z.string().url(),
+  kind: z.enum(BRAND_ASSET_KINDS),
+  label: z.string().max(120).optional(),
+});
+export type CreateBrandAssetRequest = z.infer<typeof createBrandAssetSchema>;
+
+export interface BrandAssetDto {
+  id: string;
+  kind: BrandAssetKind;
+  url: string;
+  label: string | null;
+}
+
+/** Plain arithmetic on the user's own numbers — no benchmarks, no guesses. */
+export interface BrandSnapshot {
+  /** (price - cost) / price, as a percentage. */
+  marginPct: number | null;
+  /** Gross profit on one order = price - cost. */
+  grossPerOrder: number | null;
+  /** Orders needed in the goal window to reach the revenue goal. */
+  ordersNeeded: number | null;
+  ordersPerDay: number | null;
+  /** Most you can spend to win one customer before losing money on the first order. */
+  breakEvenCac: number | null;
+  /** What the monthly budget allows per order if the goal is hit. */
+  budgetPerOrder: number | null;
+  /** Revenue still to find compared with the current monthly run-rate. */
+  revenueGapPerMonth: number | null;
+}
+
+export function computeBrandSnapshot(p: BrandProfile): BrandSnapshot {
+  const price = p.avgPrice && p.avgPrice > 0 ? p.avgPrice : null;
+  const cost = p.avgCost ?? null;
+  const gross = price !== null && cost !== null ? price - cost : null;
+  const ordersNeeded =
+    price !== null && p.goalRevenue ? Math.ceil(p.goalRevenue / price) : null;
+  const days = p.goalDays ?? null;
+  const months = days ? days / 30 : null;
+  return {
+    marginPct:
+      price !== null && gross !== null
+        ? Math.round((gross / price) * 1000) / 10
+        : null,
+    grossPerOrder: gross,
+    ordersNeeded,
+    ordersPerDay:
+      ordersNeeded !== null && days
+        ? Math.round((ordersNeeded / days) * 10) / 10
+        : null,
+    breakEvenCac: gross,
+    budgetPerOrder:
+      p.monthlyBudget && ordersNeeded !== null && months
+        ? Math.round(((p.monthlyBudget * months) / ordersNeeded) * 100) / 100
+        : null,
+    revenueGapPerMonth:
+      p.goalRevenue && months
+        ? Math.max(
+            0,
+            Math.round(p.goalRevenue / months - (p.monthlyRevenue ?? 0)),
+          )
+        : null,
+  };
+}
+
+export interface BrandDto {
+  id: string;
+  userId: string;
+  workspaceId: string | null;
+  name: string;
+  category: string | null;
+  profile: BrandProfile;
+  snapshot: BrandSnapshot;
+  assets: BrandAssetDto[];
+  documentCount: number;
+  createdAt: string;
+  updatedAt: string;
 }

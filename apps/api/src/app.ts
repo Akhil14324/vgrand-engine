@@ -19,6 +19,7 @@ import { shareRoutes } from "./routes/share.js";
 import { memoryRoutes } from "./routes/memories.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { documentRoutes } from "./routes/documents.js";
+import { brandRoutes } from "./routes/brands.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -99,6 +100,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(memoryRoutes);
   await app.register(uploadRoutes);
   await app.register(documentRoutes);
+  await app.register(brandRoutes);
 
   return app;
 }

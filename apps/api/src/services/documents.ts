@@ -157,7 +157,11 @@ export async function ingestDocument(
  */
 export async function retrieveContext(
   prompt: string,
-  scope: { conversationId: string | null; workspaceId: string | null },
+  scope: {
+    conversationId: string | null;
+    workspaceId: string | null;
+    brandId?: string | null;
+  },
 ): Promise<string[]> {
   const docs = await prisma.document.findMany({
     where: {
@@ -167,6 +171,7 @@ export async function retrieveContext(
           ? [{ conversationId: scope.conversationId }]
           : []),
         ...(scope.workspaceId ? [{ workspaceId: scope.workspaceId }] : []),
+        ...(scope.brandId ? [{ brandId: scope.brandId }] : []),
       ],
     },
     select: { id: true },

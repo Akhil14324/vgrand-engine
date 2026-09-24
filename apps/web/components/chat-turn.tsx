@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, FileText, Globe, Loader2, X } from "lucide-react";
+import { AlertCircle, FileText, Globe, Loader2, Store, X } from "lucide-react";
 import type { GenerationDto, WebSource } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
@@ -72,6 +72,12 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
             {generation.theme && (
               <Badge variant="default" className="text-[10px]">
                 /{generation.theme.slug}
+              </Badge>
+            )}
+            {typeof meta.brandId === "string" && (
+              <Badge variant="outline" className="gap-1 text-[10px]">
+                <Store className="h-2.5 w-2.5" />
+                brand
               </Badge>
             )}
             {generation.parentId && (

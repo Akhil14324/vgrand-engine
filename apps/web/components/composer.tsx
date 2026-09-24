@@ -16,6 +16,7 @@ import {
   FileText,
   Globe,
   Megaphone,
+  Store,
   Home,
   Loader2,
   Mic,
@@ -29,7 +30,14 @@ import {
 import type { DocumentDto, Quality, ThemeDto } from "@catgpt/types";
 import { apiFetch, ApiRequestError } from "@/lib/api";
 import { MAX_UPLOAD_MB } from "@/lib/config";
-import { useCreateGeneration, useDocuments, useThemes } from "@/lib/hooks";
+import {
+  useAddBrandAsset,
+  useBrands,
+  useCreateGeneration,
+  useDocuments,
+  useThemes,
+} from "@/lib/hooks";
+import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +95,11 @@ export function Composer() {
   } = useStudio();
   const { data: themes } = useThemes();
   const create = useCreateGeneration();
+  // Brand toggle: on = answers and images use the brand; off = common answers.
+  const { data: brands } = useBrands();
+  const { brandId: chosenBrand, setBrandId, draft, setDraft } = useBrandMode();
+  const activeBrand = resolveActiveBrand(brands, chosenBrand);
+  const addBrandAsset = useAddBrandAsset();
 
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -96,6 +109,15 @@ export function Composer() {
   // One-shot "search the web for this message" toggle; time-sensitive
   // questions are also detected server-side without it.
   const [webSearch, setWebSearch] = useState(false);
+
+  // Text handed over from another page (e.g. Brand -> "Build my sales strategy").
+  useEffect(() => {
+    if (draft !== null) {
+      setValue(draft);
+      setDraft(null);
+      textareaRef.current?.focus();
+    }
+  }, [draft, setDraft]);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -257,6 +279,11 @@ export function Composer() {
         batch.map(async (file) => {
           try {
             const form = new FormData();
+            // In brand mode the file also joins the brand's memory, so later
+            // chats can use it. Fields must precede the file in multipart.
+            if (activeBrand && isDocFile(file.type)) {
+              form.append("brandId", activeBrand.id);
+            }
             form.append("file", file);
             if (isDocFile(file.type)) {
               const doc = await apiFetch<DocumentDto>("/documents", {
@@ -269,6 +296,15 @@ export function Composer() {
                 method: "POST",
                 body: form,
               });
+              if (activeBrand) {
+                // Best-effort: hitting the 20-image cap must not block the message.
+                addBrandAsset.mutate({
+                  brandId: activeBrand.id,
+                  url: res.url,
+                  kind: "reference",
+                  label: file.name,
+                });
+              }
               setRefImages((prev) =>
                 prev.length < MAX_REFS ? [...prev, res.url] : prev,
               );
@@ -288,7 +324,7 @@ export function Composer() {
         }),
       );
     },
-    [refImages.length, docs.length],
+    [refImages.length, docs.length, activeBrand, addBrandAsset],
   );
 
   // Attached docs ingest async now — POST /documents returns "processing",
@@ -338,6 +374,7 @@ export function Composer() {
         referenceImageUrls: refImages.length ? refImages : undefined,
         documentIds: docs.length ? docs.map((d) => d.id) : undefined,
         webSearch: webSearch || undefined,
+        brandId: activeBrand?.id,
         conversationId: activeConversationId ?? undefined,
         // Only relevant on the first send — it gives the new conversation a
         // durable workspace home (server ignores it on existing chats).
@@ -354,7 +391,7 @@ export function Composer() {
         onError: () => clearPendingTurn(),
       },
     );
-  }, [value, create, armedTheme, quality, webSearch, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, clearPendingTurn, workspaceContextId]);
+  }, [value, create, armedTheme, quality, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -596,6 +633,49 @@ export function Composer() {
               />
 
               <div className="mb-0.5 flex shrink-0 items-center gap-1">
+                {brands && brands.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Brand mode"
+                        title={
+                          activeBrand
+                            ? `Brand mode: ${activeBrand.name}`
+                            : "Brand mode off"
+                        }
+                        className={cn(
+                          "flex max-w-[9rem] items-center gap-1 rounded-full px-2.5 py-1.5 text-xs transition-colors hover:bg-accent",
+                          activeBrand
+                            ? "bg-primary/15 text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Store className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden truncate sm:inline">
+                          {activeBrand ? activeBrand.name : "Brand off"}
+                        </span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Answer as…</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => setBrandId(null)}>
+                        Common answer (brand off)
+                        {!activeBrand && (
+                          <span className="ml-auto text-primary">●</span>
+                        )}
+                      </DropdownMenuItem>
+                      {brands.map((b) => (
+                        <DropdownMenuItem key={b.id} onClick={() => setBrandId(b.id)}>
+                          {b.name}
+                          {activeBrand?.id === b.id && (
+                            <span className="ml-auto text-primary">●</span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
                 <button
                   type="button"
                   onClick={() => setWebSearch((v) => !v)}
