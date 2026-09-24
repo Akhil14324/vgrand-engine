@@ -159,11 +159,34 @@ export async function generationRoutes(app: FastifyInstance) {
       }
     }
 
+    // An attached picture used to force an image job. Now a question ABOUT it
+    // ("what is wrong with this UI?") is answered as text with vision; only
+    // edit-style requests stay image jobs. One small classifier call, and only
+    // in this narrow case (attachment, no explicit trigger/parent/campaign).
+    let visionOnly = false;
+    if (
+      userRefs.length > 0 &&
+      !effectiveParentId &&
+      !IMAGE_TRIGGER.test(body.prompt) &&
+      !isCampaignPrompt(body.prompt) &&
+      !(conversationId && (await isCampaignConversation(conversationId)))
+    ) {
+      const intent = await classifyIntent(
+        body.prompt,
+        conversationId ? await loadChatHistory(conversationId) : [],
+        { hasImage: true },
+      );
+      visionOnly = intent === "text";
+    }
+
     // Strict gate: an image only on explicit request — "create an image" in
     // the prompt, attached references, or a regenerate/edit chain (explicit
     // or inferred just above). Everything else is a text reply.
     const kind =
-      userRefs.length > 0 || effectiveParentId || IMAGE_TRIGGER.test(body.prompt)
+      !visionOnly &&
+      (userRefs.length > 0 ||
+        effectiveParentId ||
+        IMAGE_TRIGGER.test(body.prompt))
         ? ("image" as const)
         : ("text" as const);
 
@@ -268,6 +291,7 @@ export async function generationRoutes(app: FastifyInstance) {
             size: body.size ?? "auto",
             ...(body.webSearch ? { webSearch: true } : {}),
             ...(brand ? { brandId: brand.id } : {}),
+            ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
           },
         },
       });

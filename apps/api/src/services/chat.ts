@@ -14,6 +14,8 @@ export interface HistoryTurn {
   prompt: string;
   kind: string;
   textResponse: string | null;
+  /** Images the user attached for the model to look at (vision turns). */
+  images?: string[];
 }
 
 /** Recent turns of a conversation, oldest first, for model context. */
@@ -41,7 +43,15 @@ export async function loadChatHistory(
     )
     .slice(0, take)
     .reverse()
-    .map(({ prompt, kind, textResponse }) => ({ prompt, kind, textResponse }));
+    .map(({ prompt, kind, textResponse, metadata }) => {
+      const v = (metadata as Record<string, unknown> | null)?.visionImageUrls;
+      return {
+        prompt,
+        kind,
+        textResponse,
+        ...(Array.isArray(v) ? { images: v as string[] } : {}),
+      };
+    });
 }
 
 let client: OpenAI | null = null;
@@ -57,17 +67,51 @@ export function getClient(): OpenAI {
   return client;
 }
 
+const assistantText = (t: HistoryTurn) =>
+  t.kind === "text" && t.textResponse ? t.textResponse : "[generated an image]";
+
+/** Plain-text history - safe for both the chat-completions and Responses APIs. */
 export function toMessages(history: HistoryTurn[]) {
   return history.flatMap((t) => [
     { role: "user" as const, content: t.prompt },
-    {
-      role: "assistant" as const,
-      content:
-        t.kind === "text" && t.textResponse
-          ? t.textResponse
-          : "[generated an image]",
-    },
+    { role: "assistant" as const, content: assistantText(t) },
   ]);
+}
+
+/**
+ * History for chat-completions with vision. Only the most recent image-bearing
+ * turn keeps its pictures - enough for follow-up questions ("and the button on
+ * the left?") without re-sending every image on every turn.
+ */
+export function toVisionMessages(
+  history: HistoryTurn[],
+): OpenAI.Chat.ChatCompletionMessageParam[] {
+  let last = -1;
+  history.forEach((t, i) => {
+    if (t.images?.length) last = i;
+  });
+  return history.flatMap((t, i): OpenAI.Chat.ChatCompletionMessageParam[] => [
+    {
+      role: "user",
+      content: i === last ? userContent(t.prompt, t.images ?? []) : t.prompt,
+    },
+    { role: "assistant", content: assistantText(t) },
+  ]);
+}
+
+/** A user message with pictures, in the chat-completions vision format. */
+export function userContent(
+  text: string,
+  images: string[],
+): string | OpenAI.Chat.ChatCompletionContentPart[] {
+  if (!images.length) return text;
+  return [
+    { type: "text", text },
+    ...images.map((url) => ({
+      type: "image_url" as const,
+      image_url: { url },
+    })),
+  ];
 }
 
 const CLASSIFY_SYSTEM = `You classify messages sent to CatGPT, an AI image-generation studio. Reply with exactly one word: IMAGE or CHAT.
@@ -84,6 +128,7 @@ CHAT: questions, explanations, coding help, document requests, conversation, or 
 export async function classifyIntent(
   prompt: string,
   history: HistoryTurn[],
+  opts: { hasImage?: boolean } = {},
 ): Promise<GenerationKind> {
   try {
     const res = await getClient().chat.completions.create({
@@ -91,7 +136,12 @@ export async function classifyIntent(
       temperature: 0,
       max_tokens: 4,
       messages: [
-        { role: "system", content: CLASSIFY_SYSTEM },
+        {
+          role: "system",
+          content: opts.hasImage
+            ? `${CLASSIFY_SYSTEM}\n\nThe user attached an image to this message. Questions ABOUT the image (what is it, what is wrong with it, describe/read/analyze/compare it, give feedback) are CHAT. Requests to CHANGE or build on it (edit, restyle, remove or add something, make a poster/variation from it) are IMAGE.`
+            : CLASSIFY_SYSTEM,
+        },
         ...toMessages(history),
         { role: "user", content: prompt },
       ],
@@ -109,6 +159,7 @@ You can:
 - Answer questions and explain concepts clearly and concisely.
 - Help with coding: write, debug, review, and explain code; run coding assessments — generate interview-style questions or quizzes on request, and grade/evaluate code the user pastes with specific, constructive feedback.
 - Answer questions about PDFs the user attached — retrieved passages are provided as "Document context"; ground your answers in them and say when the document doesn't cover something. Quote filenames when relevant.
+- Look at images the user attaches: describe them, read text in them, give design/UX/product feedback, compare options, or answer questions about them. Base your answer only on what is actually visible.
 - If the user seems to want an image, tell them to start the request with "create an image" (a /theme like /restaurant or /infra adds brand styling). Never claim to have generated an image or a file you didn't actually produce.
 
 User messages often have typos, missing words, or mixed English/Telugu. Never comment on spelling or ask the user to rephrase — silently correct mistakes and answer the most likely meaning. If the interpretation isn't obvious, state your best guess briefly and answer it fully anyway — never end your reply with a clarifying question.`;
@@ -191,6 +242,7 @@ export async function streamChat(
   mode: ChatMode = "chat",
   onDelta: (delta: string) => void = () => {},
   brand: string | null = null,
+  images: string[] = [],
 ): Promise<string> {
   const stream = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
@@ -200,8 +252,8 @@ export async function streamChat(
       ...brandMessage(brand),
       ...memoryMessage(memories),
       ...contextMessage(context),
-      ...toMessages(history),
-      { role: "user", content: prompt },
+      ...toVisionMessages(history),
+      { role: "user", content: userContent(prompt, images) },
     ],
   });
   let acc = "";

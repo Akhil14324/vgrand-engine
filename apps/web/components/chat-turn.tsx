@@ -25,7 +25,10 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
 
   const image = generation.imageUrls[0];
   const meta = (generation.metadata ?? {}) as Record<string, unknown>;
-  const refImages = (meta.referenceImageUrls as string[] | undefined) ?? [];
+  const refImages = [
+    ...((meta.referenceImageUrls as string[] | undefined) ?? []),
+    ...((meta.visionImageUrls as string[] | undefined) ?? []),
+  ];
   const active = selectedId === generation.id;
   const sources = (meta.sources as WebSource[] | undefined) ?? [];
   const searching = meta.searching === true;

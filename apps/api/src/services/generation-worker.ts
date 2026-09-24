@@ -157,6 +157,12 @@ export async function runGeneration(generationId: string): Promise<void> {
         ? await loadBrandContext(brandId, generation.userId)
         : null;
       const brandSummary = brand?.summary?.trim() || null;
+      // Pictures to look at (vision turn): the model answers about them.
+      const visionImages = Array.isArray(meta.visionImageUrls)
+        ? (meta.visionImageUrls as unknown[]).filter(
+            (u): u is string => typeof u === "string",
+          )
+        : [];
       // RAG + learned memory run in parallel — both are best-effort context.
       const [context, memories] = await Promise.all([
         generation.conversationId
@@ -240,10 +246,12 @@ export async function runGeneration(generationId: string): Promise<void> {
           history,
         );
       } else {
-        const useSearch = wantsWebSearch(generation.prompt, {
-          forced: meta.webSearch === true,
-          hasDocuments: context.length > 0,
-        });
+        const useSearch =
+          visionImages.length === 0 &&
+          wantsWebSearch(generation.prompt, {
+            forced: meta.webSearch === true,
+            hasDocuments: context.length > 0,
+          });
         if (useSearch) {
           let streamed = false;
           try {
@@ -284,6 +292,7 @@ export async function runGeneration(generationId: string): Promise<void> {
             workspaceId ? "workspace" : "chat",
             onDelta,
             brandSummary,
+            visionImages,
           );
         }
       }

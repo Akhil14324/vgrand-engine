@@ -779,7 +779,7 @@ export function Composer() {
         </Badge>
         <span className="hidden sm:inline">
           <kbd className="rounded border px-1 font-mono">/</kbd> themes &amp; /campaign · drop
-          an image to edit or a PDF/Word doc to ask about ·{" "}
+          an image to edit or ask about it, or a PDF/Word doc to ask about ·{" "}
           <kbd className="rounded border px-1 font-mono">Enter</kbd> to send
         </span>
       </div>
