@@ -10,6 +10,7 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  Wand2,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -33,6 +34,15 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SIZE_PRESETS, enlarge, resizeCover, saveBlob } from "@/lib/image-tools";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -48,6 +58,92 @@ async function downloadImage(url: string, filename: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(a.href);
+}
+
+const REMOVE_BG_PROMPT =
+  "Remove the background completely. Keep the main subject exactly as it is - same shape, colours, details and any text - and place it on a clean, plain white background.";
+
+/**
+ * Basic image tools. Resize and enlarge run in the browser (free, no quota);
+ * remove-background is a normal image edit, so it counts as one image.
+ */
+function ImageTools({ generation }: { generation: GenerationDto }) {
+  const regenerate = useRegenerate();
+  const { select } = useStudio();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = generation.imageUrls[0]!;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Image tools" disabled={busy}>
+                {busy ? <Loader2 className="animate-spin" /> : <Wand2 />}
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Image tools</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start">
+          <DropdownMenuLabel>Image tools</DropdownMenuLabel>
+          <DropdownMenuItem
+            onClick={() =>
+              regenerate.mutate(
+                { id: generation.id, prompt: REMOVE_BG_PROMPT, quality: "medium" },
+                {
+                  onSuccess: (res) => select(res.generationId),
+                  onError: (e) => setError(e.message),
+                },
+              )
+            }
+          >
+            Remove background
+            <span className="ml-auto pl-3 text-[10px] text-muted-foreground">1 image</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>Resize and download</DropdownMenuLabel>
+          {SIZE_PRESETS.map((p) => (
+            <DropdownMenuItem
+              key={p.id}
+              onClick={() =>
+                run(async () =>
+                  saveBlob(await resizeCover(url, p.w, p.h), `catgpt-${p.id}-${p.w}x${p.h}.png`),
+                )
+              }
+            >
+              {p.label}
+              <span className="ml-auto pl-3 text-[10px] text-muted-foreground">
+                {p.w}×{p.h}
+              </span>
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuItem
+            onClick={() =>
+              run(async () => saveBlob(await enlarge(url), `catgpt-${generation.id}-2x.png`))
+            }
+          >
+            Enlarge 2× and download
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {error && <span className="px-1 text-[11px] text-destructive">{error}</span>}
+    </>
+  );
 }
 
 export function RegenerateButton({ generation }: { generation: GenerationDto }) {
@@ -211,7 +307,7 @@ export function ActionRow({
                   onSuccess: ({ url }) => {
                     const a = document.createElement("a");
                     a.href = url;
-                    a.download = `prompthub-${generation.id}.pdf`;
+                    a.download = `catgpt-${generation.id}.pdf`;
                     a.target = "_blank";
                     a.rel = "noopener noreferrer";
                     document.body.appendChild(a);
@@ -279,6 +375,7 @@ export function ActionRow({
           </TooltipContent>
         </Tooltip>
       )}
+      {ready && <ImageTools generation={generation} />}
       {ready && (
         <Tooltip>
           <TooltipTrigger asChild>
