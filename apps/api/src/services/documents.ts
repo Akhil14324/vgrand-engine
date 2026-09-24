@@ -99,14 +99,30 @@ export async function ingestDocument(
   }
 
   const vectors = await embedTexts(chunks);
-  await prisma.$transaction(async (tx) => {
-    for (let i = 0; i < chunks.length; i++) {
-      const literal = `[${vectors[i]!.join(",")}]`;
-      await tx.$executeRaw`
+
+  // Multi-row inserts, ~25 chunks per statement — each INSERT is atomic on
+  // its own. No interactive transaction: the 5s tx timeout (and Supabase's
+  // transaction-mode pooler) can't cope with hundreds of sequential inserts.
+  const ROWS_PER_INSERT = 25;
+  try {
+    for (let i = 0; i < chunks.length; i += ROWS_PER_INSERT) {
+      const slice = chunks.slice(i, i + ROWS_PER_INSERT);
+      const rows = slice.map((content, j) => {
+        const idx = i + j;
+        const literal = `[${vectors[idx]!.join(",")}]`;
+        return Prisma.sql`(${randomUUID()}, ${documentId}, ${idx}, ${content}, ${literal}::vector)`;
+      });
+      await prisma.$executeRaw`
         INSERT INTO "DocumentChunk" ("id", "documentId", "chunkIndex", "content", "embedding")
-        VALUES (${randomUUID()}, ${documentId}, ${i}, ${chunks[i]!}, ${literal}::vector)`;
+        VALUES ${Prisma.join(rows)}`;
     }
-  });
+  } catch (err) {
+    // Partial batches may have committed — don't leave orphan chunks behind.
+    await prisma.documentChunk
+      .deleteMany({ where: { documentId } })
+      .catch(() => {});
+    throw err;
+  }
   return { pageCount: parsed.total, chunkCount: chunks.length };
 }
 
