@@ -3,8 +3,9 @@ import IORedis from "ioredis";
 import { env } from "../env.js";
 
 export const GENERATION_QUEUE = "image-generation";
+/** Separate queue so a burst of PDF uploads can't hold up anyone's chat turn. */
+export const INGEST_QUEUE = "document-ingestion";
 
-/** Job payloads carried by the shared queue — discriminated by job name. */
 export interface GenerationJob {
   generationId: string;
 }
@@ -12,7 +13,6 @@ export interface IngestJob {
   documentId: string;
   mimeType: string;
 }
-export type QueueJob = GenerationJob | IngestJob;
 
 /** Shared by BullMQ Queue (server) and Worker. */
 export function createRedisConnection(): IORedis {
@@ -32,10 +32,11 @@ export function createRedisConnection(): IORedis {
  * Created lazily — when REDIS_URL isn't configured we never touch Redis and
  * jobs run in-process instead.
  */
-let generationQueue: Queue<QueueJob> | null = null;
-function getQueue(): Queue<QueueJob> {
-  if (!generationQueue) {
-    generationQueue = new Queue<QueueJob>(GENERATION_QUEUE, {
+const queues = new Map<string, Queue>();
+function getQueue<T>(name: string): Queue<T> {
+  let queue = queues.get(name);
+  if (!queue) {
+    queue = new Queue(name, {
       connection: createRedisConnection(),
       defaultJobOptions: {
         attempts: 1,
@@ -44,12 +45,21 @@ function getQueue(): Queue<QueueJob> {
       },
     });
     // BullMQ re-emits connection errors on the Queue — must be listened for.
-    generationQueue.on("error", (err) => console.error("[queue] error:", err));
+    queue.on("error", (err) => console.error(`[queue:${name}] error:`, err));
+    queues.set(name, queue);
   }
-  return generationQueue;
+  return queue as unknown as Queue<T>;
 }
 
-export async function enqueueGeneration(generationId: string) {
+/**
+ * `background` jobs (auto-spawned campaign creatives) get a BullMQ priority,
+ * which always runs after unprioritized jobs — so one user's batch of posters
+ * never sits in front of another user's chat turn.
+ */
+export async function enqueueGeneration(
+  generationId: string,
+  opts: { background?: boolean } = {},
+) {
   if (!env.redisConfigured) {
     // No Redis — run the job in this process. Fire-and-forget: status and
     // errors are persisted on the Generation row by the worker itself.
@@ -60,13 +70,14 @@ export async function enqueueGeneration(generationId: string) {
     return;
   }
   // jobId = generationId keeps the queue idempotent on retries/duplicate POSTs.
-  await getQueue().add("generate", { generationId }, { jobId: generationId });
+  await getQueue<GenerationJob>(GENERATION_QUEUE).add(
+    "generate",
+    { generationId },
+    { jobId: generationId, ...(opts.background ? { priority: 10 } : {}) },
+  );
 }
 
-/**
- * Document ingestion (PDF/DOCX → chunks + embeddings) goes through the same
- * queue as image generation — off the request thread either way.
- */
+/** Document ingestion (PDF/DOCX → chunks + embeddings) — off the request thread. */
 export async function enqueueDocumentIngestion(
   documentId: string,
   mimeType: string,
@@ -78,7 +89,7 @@ export async function enqueueDocumentIngestion(
     );
     return;
   }
-  await getQueue().add(
+  await getQueue<IngestJob>(INGEST_QUEUE).add(
     "ingest-document",
     { documentId, mimeType },
     { jobId: `ingest-${documentId}` },
@@ -88,6 +99,10 @@ export async function enqueueDocumentIngestion(
 /** Queue depth for /health — shows whether jobs are piling up unconsumed. */
 export async function queueStats() {
   if (!env.redisConfigured) return { mode: "inline" as const };
-  const counts = await getQueue().getJobCounts("waiting", "active", "failed");
+  const counts = await getQueue(GENERATION_QUEUE).getJobCounts(
+    "waiting",
+    "active",
+    "failed",
+  );
   return { mode: "redis" as const, workerInline: env.WORKER_INLINE, ...counts };
 }

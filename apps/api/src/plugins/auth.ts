@@ -111,6 +111,26 @@ async function verifySupabaseJwt(token: string) {
 }
 
 /**
+ * Rate-limit bucket for a request. The limiter runs in onRequest, before any
+ * route's authenticate preHandler has set req.userId, so it resolves the user
+ * itself — from the verified-token cache or a local signature check, never a
+ * network call and never an unverified claim (a forged token can't pick its
+ * own bucket). Anything unverifiable shares its IP's bucket.
+ */
+export async function rateLimitKey(req: FastifyRequest): Promise<string> {
+  const token = extractToken(req);
+  if (token) {
+    const hit = verifiedTokens.get(token);
+    if (hit && hit.until > Date.now()) return `u:${hit.userId}`;
+    if (env.SUPABASE_JWT_SECRET) {
+      const claims = await verifySupabaseJwt(token).catch(() => null);
+      if (claims?.sub) return `u:${claims.sub}`;
+    }
+  }
+  return `ip:${req.ip}`;
+}
+
+/**
  * Auth strategy:
  *  - Supabase configured -> verify the Bearer JWT. With SUPABASE_JWT_SECRET
  *    this is local (jose jwtVerify, zero network calls); without it we fall

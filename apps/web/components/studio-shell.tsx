@@ -22,7 +22,7 @@ import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
 import { Composer } from "./composer";
-import { GenerationFeed } from "./generation-feed";
+import { GenerationFeed, PendingTurnBubble } from "./generation-feed";
 
 const THEME_ICONS: Record<string, LucideIcon> = {
   utensils: UtensilsCrossed,
@@ -162,17 +162,29 @@ export function StudioShell() {
 
 /** Empty state — greeting + centered pill composer, like ChatGPT's home. */
 function Hero() {
-  const { armTheme } = useStudio();
+  const { armTheme, pendingTurn } = useStudio();
   const { data: themes } = useThemes();
+  // First message of a new chat: show it the instant Send is hit, right here,
+  // until the POST resolves and the chat opens. The slot is shared with the
+  // heading so Composer keeps its place in the tree (and its state).
+  const sending = pendingTurn !== null && pendingTurn.conversationId === null;
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-10">
-      <h1 className="text-center font-display text-2xl font-medium tracking-tight md:text-3xl">
-        Cat is waiting for you.
-      </h1>
+      {sending ? (
+        <div className="w-full max-w-3xl">
+          <PendingTurnBubble />
+        </div>
+      ) : (
+        <h1 className="text-center font-display text-2xl font-medium tracking-tight md:text-3xl">
+          Cat is waiting for you.
+        </h1>
+      )}
       <div className="mt-7 w-full">
         <Composer />
       </div>
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+      <div
+        className={`mt-4 flex flex-wrap items-center justify-center gap-1.5 ${sending ? "hidden" : ""}`}
+      >
         {(themes ?? []).map((t) => {
           const Icon = (t.icon && THEME_ICONS[t.icon]) || Sparkles;
           return (

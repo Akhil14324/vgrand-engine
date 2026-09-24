@@ -295,7 +295,7 @@ export async function spawnCreatives(params: {
       },
     });
     await recordImageUsage(userId, generation.id);
-    await enqueueGeneration(generation.id);
+    await enqueueGeneration(generation.id, { background: true });
   }
   if (briefs.length < requested) {
     return briefs.length < count

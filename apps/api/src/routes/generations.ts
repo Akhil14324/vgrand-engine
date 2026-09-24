@@ -95,23 +95,43 @@ export async function generationRoutes(app: FastifyInstance) {
     async (req, reply) => {
     const body = parseBody(createGenerationSchema, req.body);
 
-    let theme = null;
-    if (body.themeSlug) {
-      theme = await prisma.theme.findUnique({
-        where: { slug: body.themeSlug },
-      });
-      if (!theme || !theme.isActive) {
-        throw notFound(`Theme "/${body.themeSlug}" not found`);
-      }
+    // Every lookup here is independent — fire them together instead of paying
+    // one DB round-trip after another before the 202 can go out.
+    const [theme, brand, parent, , docs] = await Promise.all([
+      body.themeSlug
+        ? prisma.theme.findUnique({ where: { slug: body.themeSlug } })
+        : Promise.resolve(null),
+      // Brand mode: usable only if it is the caller's own brand (or one in a
+      // workspace they own). Loaded once, narrowly - no assets/docs unless needed.
+      body.brandId
+        ? loadBrandContext(body.brandId, req.userId)
+        : Promise.resolve(null),
+      body.parentId ? loadOwned(req, body.parentId) : Promise.resolve(null),
+      body.conversationId
+        ? loadOwnedConversation(req, body.conversationId)
+        : Promise.resolve(null),
+      // Attached PDFs must belong to the caller — they get linked to this chat
+      // so every later turn retrieves their chunks automatically.
+      body.documentIds?.length
+        ? prisma.document.findMany({
+            where: { id: { in: body.documentIds }, userId: req.userId },
+            select: { id: true, filename: true, storageUrl: true },
+          })
+        : Promise.resolve([]),
+      // A workspaceId only applies to conversations this request creates —
+      // it gives the new chat a durable workspace home from turn one.
+      body.workspaceId
+        ? findWorkspaceForUser(req.userId, body.workspaceId)
+        : Promise.resolve(null),
+    ]);
+    if (body.themeSlug && (!theme || !theme.isActive)) {
+      throw notFound(`Theme "/${body.themeSlug}" not found`);
     }
-    // Brand mode: usable only if it is the caller's own brand (or one in a
-    // workspace they own). Loaded once, narrowly - no assets/docs unless needed.
-    const brand = body.brandId
-      ? await loadBrandContext(body.brandId, req.userId)
-      : null;
     if (body.brandId && !brand) throw notFound("Brand not found");
+    if (body.documentIds?.length && docs.length !== body.documentIds.length) {
+      throw badRequest("one or more attached documents were not found");
+    }
 
-    const parent = body.parentId ? await loadOwned(req, body.parentId) : null;
     const userRefs = [
       ...new Set([
         ...(body.referenceImageUrl ? [body.referenceImageUrl] : []),
@@ -123,9 +143,12 @@ export async function generationRoutes(app: FastifyInstance) {
     // chat → spin up a new conversation titled from the prompt.
     let conversationId =
       body.conversationId ?? parent?.conversationId ?? null;
-    if (body.conversationId) {
-      await loadOwnedConversation(req, body.conversationId);
-    }
+    // Looked up at most once per send, and only if a branch below needs it.
+    let campaignChat: Promise<boolean> | undefined;
+    const inCampaignChat = () =>
+      (campaignChat ??= conversationId
+        ? isCampaignConversation(conversationId)
+        : Promise.resolve(false));
 
     // In a chat that already produced an image, a follow-up like "now add a
     // hat" is an edit of that image — but only when nothing else claimed the
@@ -139,14 +162,16 @@ export async function generationRoutes(app: FastifyInstance) {
       !body.parentId &&
       userRefs.length === 0 &&
       !IMAGE_TRIGGER.test(body.prompt) &&
-      !isCampaignPrompt(body.prompt) &&
-      !(await isCampaignConversation(conversationId))
+      !isCampaignPrompt(body.prompt)
     ) {
-      const lastImage = await prisma.generation.findFirst({
-        where: { conversationId, kind: "image", status: "completed" },
-        orderBy: { createdAt: "desc" },
-      });
-      if (lastImage && lastImage.imageUrls.length > 0) {
+      const [inCampaign, lastImage] = await Promise.all([
+        inCampaignChat(),
+        prisma.generation.findFirst({
+          where: { conversationId, kind: "image", status: "completed" },
+          orderBy: { createdAt: "desc" },
+        }),
+      ]);
+      if (!inCampaign && lastImage && lastImage.imageUrls.length > 0) {
         const intent = await classifyIntent(
           body.prompt,
           await loadChatHistory(conversationId),
@@ -170,7 +195,7 @@ export async function generationRoutes(app: FastifyInstance) {
       !effectiveParentId &&
       !IMAGE_TRIGGER.test(body.prompt) &&
       !isCampaignPrompt(body.prompt) &&
-      !(conversationId && (await isCampaignConversation(conversationId)))
+      !(await inCampaignChat())
     ) {
       const intent = await classifyIntent(
         body.prompt,
@@ -209,55 +234,30 @@ export async function generationRoutes(app: FastifyInstance) {
           ].slice(0, 10)
         : [];
 
-    // Attached PDFs must belong to the caller — they get linked to this chat
-    // so every later turn retrieves their chunks automatically.
-    const docs = body.documentIds?.length
-      ? await prisma.document.findMany({
-          where: { id: { in: body.documentIds }, userId: req.userId },
-          select: { id: true, filename: true, storageUrl: true },
-        })
-      : [];
-    if (body.documentIds?.length && docs.length !== body.documentIds.length) {
-      throw badRequest("one or more attached documents were not found");
-    }
-
-    // A workspaceId only applies to conversations this request creates —
-    // it gives the new chat a durable workspace home from turn one.
-    if (body.workspaceId) {
-      await findWorkspaceForUser(req.userId, body.workspaceId);
-    }
-
-    // Plain sequential writes, not an interactive $transaction: behind the
-    // Supabase transaction pooler (pgbouncer) interactive transactions time out
-    // with "Unable to start a transaction in the given time" under load.
+    // Plain writes, not an interactive $transaction: behind the Supabase
+    // transaction pooler (pgbouncer) interactive transactions time out with
+    // "Unable to start a transaction in the given time" under load. Only a new
+    // chat has to exist before the rest; the other writes go out together.
     const generation = await (async () => {
-      if (conversationId) {
-        // Bump recency so the chat floats to the top of the sidebar.
-        await prisma.conversation.update({
-          where: { id: conversationId },
-          data: { updatedAt: new Date() },
-        });
-      } else {
-        const conversation = await prisma.conversation.create({
-          data: {
-            userId: req.userId,
-            title: deriveTitle(body.prompt),
-            workspaceId: body.workspaceId ?? null,
-          },
-        });
-        conversationId = conversation.id;
-      }
-      if (docs.length) {
-        await prisma.document.updateMany({
-          where: { id: { in: docs.map((d) => d.id) } },
-          data: { conversationId },
-        });
-      }
-      return prisma.generation.create({
+      const isNewChat = !conversationId;
+      const chatId: string =
+        conversationId ??
+        (
+          await prisma.conversation.create({
+            data: {
+              userId: req.userId,
+              title: deriveTitle(body.prompt),
+              workspaceId: body.workspaceId ?? null,
+            },
+          })
+        ).id;
+      conversationId = chatId;
+      const [created] = await Promise.all([
+        prisma.generation.create({
         data: {
           userId: req.userId,
           themeId: theme?.id ?? null,
-          conversationId,
+          conversationId: chatId,
           kind,
           prompt: body.prompt,
           finalPrompt:
@@ -294,10 +294,28 @@ export async function generationRoutes(app: FastifyInstance) {
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
           },
         },
-      });
+        }),
+        // Bump recency so the chat floats to the top of the sidebar.
+        isNewChat
+          ? null
+          : prisma.conversation.update({
+              where: { id: chatId },
+              data: { updatedAt: new Date() },
+            }),
+        docs.length
+          ? prisma.document.updateMany({
+              where: { id: { in: docs.map((d) => d.id) } },
+              data: { conversationId: chatId },
+            })
+          : null,
+      ]);
+      return created;
     })();
-    if (kind === "image") await recordImageUsage(req.userId, generation.id);
-    await enqueueGeneration(generation.id);
+    // Usage row and enqueue don't depend on each other.
+    await Promise.all([
+      kind === "image" ? recordImageUsage(req.userId, generation.id) : null,
+      enqueueGeneration(generation.id),
+    ]);
     return reply.code(202).send({
       generationId: generation.id,
       conversationId,

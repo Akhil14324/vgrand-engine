@@ -10,7 +10,7 @@ import { ChatTurn } from "./chat-turn";
 
 /** Chat thread: oldest at top, newest at bottom, auto-scrolls like ChatGPT. */
 export function GenerationFeed() {
-  const { activeConversationId, pendingTurn } = useStudio();
+  const { activeConversationId, pendingTurn, clearPendingTurn } = useStudio();
   const { data, isLoading } = useGenerations({
     conversationId: activeConversationId,
   });
@@ -20,11 +20,38 @@ export function GenerationFeed() {
     [data],
   );
 
-  const endRef = useRef<HTMLDivElement>(null);
-  const lastStatus = items.at(-1)?.status;
+  // The optimistic bubble hands over to the real turn once it is in the list.
+  const landed = Boolean(
+    pendingTurn?.generationId &&
+      items.some((g) => g.id === pendingTurn.generationId),
+  );
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [items.length, lastStatus, activeConversationId]);
+    if (landed) clearPendingTurn();
+  }, [landed, clearPendingTurn]);
+  const showPending =
+    Boolean(pendingTurn) &&
+    pendingTurn?.conversationId === activeConversationId &&
+    !landed;
+
+  const endRef = useRef<HTMLDivElement>(null);
+  const last = items.at(-1);
+  const lastStatus = last?.status;
+  const streamedLength = last?.textResponse?.length ?? 0;
+  const scrollKey = `${items.length}:${lastStatus}:${activeConversationId}:${showPending}`;
+  const lastScrollKey = useRef("");
+  useEffect(() => {
+    const el = endRef.current;
+    if (!el) return;
+    const viewport = el.closest("[data-radix-scroll-area-viewport]");
+    const gap = viewport
+      ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      : 0;
+    const structural = scrollKey !== lastScrollKey.current;
+    lastScrollKey.current = scrollKey;
+    // New turns/chats always scroll; streamed tokens only follow along while
+    // the reader is still near the bottom, so scrolling up to read isn't fought.
+    if (structural || gap < 240) el.scrollIntoView({ block: "end" });
+  }, [scrollKey, streamedLength]);
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -35,16 +62,21 @@ export function GenerationFeed() {
             {conversation.generationCount === 1 ? "turn" : "turns"}
           </p>
         )}
-        {isLoading ? (
+        {isLoading && !showPending ? (
           <div className="flex flex-col gap-8">
             {Array.from({ length: 2 }).map((_, i) => (
               <div key={i} className="flex flex-col gap-3">
-                <div className="ml-auto h-16 w-2/3 rounded-2xl bg-muted/50" />
-                <div className="aspect-square w-full max-w-md rounded-xl border shimmer" />
+                <div className="ml-auto h-12 w-2/3 rounded-2xl bg-muted/50" />
+                {/* Text-shaped: most turns are chat replies, not images. */}
+                <div className="flex max-w-[75%] flex-col gap-2">
+                  <div className="h-3 w-full rounded shimmer" />
+                  <div className="h-3 w-11/12 rounded shimmer" />
+                  <div className="h-3 w-2/3 rounded shimmer" />
+                </div>
               </div>
             ))}
           </div>
-        ) : items.length === 0 ? (
+        ) : isLoading ? null : items.length === 0 && !showPending ? (
           <p className="py-16 text-center text-sm text-muted-foreground">
             No messages yet — ask a question or describe an image below.
           </p>
@@ -53,10 +85,7 @@ export function GenerationFeed() {
         )}
         {/* Optimistic turn — the user's bubble the instant they hit Send,
             before the POST resolves and the real generation lands. */}
-        {pendingTurn &&
-          pendingTurn.conversationId === activeConversationId && (
-            <PendingTurnBubble />
-          )}
+        {showPending && <PendingTurnBubble />}
         <div ref={endRef} />
       </div>
     </ScrollArea>
@@ -64,7 +93,7 @@ export function GenerationFeed() {
 }
 
 /** Lightweight stand-in for a turn whose POST is still in flight. */
-function PendingTurnBubble() {
+export function PendingTurnBubble() {
   const { pendingTurn } = useStudio();
   if (!pendingTurn) return null;
   return (
@@ -100,7 +129,7 @@ function PendingTurnBubble() {
         </div>
       </div>
       <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Queued…
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
       </div>
     </div>
   );

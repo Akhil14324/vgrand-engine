@@ -10,7 +10,7 @@ import { ZodError } from "zod";
 import { env } from "./env.js";
 import { HttpError } from "./lib/errors.js";
 import { queueStats } from "./services/queue.js";
-import { authPlugin } from "./plugins/auth.js";
+import { authPlugin, rateLimitKey } from "./plugins/auth.js";
 import { themeRoutes } from "./routes/themes.js";
 import { generationRoutes } from "./routes/generations.js";
 import { conversationRoutes } from "./routes/conversations.js";
@@ -29,6 +29,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       level: env.NODE_ENV === "development" ? "info" : "warn",
     },
     bodyLimit: 2 * 1024 * 1024,
+    // Behind Railway's proxy req.ip would otherwise be the proxy for everyone.
+    trustProxy: true,
   });
 
   await app.register(cors, {
@@ -58,12 +60,12 @@ export async function buildApp(): Promise<FastifyInstance> {
     decorateReply: false,
   });
   await app.register(authPlugin);
-  // One heavy client (or a retry storm) shouldn't degrade everyone. userId
-  // isn't set until route preHandlers run, so unauth/early requests key on IP.
+  // One heavy client (or a retry storm) shouldn't degrade everyone. Keyed per
+  // user; requests that can't be verified locally key on IP (see rateLimitKey).
   await app.register(rateLimit, {
     max: 120,
     timeWindow: "1 minute",
-    keyGenerator: (req) => req.userId || req.ip,
+    keyGenerator: rateLimitKey,
   });
 
   app.setErrorHandler((err: unknown, req, reply) => {

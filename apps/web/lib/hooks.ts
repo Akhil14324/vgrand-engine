@@ -416,12 +416,44 @@ export function useCreateBrand() {
   });
 }
 
+type BrandsCache = { items: BrandDto[] };
+
+/** Apply an optimistic change to the cached brand list; returns the rollback snapshot. */
+async function patchBrands(
+  qc: ReturnType<typeof useQueryClient>,
+  fn: (items: BrandDto[]) => BrandDto[],
+) {
+  await qc.cancelQueries({ queryKey: ["brands"] });
+  const prev = qc.getQueryData<BrandsCache>(["brands"]);
+  if (prev) qc.setQueryData<BrandsCache>(["brands"], { items: fn(prev.items) });
+  return { prev };
+}
+
+function restoreBrands(
+  qc: ReturnType<typeof useQueryClient>,
+  ctx?: { prev?: BrandsCache },
+) {
+  if (ctx?.prev) qc.setQueryData<BrandsCache>(["brands"], ctx.prev);
+}
+
 export function useUpdateBrand() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: UpdateBrandRequest & { id: string }) =>
       apiFetch<BrandDto>(`/brands/${id}`, { method: "PATCH", json: body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+    // Saved instantly in the UI; the server's copy (with the recomputed
+    // snapshot) replaces it when it lands - no second round-trip to refetch.
+    onMutate: ({ id, ...body }) =>
+      patchBrands(qc, (items) =>
+        items.map((b) => (b.id === id ? { ...b, ...body } : b)),
+      ),
+    onError: (_e, _v, ctx) => restoreBrands(qc, ctx),
+    onSuccess: (saved) =>
+      qc.setQueryData<BrandsCache>(["brands"], (cur) =>
+        cur
+          ? { items: cur.items.map((b) => (b.id === saved.id ? saved : b)) }
+          : cur,
+      ),
   });
 }
 
@@ -430,7 +462,9 @@ export function useDeleteBrand() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<void>(`/brands/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+    onMutate: (id) => patchBrands(qc, (items) => items.filter((b) => b.id !== id)),
+    onError: (_e, _v, ctx) => restoreBrands(qc, ctx),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["brands"] }),
   });
 }
 

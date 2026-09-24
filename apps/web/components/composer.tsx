@@ -92,6 +92,7 @@ export function Composer() {
     activeConversationId,
     openConversation,
     setPendingTurn,
+    resolvePendingTurn,
     clearPendingTurn,
     workspaceContextId,
   } = useStudio();
@@ -387,14 +388,22 @@ export function Composer() {
       },
       {
         onSuccess: (res) => {
-          clearPendingTurn();
+          // Keep the bubble until the real turn shows up in the feed.
+          resolvePendingTurn(res.conversationId, res.generationId);
           openConversation(res.conversationId);
           select(res.generationId);
         },
-        onError: () => clearPendingTurn(),
+        onError: () => {
+          // Send failed — give the draft back instead of losing it.
+          clearPendingTurn();
+          setValue(value);
+          setRefImages(refImages);
+          setDocs(docs);
+          setWebSearch(webSearch);
+        },
       },
     );
-  }, [value, create, armedTheme, quality, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, clearPendingTurn, workspaceContextId]);
+  }, [value, create, armedTheme, quality, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {

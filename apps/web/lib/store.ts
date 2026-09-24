@@ -10,6 +10,8 @@ export interface PendingTurn {
   refImages: string[];
   docs: DocumentDto[];
   conversationId: string | null;
+  /** Set once the POST resolves — the bubble stays until this turn is in the feed. */
+  generationId?: string;
 }
 
 interface StudioState {
@@ -42,6 +44,8 @@ interface StudioState {
   /** Optimistic user bubble shown between Send and the POST resolving. */
   pendingTurn: PendingTurn | null;
   setPendingTurn: (t: PendingTurn) => void;
+  /** POST succeeded: pin the bubble to its real chat until the turn lands. */
+  resolvePendingTurn: (conversationId: string, generationId: string) => void;
   clearPendingTurn: () => void;
 
   /** Workspace a brand-new chat should be created inside (set by "Open chat"
@@ -87,6 +91,18 @@ export const useStudio = create<StudioState>((set) => ({
 
   pendingTurn: null,
   setPendingTurn: (t) => set({ pendingTurn: t }),
+  resolvePendingTurn: (conversationId, generationId) => {
+    const current = useStudio.getState().pendingTurn;
+    if (!current) return;
+    set({ pendingTurn: { ...current, conversationId, generationId } });
+    // Safety net if the feed never sees the turn (user navigated away, or the
+    // refetch failed) — don't leave a phantom bubble behind.
+    setTimeout(() => {
+      if (useStudio.getState().pendingTurn?.tempId === current.tempId) {
+        set({ pendingTurn: null });
+      }
+    }, 20_000);
+  },
   clearPendingTurn: () => set({ pendingTurn: null }),
 
   workspaceContextId: null,

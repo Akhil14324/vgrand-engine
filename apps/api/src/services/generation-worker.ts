@@ -12,6 +12,7 @@ import {
 } from "@catgpt/types";
 import {
   GENERATION_QUEUE,
+  INGEST_QUEUE,
   createRedisConnection,
   type GenerationJob,
   type IngestJob,
@@ -61,19 +62,26 @@ export function startGenerationWorker(): Worker | null {
   }
   const worker = new Worker(
     GENERATION_QUEUE,
-    (job: Job<GenerationJob | IngestJob>) =>
-      job.name === "ingest-document"
-        ? runDocumentIngestion(
-            (job.data as IngestJob).documentId,
-            (job.data as IngestJob).mimeType,
-          )
-        : runGeneration((job.data as GenerationJob).generationId),
-    { connection: createRedisConnection(), concurrency: 3 },
+    (job: Job<GenerationJob>) => runGeneration(job.data.generationId),
+    { connection: createRedisConnection(), concurrency: env.WORKER_CONCURRENCY },
   );
-  worker.on("error", (err) => console.error("[worker] error:", err));
-  worker.on("failed", (job, err) =>
-    console.error(`[worker] job ${job?.id} failed:`, err.message),
+  // Ingestion has its own queue and slots; it shuts down with the main worker.
+  const ingestWorker = new Worker(
+    INGEST_QUEUE,
+    (job: Job<IngestJob>) =>
+      runDocumentIngestion(job.data.documentId, job.data.mimeType),
+    { connection: createRedisConnection(), concurrency: 2 },
   );
+  worker.on("closing", () => void ingestWorker.close());
+  for (const [name, w] of [
+    ["worker", worker],
+    ["ingest", ingestWorker],
+  ] as const) {
+    w.on("error", (err) => console.error(`[${name}] error:`, err));
+    w.on("failed", (job, err) =>
+      console.error(`[${name}] job ${job?.id} failed:`, err.message),
+    );
+  }
   return worker;
 }
 
