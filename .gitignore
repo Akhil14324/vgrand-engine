@@ -24,3 +24,7 @@ Thumbs.db
 .turbo/
 .vercel
 coverage/
+
+# scratch test scripts
+*.tmp.mjs
+*.tmp.ts
