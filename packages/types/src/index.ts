@@ -37,6 +37,8 @@ export interface ThemeStyleGuide {
   negativePrompt?: string;
   preferredProvider?: ProviderName;
   layoutHints?: string;
+  /** Brand reference images (paths under /theme-assets/ or full URLs) — sent as the edit base so output keeps the theme's branding. */
+  referenceImageUrls?: string[];
   [key: string]: unknown;
 }
 

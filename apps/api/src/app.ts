@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
@@ -42,6 +43,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(fastifyStatic, {
     root: path.resolve(env.UPLOAD_DIR),
     prefix: "/uploads/",
+    decorateReply: false,
+  });
+  // Brand reference posters committed with the repo — providers fetch these
+  // over HTTP as the edit base for themed generations.
+  await app.register(fastifyStatic, {
+    root: fileURLToPath(new URL("../assets/themes", import.meta.url)),
+    prefix: "/theme-assets/",
     decorateReply: false,
   });
   await app.register(authPlugin);

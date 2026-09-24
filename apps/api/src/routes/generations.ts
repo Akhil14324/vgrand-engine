@@ -4,6 +4,7 @@ import {
   createGenerationSchema,
   regenerateGenerationSchema,
   type GenerationEvent,
+  type ThemeStyleGuide,
 } from "@prompthub/types";
 import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
 import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
@@ -17,6 +18,28 @@ import { env } from "../env.js";
 function deriveTitle(prompt: string): string {
   const line = prompt.split("\n")[0]!.trim();
   return line.length > 60 ? `${line.slice(0, 60).trimEnd()}…` : line;
+}
+
+/** This API's public base URL as the caller sees it (proxy-aware). */
+function publicBaseUrl(req: FastifyRequest): string {
+  const proto =
+    (req.headers["x-forwarded-proto"] as string | undefined)
+      ?.split(",")[0]
+      ?.trim() ?? req.protocol;
+  return `${proto}://${req.headers.host ?? "localhost"}`;
+}
+
+/**
+ * Brand references attached to a theme. Relative /theme-assets/ paths are
+ * resolved to absolute URLs so providers can fetch them over HTTP.
+ */
+function themeReferenceUrls(
+  req: FastifyRequest,
+  theme: { styleGuide: unknown } | null,
+): string[] {
+  const refs =
+    (theme?.styleGuide as ThemeStyleGuide | null)?.referenceImageUrls ?? [];
+  return refs.map((u) => (u.startsWith("http") ? u : `${publicBaseUrl(req)}${u}`));
 }
 
 /** Verify a conversation exists and belongs to the caller. */
@@ -56,8 +79,11 @@ export async function generationRoutes(app: FastifyInstance) {
       }
     }
     const parent = body.parentId ? await loadOwned(req, body.parentId) : null;
+    // Theme brand references come first — they're the base the edit keeps;
+    // any user-attached refs are extra guidance on top.
     const referenceImageUrls = [
       ...new Set([
+        ...themeReferenceUrls(req, theme),
         ...(body.referenceImageUrl ? [body.referenceImageUrl] : []),
         ...(body.referenceImageUrls ?? []),
       ]),
