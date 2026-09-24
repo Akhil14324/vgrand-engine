@@ -13,8 +13,15 @@ import {
 import { GENERATION_QUEUE, createRedisConnection } from "./queue.js";
 import { publishGenerationEvent } from "./events.js";
 import { storeImage } from "./storage.js";
-import { loadChatHistory, streamChat } from "./chat.js";
+import {
+  loadChatHistory,
+  runWithCodeInterpreter,
+  streamChat,
+  stripRunPrefix,
+  wantsCodeExecution,
+} from "./chat.js";
 import { retrieveContext } from "./documents.js";
+import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { env } from "../env.js";
 
 interface GenerationMetadata {
@@ -107,33 +114,49 @@ export async function runGeneration(generationId: string): Promise<void> {
       const history = generation.conversationId
         ? await loadChatHistory(generation.conversationId, generation.id)
         : [];
-      // RAG: pull passages from PDFs attached to this conversation. Retrieval
-      // failure is non-fatal — the answer just goes out without doc context.
-      const context = generation.conversationId
-        ? await retrieveContext(
+      // RAG + learned memory run in parallel — both are best-effort context.
+      const [context, memories] = await Promise.all([
+        generation.conversationId
+          ? retrieveContext(
+              generation.prompt,
+              generation.conversationId,
+            ).catch(() => [])
+          : Promise.resolve([]),
+        loadLearnedMemories(generation.userId).catch(() => []),
+      ]);
+
+      // "run this" / "/run" → real Python execution in OpenAI's sandbox
+      // (non-streaming — runs take seconds; the reply is assembled once).
+      const codeRun = wantsCodeExecution(generation.prompt);
+      const text = codeRun
+        ? await runWithCodeInterpreter(
+            stripRunPrefix(generation.prompt) || generation.prompt,
+            history,
+          )
+        : await streamChat(
             generation.prompt,
-            generation.conversationId,
-          ).catch(() => [])
-        : [];
-      const text = await streamChat(
-        generation.prompt,
-        history,
-        context,
-        (delta) =>
-          publishGenerationEvent({
-            generationId,
-            status: "processing",
-            kind: "text",
-            delta,
-          }),
-      );
+            history,
+            context,
+            memories,
+            (delta) =>
+              publishGenerationEvent({
+                generationId,
+                status: "processing",
+                kind: "text",
+                delta,
+              }),
+          );
       await prisma.generation.update({
         where: { id: generationId },
         data: {
           status: "completed",
           textResponse: text,
-          model: env.CHAT_MODEL,
-          metadata: { ...meta, latencyMs: Date.now() - startedAt },
+          model: codeRun ? env.CODE_MODEL : env.CHAT_MODEL,
+          metadata: {
+            ...meta,
+            ...(codeRun ? { codeRun: true } : {}),
+            latencyMs: Date.now() - startedAt,
+          },
         },
       });
       publishGenerationEvent({
@@ -142,6 +165,15 @@ export async function runGeneration(generationId: string): Promise<void> {
         kind: "text",
         textResponse: text,
       });
+      // Fire-and-forget: mine the turn for durable user facts (ChatGPT memory).
+      void rememberTurn(
+        generation.userId,
+        generation.conversationId,
+        [
+          ...history.slice(-4),
+          { prompt: generation.prompt, kind: "text", textResponse: text },
+        ],
+      );
       return;
     }
 
@@ -152,6 +184,14 @@ export async function runGeneration(generationId: string): Promise<void> {
       referenceImageUrls,
       quality: meta.quality ?? "low",
       size: meta.size ?? "auto",
+      // Progressive previews stream through SSE as they arrive from the model.
+      onPartialImage: (b64) =>
+        publishGenerationEvent({
+          generationId,
+          status: "processing",
+          kind: "image",
+          partialImage: `data:image/png;base64,${b64}`,
+        }),
     });
 
     const imageUrls = await Promise.all(

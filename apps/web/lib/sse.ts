@@ -50,6 +50,23 @@ function appendDelta(qc: QueryClient, generationId: string, delta: string) {
   );
 }
 
+/** Show a progressive preview while the final image still renders — the
+ * partial lands in imageUrls[0] so the card displays it instantly. */
+function applyPartialImage(qc: QueryClient, generationId: string, dataUrl: string) {
+  const apply = (g: GenerationDto): GenerationDto =>
+    g.id === generationId
+      ? { ...g, imageUrls: [dataUrl, ...g.imageUrls.slice(1)] }
+      : g;
+  qc.setQueryData<GenerationDto>(["generation", generationId], (old) =>
+    old ? apply(old) : old,
+  );
+  qc.setQueriesData<Paginated<GenerationDto>>(
+    { queryKey: ["generations"] },
+    (old) =>
+      old ? { ...old, items: old.items.map(apply) } : old,
+  );
+}
+
 /**
  * Streams /generations/:id/events while a generation is pending/processing so
  * cards flip from shimmer to image without polling — and chat replies render
@@ -77,6 +94,8 @@ export function useGenerationStream(
           const evt = JSON.parse(msg.data) as GenerationEvent;
           if (evt.delta) {
             appendDelta(qc, evt.generationId, evt.delta);
+          } else if (evt.partialImage) {
+            applyPartialImage(qc, evt.generationId, evt.partialImage);
           } else {
             qc.invalidateQueries({ queryKey: ["generation", id] });
             qc.invalidateQueries({ queryKey: ["generations"] });

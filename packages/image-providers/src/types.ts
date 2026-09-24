@@ -14,6 +14,9 @@ export interface GenerateParams {
   quality?: Quality;
   size?: ImageSize;
   n?: number;
+  /** Progressive preview hook — providers that stream partials call it with
+   * base64 payloads as they render; others never invoke it. */
+  onPartialImage?: (b64: string, index: number) => void;
 }
 
 export interface GeneratedImage {

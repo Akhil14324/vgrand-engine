@@ -113,16 +113,28 @@ function contextMessage(context: string[]) {
   ];
 }
 
+function memoryMessage(memories: string[]) {
+  if (memories.length === 0) return [];
+  return [
+    {
+      role: "system" as const,
+      content: `Things you remember about this user from earlier chats. Use them naturally when relevant — never recite the list or mention "memory".\n${memories.map((m) => `- ${m}`).join("\n")}`,
+    },
+  ];
+}
+
 /** Non-streaming reply (kept for callers that need the full string at once). */
 export async function answerChat(
   prompt: string,
   history: HistoryTurn[],
   context: string[] = [],
+  memories: string[] = [],
 ): Promise<string> {
   const res = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
     messages: [
       { role: "system", content: CHAT_SYSTEM },
+      ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),
       { role: "user", content: prompt },
@@ -141,13 +153,15 @@ export async function streamChat(
   prompt: string,
   history: HistoryTurn[],
   context: string[] = [],
-  onDelta: (delta: string) => void,
+  memories: string[] = [],
+  onDelta: (delta: string) => void = () => {},
 ): Promise<string> {
   const stream = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
     stream: true,
     messages: [
       { role: "system", content: CHAT_SYSTEM },
+      ...memoryMessage(memories),
       ...contextMessage(context),
       ...toMessages(history),
       { role: "user", content: prompt },
@@ -163,4 +177,75 @@ export async function streamChat(
   }
   if (!acc.trim()) throw new Error("chat model returned an empty response");
   return acc;
+}
+
+/* ---------------------------- code execution ----------------------------- */
+
+const RUN_PREFIX = /^\/run\b/i;
+const RUN_INTENT = /\b(run|execute|eval(?:uate)?|test)\b/i;
+const CODE_FENCE = /```[\s\S]+?```/;
+
+/**
+ * Should this turn actually execute code? Explicit `/run …` always counts;
+ * otherwise a fenced code block plus a run verb ("run this", "execute it").
+ */
+export function wantsCodeExecution(prompt: string): boolean {
+  if (RUN_PREFIX.test(prompt)) return true;
+  return CODE_FENCE.test(prompt) && RUN_INTENT.test(prompt);
+}
+
+/** Strip the /run prefix so the model sees the real instruction. */
+export function stripRunPrefix(prompt: string): string {
+  return prompt.replace(RUN_PREFIX, "").trim();
+}
+
+interface CodeCall {
+  code: string;
+  logs: string[];
+}
+
+/**
+ * Executes code in OpenAI's hosted Python sandbox (code_interpreter on the
+ * Responses API — same OPENAI_API_KEY). Non-streaming: runs take seconds
+ * anyway, and the reply is assembled once — code + output formatted as
+ * Markdown so the UI renders it like ChatGPT's analysis blocks.
+ */
+export async function runWithCodeInterpreter(
+  prompt: string,
+  history: HistoryTurn[],
+): Promise<string> {
+  const res = await getClient().responses.create({
+    model: env.CODE_MODEL,
+    tools: [{ type: "code_interpreter", container: { type: "auto" } }],
+    input: [
+      {
+        role: "developer",
+        content:
+          "You are CatGPT's code runner. Run the user's code (or the code needed to answer their request) in the Python sandbox. Report results concisely — real stdout/stderr, never invented.",
+      },
+      ...toMessages(history.slice(-6)),
+      { role: "user", content: prompt },
+    ],
+  });
+
+  const calls: CodeCall[] = [];
+  for (const item of res.output ?? []) {
+    if (item.type === "code_interpreter_call") {
+      const logs = (item.outputs ?? [])
+        .map((r) => (r.type === "logs" ? r.logs : ""))
+        .filter(Boolean);
+      calls.push({ code: item.code ?? "", logs });
+    }
+  }
+
+  const parts: string[] = [];
+  const summary = res.output_text?.trim();
+  if (summary) parts.push(summary);
+  for (const call of calls) {
+    if (call.code) parts.push(`**Code**\n\`\`\`python\n${call.code}\n\`\`\``);
+    if (call.logs.length)
+      parts.push(`**Output**\n\`\`\`\n${call.logs.join("\n").trim()}\n\`\`\``);
+  }
+  if (!parts.length) throw new Error("code interpreter returned nothing");
+  return parts.join("\n\n");
 }

@@ -9,6 +9,7 @@ import type {
   BoardDto,
   ConversationDto,
   CreateGenerationRequest,
+  DocumentDto,
   GenerationDto,
   GenerationKind,
   MemoryDto,
@@ -118,12 +119,21 @@ export function useDeleteGeneration() {
 
 /* ------------------------------ conversations ----------------------------- */
 
-export function useConversations(opts: { archived?: boolean } = {}) {
+export function useConversations(
+  opts: { archived?: boolean; search?: string } = {},
+) {
+  const search = opts.search?.trim();
   return useQuery({
-    queryKey: ["conversations", opts.archived ? "archived" : "active"],
+    queryKey: [
+      "conversations",
+      opts.archived ? "archived" : "active",
+      search ?? "",
+    ],
     queryFn: () =>
       apiFetch<Paginated<ConversationDto>>(
-        `/conversations?limit=50${opts.archived ? "&archived=true" : ""}`,
+        `/conversations?limit=50${opts.archived ? "&archived=true" : ""}${
+          search ? `&search=${encodeURIComponent(search)}` : ""
+        }`,
       ),
     refetchInterval: (query) => {
       const pending = query.state.data?.items.some(
@@ -174,6 +184,21 @@ export function useShareGeneration() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<ShareLinkDto>(`/share/${id}`, { method: "POST" }),
+  });
+}
+
+/* -------------------------------- documents ------------------------------- */
+
+/** PDFs attached to a conversation — powers the doc chips on reopened chats. */
+export function useDocuments(conversationId: string | null) {
+  return useQuery({
+    queryKey: ["documents", conversationId],
+    enabled: !!conversationId,
+    queryFn: () =>
+      apiFetch<DocumentDto[]>(
+        `/documents?conversationId=${conversationId}`,
+      ),
+    select: (docs) => docs.filter((d) => d.status !== "failed"),
   });
 }
 

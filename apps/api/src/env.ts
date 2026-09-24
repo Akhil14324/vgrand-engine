@@ -24,6 +24,8 @@ const envSchema = z.object({
   OPENAI_BASE_URL: opt(z.string().url()),
   /** Chat + intent-classification model — cheap tier, not the image models. */
   CHAT_MODEL: opt(z.string().min(1)),
+  /** Model for code_interpreter runs — needs a capable tier (mini lacks it). */
+  CODE_MODEL: opt(z.string().min(1)),
   /** RAG: embeddings for PDF chunks + query vectors (same OpenAI key). */
   EMBEDDING_MODEL: opt(z.string().min(1)),
   MAX_PDF_PAGES: z.coerce.number().int().positive().default(200),
@@ -54,6 +56,7 @@ export const env = {
   ...parsed,
   REDIS_URL: parsed.REDIS_URL ?? "redis://localhost:6379",
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
+  CODE_MODEL: parsed.CODE_MODEL ?? "gpt-4o",
   EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",

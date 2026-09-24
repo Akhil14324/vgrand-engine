@@ -62,6 +62,40 @@ export class OpenAIImageProvider implements ImageProvider {
         };
       }
 
+      // Draft mode can stream progressive previews — partial images arrive
+      // while the final render completes. Any stream failure falls back to a
+      // plain generate call so the request never dies on a preview hiccup.
+      if (params.onPartialImage) {
+        try {
+          const stream = await client.images.generate({
+            model,
+            prompt: params.prompt,
+            n: params.n ?? 1,
+            size: size === "auto" ? undefined : size,
+            quality,
+            stream: true,
+            partial_images: 2,
+          });
+          let lastB64: string | undefined;
+          for await (const evt of stream) {
+            if (evt.type === "image_generation.partial_image") {
+              lastB64 = evt.b64_json;
+              params.onPartialImage(evt.b64_json, evt.partial_image_index);
+            } else if (evt.type === "image_generation.completed") {
+              lastB64 = evt.b64_json;
+            }
+          }
+          if (lastB64) {
+            return {
+              images: [{ b64Json: lastB64, mimeType: "image/png" }],
+              metadata: { model, quality, size },
+            };
+          }
+        } catch {
+          // fall through to the non-streaming call
+        }
+      }
+
       const res = await client.images.generate({
         model,
         prompt: params.prompt,

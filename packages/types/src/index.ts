@@ -24,7 +24,7 @@ export const GENERATION_STATUSES = [
 ] as const;
 export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
 
-export const MEMORY_TYPES = ["preference", "fact", "style"] as const;
+export const MEMORY_TYPES = ["preference", "fact", "style", "learned"] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
 export const GENERATION_KINDS = ["image", "text"] as const;
@@ -247,6 +247,8 @@ export interface GenerationEvent {
   kind?: GenerationKind;
   /** Incremental text token for streaming chat replies. */
   delta?: string;
+  /** Progressive preview (data URL) pushed while an image renders. */
+  partialImage?: string;
   imageUrls?: string[];
   textResponse?: string | null;
   error?: string | null;

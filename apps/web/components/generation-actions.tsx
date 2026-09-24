@@ -11,6 +11,8 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import type { GenerationDto, Quality } from "@catgpt/types";
 import {
@@ -239,15 +241,41 @@ export function ActionRow({
   const { select, selectedId } = useStudio();
   const [copied, setCopied] = useState(false);
   const [textCopied, setTextCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const ready =
     generation.status === "completed" && generation.imageUrls.length > 0;
   const textReady =
     generation.status === "completed" &&
     generation.kind === "text" &&
     Boolean(generation.textResponse);
+  const canSpeak =
+    typeof window !== "undefined" && "speechSynthesis" in window;
+
+  // Browser TTS — instant and free. Markdown is flattened so the voice reads
+  // prose, not syntax; fenced code collapses to "code block".
+  const speak = () => {
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const plain = (generation.textResponse ?? "")
+      .replace(/```[\s\S]*?```/g, " code block ")
+      .replace(/`([^`]*)`/g, "$1")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/^#+\s*/gm, "")
+      .replace(/[*_~>]/g, "")
+      .replace(/\n{2,}/g, ". ")
+      .slice(0, 4000);
+    const utterance = new SpeechSynthesisUtterance(plain);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+    setSpeaking(true);
+  };
 
   return (
-    <div className={cn("flex items-center gap-0.5", className)}>
+    <div className={cn("flex flex-wrap items-center gap-0.5", className)}>
       {textReady && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -298,6 +326,23 @@ export function ActionRow({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Export as PDF</TooltipContent>
+        </Tooltip>
+      )}
+      {textReady && canSpeak && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={speaking ? "Stop reading" : "Read aloud"}
+              onClick={speak}
+            >
+              {speaking ? <VolumeX /> : <Volume2 />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {speaking ? "Stop reading" : "Read aloud"}
+          </TooltipContent>
         </Tooltip>
       )}
       {ready && <SaveToBoard generation={generation} />}

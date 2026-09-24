@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
@@ -112,21 +112,21 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [themesOpen, setThemesOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const { data: generations } = useGenerations({ themeSlug: historyTheme });
-  const { data: conversations } = useConversations();
+  // Server-side search — matches title AND generation contents inside chats.
+  const deferredSearch = useDeferredValue(search.trim());
+  const { data: conversations } = useConversations({
+    search: deferredSearch || undefined,
+  });
   const { data: memories } = useMemories();
   const deleteMemory = useDeleteMemory();
 
   const q = search.trim().toLowerCase();
 
-  const filteredChats = useMemo(() => {
-    const items = conversations?.items ?? [];
-    if (!q) return items;
-    return items.filter(
-      (c) =>
-        c.title.toLowerCase().includes(q) ||
-        c.preview?.prompt.toLowerCase().includes(q),
-    );
-  }, [conversations, q]);
+  // Already filtered server-side — history rows below stay client-filtered.
+  const filteredChats = useMemo(
+    () => conversations?.items ?? [],
+    [conversations],
+  );
 
   // ChatGPT-style grouping: pinned float into their own section, the rest
   // bucket by recency. All derived from updatedAt — nothing hardcoded.

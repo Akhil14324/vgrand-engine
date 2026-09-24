@@ -23,16 +23,49 @@ async function loadOwned(req: FastifyRequest, id: string) {
 export async function conversationRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
 
-  /** Recent chats for the sidebar — pinned first, then most recently active. */
+  /** Recent chats for the sidebar — pinned first, then most recently active.
+   *  ?search= matches title OR any generation prompt/reply inside the chat. */
   app.get("/conversations", async (req) => {
     const q = req.query as {
       cursor?: string;
       limit?: string;
       archived?: string;
+      search?: string;
     };
     const limit = Math.min(Number(q.limit) || 50, 100);
+    const search = q.search?.trim();
     const items = await prisma.conversation.findMany({
-      where: { userId: req.userId, archived: q.archived === "true" },
+      where: {
+        userId: req.userId,
+        archived: q.archived === "true",
+        ...(search
+          ? {
+              OR: [
+                { title: { contains: search, mode: "insensitive" as const } },
+                {
+                  generations: {
+                    some: {
+                      OR: [
+                        {
+                          prompt: {
+                            contains: search,
+                            mode: "insensitive" as const,
+                          },
+                        },
+                        {
+                          textResponse: {
+                            contains: search,
+                            mode: "insensitive" as const,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
       orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
       take: limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),

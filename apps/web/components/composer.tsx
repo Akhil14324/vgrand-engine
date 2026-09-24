@@ -16,6 +16,8 @@ import {
   Home,
   Image as ImageIcon,
   Loader2,
+  Mic,
+  MicOff,
   Plus,
   Sparkles,
   UtensilsCrossed,
@@ -25,7 +27,7 @@ import {
 import type { DocumentDto, Quality, ThemeDto } from "@catgpt/types";
 import { apiFetch, ApiRequestError } from "@/lib/api";
 import { MAX_UPLOAD_MB } from "@/lib/config";
-import { useCreateGeneration, useThemes } from "@/lib/hooks";
+import { useCreateGeneration, useDocuments, useThemes } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -81,8 +83,64 @@ export function Composer() {
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [listening, setListening] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const recRef = useRef<{ stop: () => void } | null>(null);
+
+  // PDFs already attached to this chat (uploaded on earlier turns).
+  const { data: conversationDocs } = useDocuments(activeConversationId);
+
+  // Browser speech recognition (Chrome/Edge/Safari) — zero API cost.
+  const speechSupported =
+    typeof window !== "undefined" &&
+    (("SpeechRecognition" in window || "webkitSpeechRecognition" in window) as
+      | boolean
+      | undefined);
+
+  const toggleMic = useCallback(() => {
+    if (listening) {
+      recRef.current?.stop();
+      return;
+    }
+    const w = window as unknown as Record<string, unknown>;
+    const SR = (w.SpeechRecognition ?? w.webkitSpeechRecognition) as
+      | (new () => {
+          continuous: boolean;
+          interimResults: boolean;
+          onresult: ((e: unknown) => void) | null;
+          onend: (() => void) | null;
+          onerror: (() => void) | null;
+          start: () => void;
+          stop: () => void;
+        })
+      | undefined;
+    if (!SR) return;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e: unknown) => {
+      const ev = e as {
+        resultIndex: number;
+        results: { isFinal: boolean; 0: { transcript: string } }[];
+      };
+      let final = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i]!.isFinal) final += ev.results[i]![0]!.transcript;
+      }
+      if (final) {
+        setValue((v) => (v ? v.replace(/\s+$/, "") + " " : "") + final.trim());
+      }
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    rec.start();
+    recRef.current = rec;
+    setListening(true);
+  }, [listening]);
+
+  // Stop dictation if the composer unmounts mid-recording.
+  useEffect(() => () => recRef.current?.stop(), []);
 
   // Auto-grow the textarea: one line at rest, expands with content up to
   // ~7 lines (168px), then scrolls — same behavior as ChatGPT/Claude.
@@ -292,6 +350,16 @@ export function Composer() {
         }}
       />
 
+      {conversationDocs && conversationDocs.length > 0 && (
+        <div className="mx-auto mb-1.5 flex max-w-3xl items-center gap-1.5 px-3 text-[11px] text-muted-foreground">
+          <FileText className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            {conversationDocs.map((d) => d.filename).join(" · ")} — answers
+            use {conversationDocs.length === 1 ? "this file" : "these files"}
+          </span>
+        </div>
+      )}
+
       <Popover open={menuOpen && filtered.length > 0}>
         <PopoverAnchor asChild>
           <div
@@ -363,6 +431,28 @@ export function Composer() {
               >
                 <Plus />
               </Button>
+
+              {speechSupported && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "mb-0.5 h-9 w-9 shrink-0 rounded-full",
+                    listening
+                      ? "text-destructive"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={toggleMic}
+                  aria-label={listening ? "Stop dictation" : "Dictate"}
+                  title={listening ? "Stop dictation" : "Dictate"}
+                >
+                  {listening ? (
+                    <MicOff className="animate-pulse" />
+                  ) : (
+                    <Mic />
+                  )}
+                </Button>
+              )}
 
               <Textarea
                 ref={textareaRef}
