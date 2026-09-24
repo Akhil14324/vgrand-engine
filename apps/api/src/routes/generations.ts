@@ -14,7 +14,11 @@ import { subscribeGenerationEvents } from "../services/events.js";
 import { classifyIntent, loadChatHistory } from "../services/chat.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
 import { storeFile } from "../services/storage.js";
-import { assertImageQuota, getImageUsage } from "../lib/usage.js";
+import {
+  assertImageQuota,
+  getImageUsage,
+  recordImageUsage,
+} from "../lib/usage.js";
 import { env } from "../env.js";
 
 /**
@@ -231,6 +235,7 @@ export async function generationRoutes(app: FastifyInstance) {
         },
       });
     });
+    if (kind === "image") await recordImageUsage(req.userId, generation.id);
     await enqueueGeneration(generation.id);
     return reply.code(202).send({
       generationId: generation.id,
@@ -327,6 +332,7 @@ export async function generationRoutes(app: FastifyInstance) {
         data: { updatedAt: new Date() },
       });
     }
+    await recordImageUsage(req.userId, child.id);
     await enqueueGeneration(child.id);
     return reply.code(202).send({
       generationId: child.id,

@@ -19,6 +19,20 @@ model User {
   conversations Conversation[]
   documents     Document[]
   workspaces    Workspace[]
+  imageUsage    ImageUsage[]
+}
+
+// Permanent per-image ledger behind the daily quota. No relation to
+// Generation on purpose: deleting a chat must not refund quota.
+model ImageUsage {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generationId String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([generationId])
 }
 
 // A named collection of documents + chats — "analyze everything here" context

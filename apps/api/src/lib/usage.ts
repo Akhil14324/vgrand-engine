@@ -11,14 +11,10 @@ function startOfUtcDay(now = new Date()): Date {
 
 export async function getImageUsage(userId: string) {
   const start = startOfUtcDay();
-  // Failed generations don't cost the user quota.
-  const used = await prisma.generation.count({
-    where: {
-      userId,
-      kind: "image",
-      status: { not: "failed" },
-      createdAt: { gte: start },
-    },
+  // Ledger rows outlive chats (deleting a conversation doesn't refund quota);
+  // failed generations remove their own row so they never cost the user.
+  const used = await prisma.imageUsage.count({
+    where: { userId, createdAt: { gte: start } },
   });
   return {
     used,
@@ -38,4 +34,14 @@ export async function assertImageQuota(userId: string) {
       "IMAGE_LIMIT",
     );
   }
+}
+
+/** Record one image against today's quota. */
+export async function recordImageUsage(userId: string, generationId: string) {
+  await prisma.imageUsage.create({ data: { userId, generationId } });
+}
+
+/** Give the quota back when a generation fails. */
+export async function refundImageUsage(generationId: string) {
+  await prisma.imageUsage.deleteMany({ where: { generationId } });
 }

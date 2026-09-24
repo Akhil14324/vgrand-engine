@@ -27,6 +27,7 @@ import {
 } from "./chat.js";
 import { retrieveContext, runDocumentIngestion } from "./documents.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
+import { refundImageUsage } from "../lib/usage.js";
 import { env } from "../env.js";
 
 interface GenerationMetadata {
@@ -276,6 +277,7 @@ export async function runGeneration(generationId: string): Promise<void> {
       where: { id: generationId },
       data: { status: "failed", error: message },
     });
+    await refundImageUsage(generationId).catch(() => {});
     publishGenerationEvent({ generationId, status: "failed", error: message });
     throw err;
   }
