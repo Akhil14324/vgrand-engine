@@ -14,6 +14,7 @@ import { subscribeGenerationEvents } from "../services/events.js";
 import { classifyIntent, loadChatHistory } from "../services/chat.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
 import { storeFile } from "../services/storage.js";
+import { assertImageQuota, getImageUsage } from "../lib/usage.js";
 import { env } from "../env.js";
 
 /**
@@ -144,6 +145,8 @@ export async function generationRoutes(app: FastifyInstance) {
         ? ("image" as const)
         : ("text" as const);
 
+    if (kind === "image") await assertImageQuota(req.userId);
+
     // Theme brand references come first — they're the base the edit keeps;
     // any user-attached refs are extra guidance on top.
     const referenceImageUrls =
@@ -237,6 +240,9 @@ export async function generationRoutes(app: FastifyInstance) {
     });
   });
 
+  /** Today's image quota — chat is unlimited, images are capped per day. */
+  app.get("/usage", async (req) => getImageUsage(req.userId));
+
   /** Paginated history — the "memory" feed. Filter by theme or chat. */
   app.get("/generations", async (req) => {
     const q = req.query as {
@@ -292,6 +298,7 @@ export async function generationRoutes(app: FastifyInstance) {
     if (!referenceImageUrl) {
       throw badRequest("Parent generation has no image to edit");
     }
+    await assertImageQuota(req.userId);
     const prompt = body.prompt ?? parent.prompt;
     const theme = parent.themeId
       ? await prisma.theme.findUnique({ where: { id: parent.themeId } })

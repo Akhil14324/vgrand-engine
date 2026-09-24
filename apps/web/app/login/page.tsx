@@ -8,20 +8,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
-  const { user, isDev, loading, signInWithEmail, signUpWithEmail, signInWithGoogle } =
+  const { user, configured, loading, signInWithEmail, signUpWithEmail } =
     useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (isDev || user) router.replace("/");
-  }, [isDev, user, router]);
+    if (user) router.replace("/");
+  }, [user, router]);
 
-  if (loading || isDev || user) {
+  if (!configured) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6 text-center text-sm text-muted-foreground">
+        Sign-in isn&apos;t configured. Set NEXT_PUBLIC_SUPABASE_URL and
+        NEXT_PUBLIC_SUPABASE_ANON_KEY, then redeploy.
+      </div>
+    );
+  }
+
+  if (loading || user) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -33,9 +43,14 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       if (mode === "signin") await signInWithEmail(email, password);
-      else await signUpWithEmail(email, password);
+      else if (!(await signUpWithEmail(email, password))) {
+        setNotice("Account created — check your email to confirm it, then sign in.");
+        setMode("signin");
+        setBusy(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed");
       setBusy(false);
@@ -53,7 +68,7 @@ export default function LoginPage() {
             className="mx-auto h-24 w-auto rounded-2xl bg-white object-contain p-2"
           />
           <p className="mt-2 text-sm text-muted-foreground">
-            Themed AI image generation studio
+            Chat with AI and create images
           </p>
         </div>
 
@@ -69,23 +84,17 @@ export default function LoginPage() {
             type="password"
             required
             placeholder="Password"
+            minLength={6}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           {error && <p className="text-xs text-destructive">{error}</p>}
+          {notice && <p className="text-xs text-muted-foreground">{notice}</p>}
           <Button type="submit" disabled={busy}>
             {busy && <Loader2 className="animate-spin" />}
             {mode === "signin" ? "Sign in" : "Create account"}
           </Button>
         </form>
-
-        <Button
-          variant="outline"
-          className="mt-3 w-full"
-          onClick={() => void signInWithGoogle()}
-        >
-          Continue with Google
-        </Button>
 
         <button
           onClick={() => setMode(mode === "signin" ? "signup" : "signin")}

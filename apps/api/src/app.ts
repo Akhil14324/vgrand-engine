@@ -86,8 +86,8 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.get("/health", async () => ({
     status: "ok",
-    auth: env.supabaseConfigured ? "supabase" : "dev-bypass",
-    storage: env.supabaseConfigured ? "supabase" : "local",
+    auth: "supabase",
+    storage: "supabase",
     queue: await queueStats().catch((e: Error) => ({ error: e.message })),
   }));
 

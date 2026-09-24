@@ -84,7 +84,23 @@ export function useCreateGeneration() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["generations"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["usage"] });
     },
+  });
+}
+
+export interface ImageUsageDto {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt: string;
+}
+
+export function useImageUsage() {
+  return useQuery({
+    queryKey: ["usage"],
+    queryFn: () => apiFetch<ImageUsageDto>("/usage"),
+    staleTime: 30_000,
   });
 }
 
@@ -102,6 +118,7 @@ export function useRegenerate() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["generations"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["usage"] });
     },
   });
 }

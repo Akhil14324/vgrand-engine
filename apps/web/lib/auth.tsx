@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { DEV_MODE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
+import { AUTH_CONFIGURED, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { registerTokenGetter } from "./api";
 
 interface AuthUser {
@@ -23,39 +23,30 @@ interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  isDev: boolean;
+  configured: boolean;
   getToken: () => Promise<string | null>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  /** Resolves true when signed in immediately, false when email confirmation is pending. */
+  signUpWithEmail: (email: string, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const DEV_USER: AuthUser = {
-  id: "dev-user",
-  email: "dev@catgpt.local",
-  name: "Dev User",
-};
-
 let supabase: SupabaseClient | null = null;
 function getSupabase(): SupabaseClient | null {
-  if (DEV_MODE) return null;
+  if (!AUTH_CONFIGURED) return null;
   supabase ??= createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   return supabase;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(DEV_MODE ? DEV_USER : null);
-  const [loading, setLoading] = useState(!DEV_MODE);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(AUTH_CONFIGURED);
 
   useEffect(() => {
     const client = getSupabase();
-    if (!client) {
-      registerTokenGetter(async () => "dev-token");
-      return;
-    }
+    if (!client) return;
     client.auth.getSession().then(({ data }) => {
       setUser(toAuthUser(data.session?.user));
       setLoading(false);
@@ -76,9 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return {
       user,
       loading,
-      isDev: DEV_MODE,
+      configured: AUTH_CONFIGURED,
       getToken: async () => {
-        if (!client) return "dev-token";
+        if (!client) return null;
         const { data } = await client.auth.getSession();
         return data.session?.access_token ?? null;
       },
@@ -91,17 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) throw error;
       },
       signUpWithEmail: async (email, password) => {
-        if (!client) return;
-        const { error } = await client.auth.signUp({ email, password });
+        if (!client) return false;
+        const { data, error } = await client.auth.signUp({ email, password });
         if (error) throw error;
-      },
-      signInWithGoogle: async () => {
-        if (!client) return;
-        const { error } = await client.auth.signInWithOAuth({
-          provider: "google",
-          options: { redirectTo: window.location.origin },
-        });
-        if (error) throw error;
+        return Boolean(data.session);
       },
       signOut: async () => {
         await client?.auth.signOut();

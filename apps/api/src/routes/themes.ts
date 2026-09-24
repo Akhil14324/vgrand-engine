@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { prisma, type Prisma } from "@catgpt/db";
-import { createThemeSchema, updateThemeSchema } from "@catgpt/types";
-import { notFound, parseBody } from "../lib/errors.js";
+import { prisma } from "@catgpt/db";
+import { notFound } from "../lib/errors.js";
 import { toThemeDto } from "../lib/serialize.js";
 
 export async function themeRoutes(app: FastifyInstance) {
@@ -23,33 +22,6 @@ export async function themeRoutes(app: FastifyInstance) {
     return toThemeDto(theme);
   });
 
-  // Admin endpoints — v1 allows any authenticated user. Add a role check
-  // before opening this to real tenants.
-  app.post("/themes", async (req, reply) => {
-    const body = parseBody(createThemeSchema, req.body);
-    const theme = await prisma.theme.create({
-      data: {
-        ...body,
-        styleGuide: body.styleGuide as Prisma.InputJsonValue | undefined,
-      },
-    });
-    return reply.code(201).send(toThemeDto(theme));
-  });
-
-  app.put("/themes/:id", async (req) => {
-    const { id } = req.params as { id: string };
-    const body = parseBody(updateThemeSchema, req.body);
-    try {
-      const theme = await prisma.theme.update({
-        where: { id },
-        data: {
-          ...body,
-          styleGuide: body.styleGuide as Prisma.InputJsonValue | undefined,
-        },
-      });
-      return toThemeDto(theme);
-    } catch {
-      throw notFound("Theme not found");
-    }
-  });
+  // Themes are shared, read-only brand presets. Creating/editing them is done
+  // out-of-band (prisma seed) — never by end users.
 }

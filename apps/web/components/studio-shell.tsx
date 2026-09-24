@@ -30,7 +30,7 @@ const THEME_ICONS: Record<string, LucideIcon> = {
 };
 
 export function StudioShell() {
-  const { user, loading, isDev } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { activeConversationId, sidebarCollapsed, toggleSidebar, startNewChat } =
@@ -38,8 +38,8 @@ export function StudioShell() {
   const { data: conversation } = useConversation(activeConversationId);
 
   useEffect(() => {
-    if (!loading && !user && !isDev) router.replace("/login");
-  }, [loading, user, isDev, router]);
+    if (!loading && !user) router.replace("/login");
+  }, [loading, user, router]);
 
   if (loading) {
     return (

@@ -18,8 +18,9 @@ and browsed in a per-user history/memory feed.
 | db      | Prisma → Postgres + pgvector (Supabase-compatible)          |
 | images  | OpenAI `gpt-image-2.5-flare` (drafts) + `gpt-image-2.5-sunburst` (edits); Flux & Ideogram adapters ready |
 | chat    | `CHAT_MODEL` streaming replies; `text-embedding-3-small` for PDF RAG — same OpenAI key |
-| storage | Supabase Storage, or local `./uploads` fallback in dev      |
-| auth    | Supabase Auth (email + Google), or `DEV_AUTH_BYPASS` locally |
+| storage | Supabase Storage                                            |
+| auth    | Supabase Auth, email + password only (login required)       |
+| limits  | Unlimited chat; `IMAGE_DAILY_LIMIT` (default 50) images per user per UTC day |
 
 ## Quickstart
 
@@ -38,18 +39,17 @@ pnpm db:seed               # seeds /restaurant and /infra themes
 pnpm dev                   # web :3000, api :4000 (worker runs inline)
 ```
 
-Works out of the box without Supabase: `DEV_AUTH_BYPASS=true` signs everyone in
-as a local dev user, and images are stored under `apps/api/uploads/` and served
-at `/uploads/*`.
+Supabase is required: every request is authenticated and each user only ever
+sees their own chats, images, documents and memories.
 
-## When you get Supabase
+## Supabase setup
 
 Fill `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` in
 `apps/api/.env`, and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-in `apps/web/.env.local`. That automatically switches on real JWT auth
-(email + Google login UI) and Supabase Storage uploads. Point
+in `apps/web/.env.local`. That enables email/password login and Supabase Storage uploads. Point
 `DATABASE_URL` at your Supabase Postgres (use the pooler URL) and re-run
-`pnpm db:migrate && pnpm db:seed`. Set `DEV_AUTH_BYPASS=false` in production.
+`pnpm db:migrate && pnpm db:seed`. In Supabase Auth settings, turn off "Confirm email" if you want
+sign-ups to work instantly without an email round-trip.
 
 ## Model routing
 

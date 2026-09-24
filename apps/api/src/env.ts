@@ -47,7 +47,8 @@ const envSchema = z.object({
   SUPABASE_JWT_SECRET: opt(z.string().min(1)),
   STORAGE_BUCKET: opt(z.string().min(1)),
 
-  DEV_AUTH_BYPASS: bool,
+  /** Max image generations per user per UTC day. Chat is unlimited. */
+  IMAGE_DAILY_LIMIT: z.coerce.number().int().positive().default(50),
   WORKER_INLINE: bool,
   UPLOAD_DIR: opt(z.string().min(1)),
 });
@@ -74,9 +75,6 @@ export const env = {
   EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
-  // Defaults on in dev only — production must opt in explicitly.
-  DEV_AUTH_BYPASS:
-    parsed.DEV_AUTH_BYPASS ?? parsed.NODE_ENV !== "production",
   // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults
   // to a separate worker process (pnpm --filter @catgpt/api worker).
   WORKER_INLINE: parsed.WORKER_INLINE ?? !Boolean(parsed.REDIS_URL),
@@ -90,12 +88,11 @@ export const env = {
   },
 };
 
-// Boot-time guard: in production the bypass maps every request to one shared
-// dev identity — a data-isolation breach, not a convenience. Refuse to start
-// if it resolves to true, whether set explicitly or by default.
-if (parsed.NODE_ENV === "production" && env.DEV_AUTH_BYPASS) {
+// Every request is authenticated against Supabase — there is no anonymous or
+// shared "dev" identity, so a missing config must stop the boot, not degrade.
+if (!env.supabaseConfigured) {
   throw new Error(
-    "DEV_AUTH_BYPASS resolves to true with NODE_ENV=production. " +
-      "Set DEV_AUTH_BYPASS=false and configure Supabase auth before deploying.",
+    "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the API only " +
+      "serves authenticated Supabase users.",
   );
 }

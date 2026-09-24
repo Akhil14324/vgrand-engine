@@ -15,12 +15,6 @@ declare module "fastify" {
   }
 }
 
-const DEV_USER = {
-  id: "dev-user",
-  email: "dev@catgpt.local",
-  name: "Dev User",
-};
-
 let supabaseAuth: SupabaseClient | null = null;
 function getSupabase(): SupabaseClient | null {
   if (!env.supabaseConfigured) return null;
@@ -95,8 +89,6 @@ async function verifySupabaseJwt(token: string) {
  *  - Supabase configured -> verify the Bearer JWT. With SUPABASE_JWT_SECRET
  *    this is local (jose jwtVerify, zero network calls); without it we fall
  *    back to supabase.auth.getUser (one HTTP call per request).
- *  - Not configured + DEV_AUTH_BYPASS -> everyone maps to a local dev user so
- *    the app runs end-to-end before Supabase is wired in.
  */
 export const authPlugin = fp(async (app) => {
   app.decorateRequest("userId", "");
@@ -143,15 +135,8 @@ export const authPlugin = fp(async (app) => {
         "[auth] token rejected:",
         error ? error.message : "no user returned",
       );
-      // Bad token: fall through — DEV_AUTH_BYPASS still rescues the request
-      // when it's explicitly enabled; otherwise this 401s below.
     } else if (token) {
       console.error("[auth] token sent but Supabase client unavailable");
-    }
-
-    if (env.DEV_AUTH_BYPASS) {
-      req.userId = await upsertUser(DEV_USER.id, DEV_USER.email, DEV_USER.name);
-      return;
     }
 
     throw unauthorized(

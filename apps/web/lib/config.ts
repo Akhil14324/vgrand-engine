@@ -9,8 +9,8 @@ export const API_URL = (
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-/** True until Supabase env vars are provided — the app runs with a dev user. */
-export const DEV_MODE = !(SUPABASE_URL && SUPABASE_ANON_KEY);
+/** Login is mandatory — without these the app shows a setup error, never a fake user. */
+export const AUTH_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 /**
  * Upload cap mirrored from the API's MAX_UPLOAD_MB for client-side pre-checks.
