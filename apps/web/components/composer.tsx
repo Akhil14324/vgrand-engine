@@ -15,7 +15,6 @@ import {
   Building2,
   FileText,
   Home,
-  Image as ImageIcon,
   Loader2,
   Mic,
   MicOff,

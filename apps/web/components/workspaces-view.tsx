@@ -204,8 +204,10 @@ function WorkspaceDetail({
     try {
       for (const file of Array.from(files)) {
         const form = new FormData();
-        form.append("file", file);
+        // Field order matters — @fastify/multipart only exposes fields sent
+        // BEFORE the file part in file.fields.
         form.append("workspaceId", workspaceId);
+        form.append("file", file);
         await apiFetch("/documents", { method: "POST", body: form });
       }
       void qc.invalidateQueries({ queryKey: ["workspace", workspaceId] });
