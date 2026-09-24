@@ -170,6 +170,7 @@ export async function runGeneration(generationId: string): Promise<void> {
       let text = "";
       let sources: WebSource[] = [];
       let searched = false;
+      let searchError: string | null = null;
       if (codeRun) {
         text = await runWithCodeInterpreter(
           stripRunPrefix(generation.prompt) || generation.prompt,
@@ -206,6 +207,7 @@ export async function runGeneration(generationId: string): Promise<void> {
           } catch (err) {
             // Tokens already reached the client, so we cannot restart cleanly.
             if (streamed) throw err;
+            searchError = err instanceof Error ? err.message : String(err);
             console.error("[worker] web search failed, answering without it:", err);
           }
         }
@@ -229,6 +231,7 @@ export async function runGeneration(generationId: string): Promise<void> {
           metadata: {
             ...meta,
             ...(codeRun ? { codeRun: true } : {}),
+            ...(searchError ? { searchError: searchError.slice(0, 300) } : {}),
             ...(searched
               ? {
                   webSearched: true,
