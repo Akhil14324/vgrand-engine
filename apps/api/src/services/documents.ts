@@ -46,7 +46,7 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
 export function chunkText(raw: string): string[] {
   const size = env.RAG_CHUNK_CHARS;
   const overlap = env.RAG_CHUNK_OVERLAP;
-  const text = raw.replace(/\s+/g, " ").trim();
+  const text = raw.replace(/\u0000/g, " ").replace(/\s+/g, " ").trim();
   if (!text) return [];
 
   const chunks: string[] = [];
