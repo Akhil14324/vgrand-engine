@@ -16,7 +16,8 @@ import type {
   WorkspaceDto,
 } from "@catgpt/types";
 
-type GenerationWithTheme = Generation & {
+type GenerationWithTheme = Omit<Generation, "finalPrompt"> & {
+  finalPrompt?: string;
   theme?: Pick<Theme, "id" | "slug" | "label" | "icon"> | null;
 };
 

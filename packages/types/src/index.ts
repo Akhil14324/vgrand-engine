@@ -67,7 +67,8 @@ export interface GenerationDto {
   /** "image" = generated image, "text" = chat reply (textResponse set). */
   kind: GenerationKind;
   prompt: string;
-  finalPrompt: string;
+  /** Set on detail responses; omitted from list payloads to keep them light. */
+  finalPrompt?: string;
   textResponse: string | null;
   provider: string;
   model: string | null;

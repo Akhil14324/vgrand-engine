@@ -387,7 +387,24 @@ export async function generationRoutes(app: FastifyInstance) {
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
-      include: {
+      // Everything except finalPrompt — it duplicates prompt + the theme
+      // template and the feed never renders it.
+      select: {
+        id: true,
+        userId: true,
+        themeId: true,
+        kind: true,
+        prompt: true,
+        textResponse: true,
+        provider: true,
+        model: true,
+        imageUrls: true,
+        status: true,
+        error: true,
+        metadata: true,
+        parentId: true,
+        conversationId: true,
+        createdAt: true,
         theme: { select: { id: true, slug: true, label: true, icon: true } },
       },
     });

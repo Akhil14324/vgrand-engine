@@ -51,6 +51,9 @@ async function ensureBucket(client: SupabaseClient) {
   bucketEnsured = true;
 }
 
+/** Cap on bytes pulled from a provider URL — guards memory, not quota. */
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -72,11 +75,22 @@ export async function storeImage(input: StoreImageInput): Promise<string> {
   let mimeType = input.mimeType;
 
   if (!buffer && input.sourceUrl) {
-    const res = await fetch(input.sourceUrl);
+    // A hung provider connection would otherwise stall the job until the sweep
+    // notices it ~15 min later; cap the body so a bad URL can't exhaust memory.
+    const res = await fetch(input.sourceUrl, {
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!res.ok) {
       throw new Error(`failed to fetch provider image (${res.status})`);
     }
+    const declared = Number(res.headers.get("content-length") ?? 0);
+    if (declared > MAX_FILE_BYTES) {
+      throw new Error("provider image exceeds size limit");
+    }
     buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.byteLength > MAX_FILE_BYTES) {
+      throw new Error("provider image exceeds size limit");
+    }
     mimeType ??= res.headers.get("content-type") ?? undefined;
   }
   if (!buffer) throw new Error("storeImage: no buffer or sourceUrl");
