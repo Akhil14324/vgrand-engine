@@ -127,7 +127,12 @@ function describeError(err: unknown): string {
     error?: { message?: string };
     message?: string;
   } | null;
-  return e?.error?.message ?? e?.message ?? "generation request failed";
+  const msg = e?.error?.message ?? e?.message ?? "generation request failed";
+  // OpenAI's canned rejection tells the user nothing actionable — translate it.
+  if (/rejected by the safety system|content[_ ]?policy/i.test(msg)) {
+    return "the image model declined this prompt as sensitive — real people, public figures and graphic content are refused. Try describing the scene with symbols, objects or places instead";
+  }
+  return msg;
 }
 
 function mapImages(

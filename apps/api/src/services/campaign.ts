@@ -45,29 +45,13 @@ export function stripCampaignPrefix(prompt: string): string {
 export async function isCampaignConversation(
   conversationId: string,
 ): Promise<boolean> {
-  // Conversation.campaign is set the first time a /campaign turn lands — one
-  // PK lookup instead of an unindexed prompt-prefix scan on every text turn.
+  // Conversation.campaign is set the first time a /campaign turn lands and the
+  // migration backfilled older rows — one PK lookup, no prompt scans.
   const convo = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { campaign: true },
   });
-  if (convo?.campaign) return true;
-  // Rows predating the flag (or set after an old deploy): derive once and
-  // backfill so later turns still take the cheap path.
-  const hit = await prisma.generation.findFirst({
-    where: {
-      conversationId,
-      prompt: { startsWith: "/campaign", mode: "insensitive" },
-    },
-    select: { id: true },
-  });
-  if (hit) {
-    await prisma.conversation
-      .update({ where: { id: conversationId }, data: { campaign: true } })
-      .catch(() => {});
-    return true;
-  }
-  return false;
+  return convo?.campaign ?? false;
 }
 
 /* --------------------------------- prompts -------------------------------- */
@@ -106,7 +90,10 @@ where N is the number of image creatives to generate: 3 after a full campaign, o
 
 const CREATIVE_SYSTEM = `You write image-generation prompts for sales advertising creatives. Return JSON only: {"creatives":[{"title":"...","prompt":"..."}]}.
 
-Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (square social-media post unless the conversation says otherwise), lighting and style, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. "title" is a short label (max 6 words).`;
+Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (square social-media post unless the conversation says otherwise), lighting and style, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. "title" is a short label (max 6 words).
+
+Never depict real people or public figures — politicians, celebrities, historical leaders. Image providers refuse their likenesses, so the creative would fail. For occasions tied to a person (birth anniversaries, memorial days, founder tributes), use symbolic imagery instead: their iconic objects, signature colours, a famous quote as text, or the event's symbols.`;
+
 
 /* ----------------------------- marker filtering ---------------------------- */
 
