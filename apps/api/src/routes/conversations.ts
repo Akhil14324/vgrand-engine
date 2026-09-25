@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toConversationDto } from "../lib/serialize.js";
 import { loadTranscript, transcriptMarkdown } from "../lib/transcript.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
-import { storeFile } from "../services/storage.js";
+import { deleteStoredFiles, storeFile } from "../services/storage.js";
 
 const PREVIEW_INCLUDE = {
   _count: { select: { generations: true } },
@@ -88,11 +88,14 @@ export async function conversationRoutes(app: FastifyInstance) {
 
   app.get("/conversations/:id", async (req) => {
     const { id } = req.params as { id: string };
-    await loadOwned(req, id);
-    const conversation = await prisma.conversation.findUniqueOrThrow({
+    // One query — loadOwned + findUniqueOrThrow paid two round-trips for the
+    // same row.
+    const conversation = await prisma.conversation.findUnique({
       where: { id },
       include: PREVIEW_INCLUDE,
     });
+    if (!conversation) throw notFound("Conversation not found");
+    if (conversation.userId !== req.userId) throw forbidden();
     return toConversationDto(conversation);
   });
 
@@ -137,7 +140,24 @@ export async function conversationRoutes(app: FastifyInstance) {
   app.delete("/conversations/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     await loadOwned(req, id);
+    // Collect the files the cascade is about to orphan: generated images plus
+    // chat-scoped document uploads (workspace/brand docs are never linked to
+    // a conversation, so they are untouched here).
+    const [generations, docs] = await Promise.all([
+      prisma.generation.findMany({
+        where: { conversationId: id },
+        select: { imageUrls: true },
+      }),
+      prisma.document.findMany({
+        where: { conversationId: id },
+        select: { storageUrl: true },
+      }),
+    ]);
     await prisma.conversation.delete({ where: { id } });
+    await deleteStoredFiles([
+      ...generations.flatMap((g) => g.imageUrls),
+      ...docs.map((d) => d.storageUrl),
+    ]);
     return reply.code(204).send();
   });
 }

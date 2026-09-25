@@ -47,3 +47,15 @@ export class ProviderError extends Error {
     this.name = "ProviderError";
   }
 }
+
+/**
+ * Thrown from an `onPartialImage` callback to abort a streaming generation
+ * early (e.g. the user hit Stop). Providers must let it propagate — it is
+ * not a stream failure to retry, so fallback logic rethrows it untouched.
+ */
+export class ImageGenerationAborted extends Error {
+  constructor(message = "image generation aborted") {
+    super(message);
+    this.name = "ImageGenerationAborted";
+  }
+}

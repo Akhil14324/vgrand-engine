@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { DocumentDto, Quality, ThemeDto } from "@catgpt/types";
+import type { DocumentDto, ImageSize, Quality, ThemeDto } from "@catgpt/types";
 
 /** Optimistic copy of a just-sent turn — renders before the server answers. */
 export interface PendingTurn {
@@ -32,6 +32,10 @@ interface StudioState {
   /** Quality tier for the next generation ("low" default keeps cost down). */
   quality: Quality;
   setQuality: (q: Quality) => void;
+
+  /** Canvas for the next image — "auto" lets the provider pick a ratio. */
+  size: ImageSize;
+  setSize: (s: ImageSize) => void;
 
   /** Desktop sidebar collapsed via the PanelLeft button. */
   sidebarCollapsed: boolean;
@@ -81,6 +85,9 @@ export const useStudio = create<StudioState>((set) => ({
 
   quality: "low",
   setQuality: (quality) => set({ quality }),
+
+  size: "auto",
+  setSize: (size) => set({ size }),
 
   sidebarCollapsed: false,
   toggleSidebar: () =>

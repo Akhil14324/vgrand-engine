@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@catgpt/db";
 import { parseBody } from "../lib/errors.js";
 import { findWorkspaceForUser, workspaceAccess } from "../lib/workspace-access.js";
+import { deleteStoredFiles } from "../services/storage.js";
 import {
   toWorkspaceDetailDto,
   toWorkspaceDto,
@@ -82,7 +83,35 @@ export async function workspaceRoutes(app: FastifyInstance) {
   app.delete("/workspaces/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     await loadOwned(req, id);
+    // Workspace brands are destroyed with the workspace (documents and chats
+    // only lose their workspaceId). Collect the brand-owned files — asset
+    // images and brand document uploads — so storage can be reclaimed.
+    const [docs, assets] = await Promise.all([
+      prisma.document.findMany({
+        where: { brand: { workspaceId: id } },
+        select: { storageUrl: true },
+      }),
+      prisma.brandAsset.findMany({
+        where: { brand: { workspaceId: id } },
+        select: { url: true },
+      }),
+    ]);
     await prisma.workspace.delete({ where: { id } });
+    const assetUrls = assets.map((a) => a.url);
+    const shared = assetUrls.length
+      ? new Set(
+          (
+            await prisma.brandAsset.findMany({
+              where: { url: { in: assetUrls } },
+              select: { url: true },
+            })
+          ).map((a) => a.url),
+        )
+      : new Set<string>();
+    await deleteStoredFiles([
+      ...docs.map((d) => d.storageUrl),
+      ...assetUrls.filter((u) => !shared.has(u)),
+    ]);
     return reply.code(204).send();
   });
 }

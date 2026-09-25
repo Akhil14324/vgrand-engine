@@ -5,7 +5,7 @@ export type {
   GenerationMode,
   ImageProvider,
 } from "./types.js";
-export { ProviderError } from "./types.js";
+export { ImageGenerationAborted, ProviderError } from "./types.js";
 export { OpenAIImageProvider, OPENAI_DRAFT_MODEL, OPENAI_EDIT_MODEL } from "./openai.js";
 export { FluxProvider } from "./flux.js";
 export { IdeogramProvider } from "./ideogram.js";

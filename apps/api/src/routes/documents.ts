@@ -4,7 +4,7 @@ import { prisma } from "@catgpt/db";
 import { badRequest, forbidden, notFound } from "../lib/errors.js";
 import { toDocumentDto } from "../lib/serialize.js";
 import { enqueueDocumentIngestion } from "../services/queue.js";
-import { storeFile } from "../services/storage.js";
+import { deleteStoredFiles, storeFile } from "../services/storage.js";
 import { MAX_BRAND_DOCUMENTS, findAccessibleBrand } from "../lib/brand.js";
 import { findWorkspaceForUser } from "../lib/workspace-access.js";
 
@@ -109,6 +109,7 @@ export async function documentRoutes(app: FastifyInstance) {
       throw forbidden();
     }
     await prisma.document.delete({ where: { id } });
+    await deleteStoredFiles([doc.storageUrl]);
     return reply.code(204).send();
   });
 }

@@ -1,7 +1,12 @@
 import { prisma } from "@catgpt/db";
 import { env } from "../env.js";
 import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
-import { getImageUsage, recordImageUsage } from "../lib/usage.js";
+import {
+  getImageUsage,
+  recordImageUsage,
+  refundImageUsage,
+} from "../lib/usage.js";
+import { publishGenerationEvent } from "./events.js";
 import {
   brandImageGuidance,
   brandReferenceUrls,
@@ -40,14 +45,29 @@ export function stripCampaignPrefix(prompt: string): string {
 export async function isCampaignConversation(
   conversationId: string,
 ): Promise<boolean> {
-  const first = await prisma.generation.findFirst({
+  // Conversation.campaign is set the first time a /campaign turn lands — one
+  // PK lookup instead of an unindexed prompt-prefix scan on every text turn.
+  const convo = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { campaign: true },
+  });
+  if (convo?.campaign) return true;
+  // Rows predating the flag (or set after an old deploy): derive once and
+  // backfill so later turns still take the cheap path.
+  const hit = await prisma.generation.findFirst({
     where: {
       conversationId,
       prompt: { startsWith: "/campaign", mode: "insensitive" },
     },
     select: { id: true },
   });
-  return first !== null;
+  if (hit) {
+    await prisma.conversation
+      .update({ where: { id: conversationId }, data: { campaign: true } })
+      .catch(() => {});
+    return true;
+  }
+  return false;
 }
 
 /* --------------------------------- prompts -------------------------------- */
@@ -270,6 +290,8 @@ export async function spawnCreatives(params: {
     params.reply,
     count,
   );
+  let spawned = 0;
+  let hitQuota = false;
   for (const [i, brief] of briefs.entries()) {
     const generation = await prisma.generation.create({
       data: {
@@ -294,13 +316,49 @@ export async function spawnCreatives(params: {
         },
       },
     });
-    await recordImageUsage(userId, generation.id);
-    await enqueueGeneration(generation.id, { background: true });
+    // The quota snapshot that picked `count` is stale by now — reserve
+    // atomically per creative so concurrent sends can't overspend the limit.
+    const reserved = await recordImageUsage(userId, generation.id);
+    if (!reserved) {
+      hitQuota = true;
+      await prisma.generation.update({
+        where: { id: generation.id },
+        data: { status: "failed", error: "Daily image limit reached" },
+      });
+      publishGenerationEvent({
+        generationId: generation.id,
+        status: "failed",
+        error: "Daily image limit reached",
+      });
+      break;
+    }
+    try {
+      await enqueueGeneration(generation.id, { background: true });
+      spawned++;
+    } catch (err) {
+      // Same contract as POST /generations: a job that never starts must not
+      // stay pending or stay charged.
+      await refundImageUsage(generation.id).catch(() => {});
+      await prisma.generation
+        .update({
+          where: { id: generation.id },
+          data: { status: "failed", error: "Could not start the job" },
+        })
+        .catch(() => {});
+      publishGenerationEvent({
+        generationId: generation.id,
+        status: "failed",
+        error: "Could not start the job",
+      });
+      console.error("[campaign] creative enqueue failed:", err);
+      break;
+    }
   }
-  if (briefs.length < requested) {
-    return briefs.length < count
-      ? `\n\n> Only ${briefs.length} of ${requested} creatives could be planned.`
-      : `\n\n> Generated ${briefs.length} of ${requested} creatives - that is all the images you have left today.`;
+  if (spawned < requested) {
+    if (hitQuota) {
+      return `\n\n> Generated ${spawned} of ${requested} creatives - that is all the images you have left today.`;
+    }
+    return `\n\n> Only ${spawned} of ${requested} creatives could be started — ask me to retry the rest.`;
   }
   return null;
 }

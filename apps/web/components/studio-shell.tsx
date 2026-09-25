@@ -4,34 +4,24 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Building2,
-  Home,
   LayoutGrid,
   Megaphone,
   Menu,
   PanelLeftOpen,
   Sparkles,
   SquarePen,
-  UtensilsCrossed,
-  type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { ChatMenu } from "@/components/chat-menu";
 import { PENDING_JOIN_KEY } from "@/lib/config";
 import { useConversation, useThemes } from "@/lib/hooks";
 import { useBrandMode } from "@/lib/brand-mode";
+import { THEME_ICONS } from "@/lib/theme-icons";
 import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
 import { Composer } from "./composer";
 import { GenerationFeed, PendingTurnBubble } from "./generation-feed";
-
-const THEME_ICONS: Record<string, LucideIcon> = {
-  utensils: UtensilsCrossed,
-  building: Building2,
-  sparkles: Sparkles,
-  home: Home,
-};
 
 export function StudioShell() {
   const { user, loading } = useAuth();

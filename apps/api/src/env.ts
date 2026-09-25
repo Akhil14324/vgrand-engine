@@ -99,7 +99,7 @@ export const env = {
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
   // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults
   // to a separate worker process (pnpm --filter @catgpt/api worker).
-  WORKER_INLINE: parsed.WORKER_INLINE ?? !Boolean(parsed.REDIS_URL),
+  WORKER_INLINE: parsed.WORKER_INLINE ?? !parsed.REDIS_URL,
   /** True only when REDIS_URL was explicitly provided — otherwise jobs run inline. */
   get redisConfigured(): boolean {
     return Boolean(parsed.REDIS_URL);

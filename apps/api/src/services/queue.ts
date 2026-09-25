@@ -52,9 +52,10 @@ function getQueue<T>(name: string): Queue<T> {
 }
 
 /**
- * `background` jobs (auto-spawned campaign creatives) get a BullMQ priority,
- * which always runs after unprioritized jobs — so one user's batch of posters
- * never sits in front of another user's chat turn.
+ * BullMQ runs prioritized jobs BEFORE unprioritized ones, and lower numbers
+ * first — so foreground turns get priority 1 and `background` jobs
+ * (auto-spawned campaign creatives) get 10, which makes a batch of posters
+ * sit behind other users' chat turns instead of jumping ahead of them.
  */
 export async function enqueueGeneration(
   generationId: string,
@@ -73,8 +74,26 @@ export async function enqueueGeneration(
   await getQueue<GenerationJob>(GENERATION_QUEUE).add(
     "generate",
     { generationId },
-    { jobId: generationId, ...(opts.background ? { priority: 10 } : {}) },
+    { jobId: generationId, priority: opts.background ? 10 : 1 },
   );
+}
+
+/**
+ * Force a fresh queue entry for a generation — the stale-work sweep uses this
+ * when the original job may still exist in a dead/failed state, where BullMQ
+ * would otherwise dedupe the re-add and the row would never run again.
+ * Removing a live/locked job throws (swallowed), and the dedupe then keeps
+ * the real job — safe either way.
+ */
+export async function requeueGeneration(generationId: string) {
+  if (!env.redisConfigured) {
+    await enqueueGeneration(generationId);
+    return;
+  }
+  await getQueue<GenerationJob>(GENERATION_QUEUE)
+    .remove(generationId)
+    .catch(() => {});
+  await enqueueGeneration(generationId);
 }
 
 /** Document ingestion (PDF/DOCX → chunks + embeddings) — off the request thread. */

@@ -101,6 +101,9 @@ model Conversation {
   title       String // auto-derived from the first prompt
   pinned      Boolean             @default(false)
   archived    Boolean             @default(false)
+  /// Set once a turn was routed through campaign mode — avoids scanning
+  /// Generation prompts on every later message to detect the mode.
+  campaign    Boolean             @default(false)
   generations Generation[]
   documents   Document[]
   shares      ConversationShare[]

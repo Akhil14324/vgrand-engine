@@ -10,10 +10,47 @@ import { env } from "../env.js";
 const channel = (generationId: string) => `catgpt:gen:${generationId}`;
 
 let pub: IORedis | null = null;
+let sub: IORedis | null = null;
+/** generationId channel -> live SSE handlers, on one shared subscriber conn. */
+const subscribers = new Map<string, Set<(evt: GenerationEvent) => void>>();
 
 /** In-process bus used when there's no Redis — inline mode is same-process. */
 const localBus = new EventEmitter();
 localBus.setMaxListeners(0); // one listener per open SSE stream — don't warn.
+
+function getPublisher(): IORedis {
+  // No 'error' listener => unhandled EventEmitter error => process crash when
+  // Redis is down. Attach once — publishes already fail soft via .catch().
+  if (!pub) {
+    pub = new IORedis(env.REDIS_URL);
+    pub.on("error", () => {});
+  }
+  return pub;
+}
+
+/**
+ * One shared subscriber connection for every open SSE stream — a connection
+ * per stream multiplied Redis connections by concurrent viewers. Channels are
+ * SUBSCRIBEd on the first handler and UNSUBSCRIBEd when the last one leaves.
+ */
+function getSubscriber(): IORedis {
+  if (!sub) {
+    sub = new IORedis(env.REDIS_URL);
+    sub.on("error", () => {});
+    sub.on("message", (ch, message) => {
+      const handlers = subscribers.get(ch);
+      if (!handlers) return;
+      let evt: GenerationEvent;
+      try {
+        evt = JSON.parse(message) as GenerationEvent;
+      } catch {
+        return; // ignore malformed events
+      }
+      for (const handler of handlers) handler(evt);
+    });
+  }
+  return sub;
+}
 
 /**
  * Redis pub/sub bridge between the BullMQ worker and the SSE routes — works
@@ -26,11 +63,7 @@ export function publishGenerationEvent(evt: GenerationEvent): void {
     localBus.emit(channel(evt.generationId), evt);
     return;
   }
-  pub ??= new IORedis(env.REDIS_URL);
-  // No 'error' listener => unhandled EventEmitter error => process crash when
-  // Redis is down. Swallow it — publishes already fail soft via .catch().
-  pub.on("error", () => {});
-  pub
+  getPublisher()
     .publish(channel(evt.generationId), JSON.stringify(evt))
     .catch(() => {});
 }
@@ -46,19 +79,19 @@ export function subscribeGenerationEvents(
       localBus.off(ch, handler);
     };
   }
-  const sub = new IORedis(env.REDIS_URL);
-  sub.on("error", () => {});
-  sub.subscribe(ch).catch(() => {});
-  const onMessage = (_channel: string, message: string) => {
-    try {
-      handler(JSON.parse(message) as GenerationEvent);
-    } catch {
-      // ignore malformed events
-    }
-  };
-  sub.on("message", onMessage);
+  const conn = getSubscriber();
+  let handlers = subscribers.get(ch);
+  if (!handlers) {
+    handlers = new Set();
+    subscribers.set(ch, handlers);
+    conn.subscribe(ch).catch(() => {});
+  }
+  handlers.add(handler);
   return () => {
-    sub.off("message", onMessage);
-    sub.disconnect();
+    handlers.delete(handler);
+    if (handlers.size === 0) {
+      subscribers.delete(ch);
+      conn.unsubscribe(ch).catch(() => {});
+    }
   };
 }

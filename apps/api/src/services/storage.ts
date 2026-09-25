@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { env } from "../env.js";
@@ -42,9 +42,11 @@ async function ensureBucket(client: SupabaseClient) {
   const { error } = await client.storage.createBucket(BUCKET, {
     public: true,
   });
-  // "already exists" is fine — anything else surfaces on upload anyway.
+  // Cache success (or "already exists") only — a transient failure must not
+  // poison the flag for the process lifetime, or uploads never retry.
   if (error && !/already exists/i.test(error.message)) {
     console.warn(`storage bucket create: ${error.message}`);
+    return;
   }
   bucketEnsured = true;
 }
@@ -103,3 +105,46 @@ export async function storeImage(input: StoreImageInput): Promise<string> {
 
 /** Generic-byte alias — same store, clearer name for non-image files (PDFs). */
 export const storeFile = storeImage;
+
+/**
+ * Best-effort removal of objects this service stored. Only URLs we produced
+ * are touched — Supabase public-object URLs in our bucket, or /uploads/ links
+ * on this API's own origin; anything else (provider URLs, theme assets) is
+ * skipped. Never throws: an orphaned file beats a failed delete request.
+ */
+export async function deleteStoredFiles(
+  urls: readonly (string | null | undefined)[],
+): Promise<void> {
+  const supabasePrefix = env.SUPABASE_URL
+    ? `${normalizeSupabaseUrl(env.SUPABASE_URL)}/storage/v1/object/public/${BUCKET}/`
+    : null;
+  const uploadsPrefix = `${env.API_PUBLIC_URL.replace(/\/+$/, "")}/uploads/`;
+
+  const keys: string[] = [];
+  const locals: string[] = [];
+  for (const raw of urls) {
+    if (!raw) continue;
+    if (supabasePrefix && raw.startsWith(supabasePrefix)) {
+      keys.push(decodeURIComponent(raw.slice(supabasePrefix.length)));
+    } else if (raw.startsWith(uploadsPrefix)) {
+      const rel = raw.slice(uploadsPrefix.length);
+      // Defence in depth: stored keys are hex-named, but never unlink outside
+      // UPLOAD_DIR if a malformed URL somehow got in.
+      if (!rel.includes("..")) locals.push(rel);
+    }
+  }
+
+  const tasks: Promise<unknown>[] = [];
+  const client = getSupabase();
+  if (client && keys.length) {
+    tasks.push(client.storage.from(BUCKET).remove(keys));
+  }
+  for (const rel of locals) {
+    tasks.push(rm(path.join(env.UPLOAD_DIR, rel), { force: true }));
+  }
+  for (const r of await Promise.allSettled(tasks)) {
+    if (r.status === "rejected") {
+      console.warn("storage cleanup failed:", r.reason);
+    }
+  }
+}

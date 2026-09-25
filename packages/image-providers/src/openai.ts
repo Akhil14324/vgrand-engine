@@ -5,7 +5,7 @@ import type {
   GeneratedImage,
   ImageProvider,
 } from "./types.js";
-import { ProviderError } from "./types.js";
+import { ImageGenerationAborted, ProviderError } from "./types.js";
 
 /**
  * OpenAI GPT Image 2.5 — default engine.
@@ -91,7 +91,10 @@ export class OpenAIImageProvider implements ImageProvider {
               metadata: { model, quality, size },
             };
           }
-        } catch {
+        } catch (err) {
+          // A throw from onPartialImage is a deliberate abort — never
+          // retry it as a plain generate call.
+          if (err instanceof ImageGenerationAborted) throw err;
           // fall through to the non-streaming call
         }
       }

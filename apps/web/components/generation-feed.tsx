@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
+import type { GenerationDto, Paginated } from "@catgpt/types";
+import { apiFetch } from "@/lib/api";
 import { useConversation, useGenerations } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,9 +17,38 @@ export function GenerationFeed() {
     conversationId: activeConversationId,
   });
   const { data: conversation } = useConversation(activeConversationId);
+
+  // Pages older than the first 50, fetched on demand. Kept in component state
+  // (not the query cache) so the 4s pending-poll refetch can't drop them.
+  const [older, setOlder] = useState<GenerationDto[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null | undefined>(
+    undefined,
+  );
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  useEffect(() => {
+    setOlder([]);
+    setOlderCursor(undefined);
+  }, [activeConversationId]);
+  const cursor =
+    olderCursor === undefined ? (data?.nextCursor ?? null) : olderCursor;
+  const loadOlder = async () => {
+    if (!cursor || !activeConversationId) return;
+    setLoadingOlder(true);
+    try {
+      const page = await apiFetch<Paginated<GenerationDto>>(
+        `/generations?limit=50&conversationId=${activeConversationId}&cursor=${cursor}`,
+      );
+      // Items are newest-first; each older page continues that order.
+      setOlder((o) => [...o, ...page.items]);
+      setOlderCursor(page.nextCursor);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
   const items = useMemo(
-    () => [...(data?.items ?? [])].reverse(),
-    [data],
+    () => [...(data?.items ?? []), ...older].reverse(),
+    [data, older],
   );
 
   // The optimistic bubble hands over to the real turn once it is in the list.
@@ -81,7 +112,22 @@ export function GenerationFeed() {
             No messages yet — ask a question or describe an image below.
           </p>
         ) : (
-          items.map((g) => <ChatTurn key={g.id} generation={g} />)
+          <>
+            {cursor && (
+              <button
+                type="button"
+                onClick={() => void loadOlder()}
+                disabled={loadingOlder}
+                className="mx-auto flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                {loadingOlder && (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                )}
+                Load earlier messages
+              </button>
+            )}
+            {items.map((g) => <ChatTurn key={g.id} generation={g} />)}
+          </>
         )}
         {/* Optimistic turn — the user's bubble the instant they hit Send,
             before the POST resolves and the real generation lands. */}

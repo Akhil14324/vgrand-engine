@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "worker": "tsx src/worker.ts",
     "start": "tsx src/index.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -35,6 +36,7 @@
     "@catgpt/config": "workspace:*",
     "@types/node": "^22.15.0",
     "@types/pdfkit": "^0.17.6",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^5.0.1"
   }
 }

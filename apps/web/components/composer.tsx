@@ -12,21 +12,17 @@ import {
 import {
   AlertCircle,
   ArrowUp,
-  Building2,
   FileText,
   Globe,
   Megaphone,
   Store,
   Square,
-  Home,
   Loader2,
   Mic,
   MicOff,
   Plus,
   Sparkles,
-  UtensilsCrossed,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type { DocumentDto, GenerationDto, Quality, ThemeDto } from "@catgpt/types";
 import { apiFetch, ApiRequestError } from "@/lib/api";
@@ -41,6 +37,8 @@ import {
   useThemes,
 } from "@/lib/hooks";
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
+import { CHANNEL_PRESETS, channelLabel } from "@/lib/channels";
+import { THEME_ICONS } from "@/lib/theme-icons";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge, badgeVariants } from "@/components/ui/badge";
@@ -58,13 +56,6 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-
-const THEME_ICONS: Record<string, LucideIcon> = {
-  utensils: UtensilsCrossed,
-  building: Building2,
-  sparkles: Sparkles,
-  home: Home,
-};
 
 const MAX_REFS = 10;
 
@@ -97,6 +88,8 @@ export function Composer() {
     disarmTheme,
     quality,
     setQuality,
+    size,
+    setSize,
     select,
     activeConversationId,
     openConversation,
@@ -417,6 +410,7 @@ export function Composer() {
         prompt,
         themeSlug: armedTheme?.slug,
         quality,
+        size,
         referenceImageUrls: refImages.length ? refImages : undefined,
         documentIds: docs.length ? docs.map((d) => d.id) : undefined,
         webSearch: webSearch || undefined,
@@ -445,7 +439,7 @@ export function Composer() {
         },
       },
     );
-  }, [value, create, armedTheme, quality, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
+  }, [value, create, armedTheme, quality, size, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -497,7 +491,10 @@ export function Composer() {
     (Boolean(value.trim()) || docs.length > 0) &&
     value !== "/" &&
     !create.isPending &&
-    uploading === 0;
+    uploading === 0 &&
+    // Sending while a doc is still ingesting means retrieval silently skips
+    // it — "summarize this PDF" would answer without the file.
+    docs.every((d) => d.status !== "processing");
 
   return (
     <div
@@ -707,14 +704,15 @@ export function Composer() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    aria-label="Model and image quality"
-                    title="Model — click to set image quality"
+                    aria-label="Model, image quality and canvas"
+                    title="Model — click to set image quality and canvas"
                     className={cn(
                       badgeVariants({ variant: "muted" }),
                       "ml-1 hidden shrink-0 font-mono text-[10px] hover:bg-accent hover:text-foreground sm:inline-flex",
                     )}
                   >
                     {providerLabel} · {quality}
+                    {size !== "auto" ? ` · ${channelLabel(size)}` : ""}
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
@@ -723,6 +721,20 @@ export function Composer() {
                     <DropdownMenuItem key={q} onClick={() => setQuality(q)}>
                       {QUALITY_LABEL[q]}
                       {q === quality && (
+                        <span className="ml-auto text-primary">●</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuLabel>Canvas</DropdownMenuLabel>
+                  {CHANNEL_PRESETS.map((p) => (
+                    <DropdownMenuItem key={p.id} onClick={() => setSize(p.id)}>
+                      <span>
+                        {p.label}
+                        <span className="ml-1.5 text-muted-foreground">
+                          {p.hint}
+                        </span>
+                      </span>
+                      {p.id === size && (
                         <span className="ml-auto text-primary">●</span>
                       )}
                     </DropdownMenuItem>

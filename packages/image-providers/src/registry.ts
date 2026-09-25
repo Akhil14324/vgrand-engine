@@ -4,7 +4,7 @@ import type {
   GenerateResult,
   ImageProvider,
 } from "./types.js";
-import { ProviderError } from "./types.js";
+import { ImageGenerationAborted, ProviderError } from "./types.js";
 import { OpenAIImageProvider } from "./openai.js";
 import { FluxProvider } from "./flux.js";
 import { IdeogramProvider } from "./ideogram.js";
@@ -84,6 +84,8 @@ export async function generateWithFallback(
     const result = await generateWithRetry(providerName, params);
     return { ...result, providerUsed: providerName, fellBack: false };
   } catch (err) {
+    // A user abort must never be retried as a provider failure.
+    if (err instanceof ImageGenerationAborted) throw err;
     if (providerName === DEFAULT_PROVIDER) throw err;
     const result = await generateWithRetry(DEFAULT_PROVIDER, params);
     return {

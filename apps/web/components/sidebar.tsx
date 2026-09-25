@@ -7,11 +7,9 @@ import {
   Archive,
   ArchiveRestore,
   Brain,
-  Building2,
   Check,
   ChevronDown,
   History,
-  Home,
   Layers,
   LayoutGrid,
   Store,
@@ -26,13 +24,13 @@ import {
   Sparkles,
   SquarePen,
   Trash2,
-  UtensilsCrossed,
   X,
   type LucideIcon,
 } from "lucide-react";
 import type { ConversationDto, GenerationDto } from "@catgpt/types";
 import { useAuth } from "@/lib/auth";
 import { useStudio } from "@/lib/store";
+import { THEME_ICONS } from "@/lib/theme-icons";
 import {
   useConversations,
   useDeleteConversation,
@@ -58,13 +56,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-const THEME_ICONS: Record<string, LucideIcon> = {
-  utensils: UtensilsCrossed,
-  building: Building2,
-  sparkles: Sparkles,
-  home: Home,
-};
 
 function ThemeIcon({ name }: { name: string | null }) {
   const Icon = (name && THEME_ICONS[name]) || Sparkles;

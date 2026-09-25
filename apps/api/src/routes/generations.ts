@@ -16,10 +16,11 @@ import {
 } from "../services/events.js";
 import { classifyIntent, loadChatHistory } from "../services/chat.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
-import { storeFile } from "../services/storage.js";
+import { deleteStoredFiles, storeFile } from "../services/storage.js";
 import {
   assertImageQuota,
   getImageUsage,
+  quotaError,
   recordImageUsage,
   refundImageUsage,
 } from "../lib/usage.js";
@@ -259,6 +260,7 @@ export async function generationRoutes(app: FastifyInstance) {
               userId: req.userId,
               title: deriveTitle(body.prompt),
               workspaceId: body.workspaceId ?? null,
+              campaign: isCampaignPrompt(body.prompt),
             },
           })
         ).id;
@@ -311,7 +313,12 @@ export async function generationRoutes(app: FastifyInstance) {
           ? null
           : prisma.conversation.update({
               where: { id: chatId },
-              data: { updatedAt: new Date() },
+              data: {
+                updatedAt: new Date(),
+                // Sticky flag — campaign mode survives across later turns
+                // without re-scanning prompts on every message.
+                ...(isCampaignPrompt(body.prompt) ? { campaign: true } : {}),
+              },
             }),
         docs.length
           ? prisma.document.updateMany({
@@ -328,13 +335,18 @@ export async function generationRoutes(app: FastifyInstance) {
       ]);
       return created;
     })();
-    // Usage row and enqueue don't depend on each other. If either fails the
-    // user must not stay charged for a job that will never run.
+    // Quota row and enqueue don't depend on each other — but the quota insert
+    // is itself atomic (count + insert in one statement), so racing sends
+    // can't both pass the last slot. If either step fails the user must not
+    // stay charged for a job that will never run.
     try {
-      await Promise.all([
-        kind === "image" ? recordImageUsage(req.userId, generation.id) : null,
-        enqueueGeneration(generation.id),
-      ]);
+      if (
+        kind === "image" &&
+        !(await recordImageUsage(req.userId, generation.id))
+      ) {
+        throw quotaError(env.IMAGE_DAILY_LIMIT);
+      }
+      await enqueueGeneration(generation.id);
     } catch (err) {
       await Promise.allSettled([
         refundImageUsage(generation.id),
@@ -413,8 +425,11 @@ export async function generationRoutes(app: FastifyInstance) {
 
   app.delete("/generations/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    await loadOwned(req, id);
+    const generation = await loadOwned(req, id);
     await prisma.generation.delete({ where: { id } });
+    // Reclaim the generated images — references/uploads are shared inputs and
+    // are deliberately left alone.
+    await deleteStoredFiles(generation.imageUrls);
     return reply.code(204).send();
   });
 
@@ -480,8 +495,23 @@ export async function generationRoutes(app: FastifyInstance) {
         data: { updatedAt: new Date() },
       });
     }
-    await recordImageUsage(req.userId, child.id);
-    await enqueueGeneration(child.id);
+    // Same contract as POST /generations: if the enqueue fails (Redis blip)
+    // the child must not sit pending forever, and the quota is refunded.
+    try {
+      if (!(await recordImageUsage(req.userId, child.id))) {
+        throw quotaError(env.IMAGE_DAILY_LIMIT);
+      }
+      await enqueueGeneration(child.id);
+    } catch (err) {
+      await Promise.allSettled([
+        refundImageUsage(child.id),
+        prisma.generation.update({
+          where: { id: child.id },
+          data: { status: "failed", error: "Could not start the job" },
+        }),
+      ]);
+      throw err;
+    }
     return reply.code(202).send({
       generationId: child.id,
       conversationId: child.conversationId,
@@ -522,7 +552,8 @@ export async function generationRoutes(app: FastifyInstance) {
   /** SSE stream for the live "generating..." state. Token may come via ?token=. */
   app.get("/generations/:id/events", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const generation = await loadOwned(req, id);
+    // Ownership check before the stream opens — loadOwned throws 404/403.
+    await loadOwned(req, id);
 
     await reply.hijack();
     reply.raw.writeHead(200, {
@@ -533,28 +564,17 @@ export async function generationRoutes(app: FastifyInstance) {
       "Access-Control-Allow-Origin": "*",
     });
 
-    const send = (evt: GenerationEvent) =>
+    let done = false;
+    const send = (evt: GenerationEvent) => {
+      if (done) return;
       reply.raw.write(`data: ${JSON.stringify(evt)}\n\n`);
-
-    send({
-      generationId: generation.id,
-      status: generation.status as GenerationEvent["status"],
-      kind: generation.kind as GenerationEvent["kind"],
-      imageUrls: generation.imageUrls,
-      textResponse: generation.textResponse,
-      error: generation.error,
-    });
-    if (
-      generation.status === "completed" ||
-      generation.status === "failed" ||
-      generation.status === "cancelled"
-    ) {
-      reply.raw.end();
-      return;
-    }
+    };
 
     const heartbeat = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
-    const unsubscribe = subscribeGenerationEvents(generation.id, (evt) => {
+    // Subscribe BEFORE the snapshot read: a completion that lands between the
+    // auth check above and this point is caught by the fresh read below rather
+    // than silently missed (the old order could leave the stream stuck).
+    const unsubscribe = subscribeGenerationEvents(id, (evt) => {
       send(evt);
       if (
         evt.status === "completed" ||
@@ -564,10 +584,32 @@ export async function generationRoutes(app: FastifyInstance) {
         cleanup();
     });
     const cleanup = () => {
+      if (done) return;
+      done = true;
       clearInterval(heartbeat);
       unsubscribe();
       reply.raw.end();
     };
     req.raw.on("close", cleanup);
+
+    const generation = await prisma.generation.findUnique({ where: { id } });
+    if (generation) {
+      send({
+        generationId: generation.id,
+        status: generation.status as GenerationEvent["status"],
+        kind: generation.kind as GenerationEvent["kind"],
+        imageUrls: generation.imageUrls,
+        textResponse: generation.textResponse,
+        error: generation.error,
+      });
+    }
+    if (
+      !generation ||
+      generation.status === "completed" ||
+      generation.status === "failed" ||
+      generation.status === "cancelled"
+    ) {
+      cleanup();
+    }
   });
 }

@@ -13,7 +13,6 @@ import {
   Pencil,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 import type { DocumentDto } from "@catgpt/types";
 import { useAuth } from "@/lib/auth";

@@ -11,7 +11,8 @@
     "build": "turbo build",
     "start": "pnpm --filter @catgpt/db exec prisma generate && pnpm --filter @catgpt/db exec prisma migrate deploy && pnpm --filter @catgpt/api start",
     "typecheck": "turbo typecheck",
-    "lint": "turbo lint",
+    "lint": "eslint .",
+    "test": "turbo test",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "db:generate": "pnpm --filter @catgpt/db generate",
@@ -21,7 +22,12 @@
     "db:studio": "pnpm --filter @catgpt/db studio"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@next/eslint-plugin-next": "15.5.26",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^5",
     "turbo": "^2.5.5",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.70.1"
   }
 }

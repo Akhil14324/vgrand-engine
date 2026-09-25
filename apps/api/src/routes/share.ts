@@ -42,6 +42,23 @@ export async function shareRoutes(app: FastifyInstance) {
     },
   );
 
+  /** Revoke a generation's share links — parity with conversation shares. */
+  app.delete(
+    "/share/:generationId",
+    { preHandler: app.authenticate },
+    async (req, reply) => {
+      const { generationId } = req.params as { generationId: string };
+      const generation = await prisma.generation.findUnique({
+        where: { id: generationId },
+        select: { userId: true },
+      });
+      if (!generation) throw notFound("Generation not found");
+      if (generation.userId !== req.userId) throw forbidden();
+      await prisma.shareLink.deleteMany({ where: { generationId } });
+      return reply.code(204).send();
+    },
+  );
+
   /** Share a whole chat (text + images) as a public read-only link. */
   app.post(
     "/share/conversation/:conversationId",

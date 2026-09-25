@@ -103,7 +103,16 @@ function rememberToken(token: string, userId: string) {
   if (verifiedTokens.size >= TOKEN_CACHE_MAX) {
     const now = Date.now();
     for (const [t, v] of verifiedTokens) if (v.until <= now) verifiedTokens.delete(t);
-    if (verifiedTokens.size >= TOKEN_CACHE_MAX) verifiedTokens.clear();
+    // Still full: evict the oldest ~10% rather than wiping the whole map —
+    // a full clear forces every in-flight user through JWKS again at once.
+    // Map iterates in insertion order, so the first keys are the oldest.
+    if (verifiedTokens.size >= TOKEN_CACHE_MAX) {
+      let toDrop = Math.ceil(TOKEN_CACHE_MAX / 10);
+      for (const t of verifiedTokens.keys()) {
+        if (toDrop-- <= 0) break;
+        verifiedTokens.delete(t);
+      }
+    }
   }
   verifiedTokens.set(token, { userId, until });
 }

@@ -50,6 +50,33 @@ function appendDelta(qc: QueryClient, generationId: string, delta: string) {
   );
 }
 
+/**
+ * Token deltas arrive faster than React can usefully render them — one cache
+ * rewrite per token is O(tokens × cached lists × items). Accumulate deltas
+ * per generation and flush once per ~60ms; the buffer keeps full fidelity.
+ */
+const pendingDeltas = new Map<string, string>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function queueDelta(qc: QueryClient, generationId: string, delta: string) {
+  pendingDeltas.set(
+    generationId,
+    (pendingDeltas.get(generationId) ?? "") + delta,
+  );
+  if (!flushTimer) {
+    flushTimer = setTimeout(() => flushDeltas(qc), 60);
+  }
+}
+
+function flushDeltas(qc: QueryClient) {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  for (const [id, text] of pendingDeltas) appendDelta(qc, id, text);
+  pendingDeltas.clear();
+}
+
 /** Flag a turn as "searching the web" until its first answer token lands. */
 function markSearching(qc: QueryClient, generationId: string) {
   const apply = (g: GenerationDto): GenerationDto =>
@@ -115,7 +142,7 @@ export function useGenerationStream(
         try {
           const evt = JSON.parse(msg.data) as GenerationEvent;
           if (evt.delta) {
-            appendDelta(qc, evt.generationId, evt.delta);
+            queueDelta(qc, evt.generationId, evt.delta);
           } else if (evt.partialImage) {
             applyPartialImage(qc, evt.generationId, evt.partialImage);
           } else if (evt.searching) {
@@ -130,6 +157,8 @@ export function useGenerationStream(
             evt.status === "failed" ||
             evt.status === "cancelled"
           ) {
+            // Terminal state — land every buffered token before the refetch.
+            flushDeltas(qc);
             streamBuffers.delete(evt.generationId);
             es?.close();
           }

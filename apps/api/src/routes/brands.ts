@@ -8,6 +8,7 @@ import {
 } from "@catgpt/types";
 import { HttpError, badRequest, notFound, parseBody } from "../lib/errors.js";
 import { findWorkspaceForUser, workspaceAccess } from "../lib/workspace-access.js";
+import { deleteStoredFiles } from "../services/storage.js";
 import {
   BRAND_INCLUDE,
   MAX_BRAND_ASSETS,
@@ -121,7 +122,36 @@ export async function brandRoutes(app: FastifyInstance) {
   app.delete("/brands/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     await findManageableBrand(req.userId, id);
+    // The cascade removes this brand's documents and assets — collect their
+    // files first so storage can be reclaimed after the row is gone.
+    const [docs, assets] = await Promise.all([
+      prisma.document.findMany({
+        where: { brandId: id },
+        select: { storageUrl: true },
+      }),
+      prisma.brandAsset.findMany({
+        where: { brandId: id },
+        select: { url: true },
+      }),
+    ]);
     await prisma.brand.delete({ where: { id } });
+    const assetUrls = assets.map((a) => a.url);
+    // An uploaded image can be attached to more than one brand — only remove
+    // files nothing else still references.
+    const shared = assetUrls.length
+      ? new Set(
+          (
+            await prisma.brandAsset.findMany({
+              where: { url: { in: assetUrls } },
+              select: { url: true },
+            })
+          ).map((a) => a.url),
+        )
+      : new Set<string>();
+    await deleteStoredFiles([
+      ...docs.map((d) => d.storageUrl),
+      ...assetUrls.filter((u) => !shared.has(u)),
+    ]);
     return reply.code(204).send();
   });
 
@@ -157,10 +187,18 @@ export async function brandRoutes(app: FastifyInstance) {
   app.delete("/brands/:id/assets/:assetId", async (req, reply) => {
     const { id, assetId } = req.params as { id: string; assetId: string };
     await findManageableBrand(req.userId, id);
-    const res = await prisma.brandAsset.deleteMany({
+    const asset = await prisma.brandAsset.findFirst({
       where: { id: assetId, brandId: id },
+      select: { id: true, url: true },
     });
-    if (res.count === 0) throw notFound("Asset not found");
+    if (!asset) throw notFound("Asset not found");
+    await prisma.brandAsset.delete({ where: { id: asset.id } });
+    // The same upload may back another brand's asset — only remove the file
+    // when nothing else references it.
+    const stillUsed = await prisma.brandAsset.count({
+      where: { url: asset.url },
+    });
+    if (!stillUsed) await deleteStoredFiles([asset.url]);
     return reply.code(204).send();
   });
 }

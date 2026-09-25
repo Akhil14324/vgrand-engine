@@ -2,6 +2,7 @@ import { Worker, type Job } from "bullmq";
 import { prisma } from "@catgpt/db";
 import {
   generateWithFallback,
+  ImageGenerationAborted,
   type GenerationMode,
 } from "@catgpt/image-providers";
 import {
@@ -34,6 +35,7 @@ import {
   findScopeDocuments,
   retrievePassages,
   runDocumentIngestion,
+  waitForScopeIngestion,
 } from "./documents.js";
 import { evaluateSafe } from "./jev.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
@@ -53,6 +55,7 @@ interface GenerationMetadata {
   referenceImageUrls?: string[];
   quality?: Quality;
   size?: ImageSize;
+  workerAttempts?: number;
   [key: string]: unknown;
 }
 
@@ -66,9 +69,27 @@ export function startGenerationWorker(): Worker | null {
     // kick them off again here.
     console.log("[worker] no REDIS_URL — processing generations inline");
     void recoverPendingGenerations();
+    const sweeper = setInterval(
+      () =>
+        void sweepStaleWork().catch((err) =>
+          console.error("[worker] sweep failed:", err),
+        ),
+      SWEEP_INTERVAL_MS,
+    );
+    sweeper.unref();
     return null;
   }
-  void failInterruptedGenerations();
+  void sweepStaleWork();
+  // Repeated, not just at boot: rows can go stale at any time (crash, deploy,
+  // dropped BullMQ lock), and documents/team answers have no other recovery.
+  const sweeper = setInterval(
+    () =>
+      void sweepStaleWork().catch((err) =>
+        console.error("[worker] sweep failed:", err),
+      ),
+    SWEEP_INTERVAL_MS,
+  );
+  sweeper.unref();
   const worker = new Worker(
     GENERATION_QUEUE,
     (job: Job<GenerationJob>) => runGeneration(job.data.generationId),
@@ -94,28 +115,89 @@ export function startGenerationWorker(): Worker | null {
   return worker;
 }
 
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+const STALE_PROCESSING_MS = 15 * 60_000;
+const MAX_SWEEP_RETRIES = 2;
+
 /**
- * A process that dies mid-job leaves its row "processing" forever — a stalled
- * BullMQ job is retried but runGeneration only picks up "pending" rows. Fail
- * (and refund) anything stuck longer than any job could legitimately run.
+ * Rows whose worker vanished mid-flight: a crashed job leaves "processing"
+ * forever because BullMQ's stalled retry no-ops on a non-pending row, and the
+ * boot sweep only ran once at startup. Stale rows get a bounded number of
+ * re-queues, then are failed (with quota refund and a terminal event).
+ * Documents stuck "processing" and team answers stuck "pending" get the same
+ * treatment — they had no recovery path at all.
  */
-async function failInterruptedGenerations() {
-  try {
-    const cutoff = new Date(Date.now() - 30 * 60_000);
-    const stuck = await prisma.generation.findMany({
-      where: { status: "processing", createdAt: { lt: cutoff } },
-      select: { id: true },
-    });
-    for (const { id } of stuck) {
+async function sweepStaleWork() {
+  const cutoff = new Date(Date.now() - STALE_PROCESSING_MS);
+  const stale = await prisma.generation.findMany({
+    where: { status: "processing", createdAt: { lt: cutoff } },
+    select: { id: true, kind: true, metadata: true },
+  });
+  for (const gen of stale) {
+    const meta = (gen.metadata ?? {}) as GenerationMetadata;
+    const attempts = (meta.workerAttempts ?? 0) + 1;
+    if (attempts <= MAX_SWEEP_RETRIES) {
+      // Back to pending so runGeneration's atomic claim picks it up cleanly.
       await prisma.generation.update({
-        where: { id },
+        where: { id: gen.id },
+        data: {
+          status: "pending",
+          metadata: { ...meta, workerAttempts: attempts },
+        },
+      });
+      const { requeueGeneration } = await import("./queue.js");
+      await requeueGeneration(gen.id).catch((err) =>
+        console.error(`[worker] sweep re-enqueue ${gen.id} failed:`, err),
+      );
+    } else {
+      await prisma.generation.update({
+        where: { id: gen.id },
         data: { status: "failed", error: "Interrupted - please try again" },
       });
-      await refundImageUsage(id).catch(() => {});
+      publishGenerationEvent({
+        generationId: gen.id,
+        status: "failed",
+        error: "Interrupted - please try again",
+      });
+      if (gen.kind === "image") {
+        await refundImageUsage(gen.id).catch(() => {});
+      }
     }
-  } catch (err) {
-    console.error("[worker] interrupted-job sweep failed:", err);
   }
+  // Pending rows whose queue job vanished (Redis flushed, enqueue died
+  // silently). requeueGeneration clears any dead job first — a plain add
+  // would be deduped against a stale jobId and never run.
+  const lost = await prisma.generation.findMany({
+    where: {
+      status: "pending",
+      createdAt: { lt: new Date(Date.now() - 2 * 60_000) },
+    },
+    select: { id: true },
+    take: 50,
+  });
+  for (const gen of lost) {
+    const { requeueGeneration } = await import("./queue.js");
+    await requeueGeneration(gen.id).catch(() => {});
+  }
+
+  await prisma.document
+    .updateMany({
+      where: { status: "processing", createdAt: { lt: cutoff } },
+      data: {
+        status: "failed",
+        error: "Ingestion was interrupted — retry the upload",
+      },
+    })
+    .catch(() => {});
+  await prisma.teamMessage
+    .updateMany({
+      where: { status: "pending", createdAt: { lt: cutoff } },
+      data: {
+        status: "failed",
+        body: "The AI response was interrupted — please try again.",
+      },
+    })
+    .catch(() => {});
 }
 
 /** Inline mode: re-run rows a previous process left behind. */
@@ -140,16 +222,23 @@ async function recoverPendingGenerations() {
 }
 
 export async function runGeneration(generationId: string): Promise<void> {
+  // Atomic claim — a single conditional UPDATE instead of read-then-write.
+  // A BullMQ stalled-retry, the recovery sweep and a live enqueue can all
+  // reach this row concurrently; only one can flip pending -> processing, so
+  // the provider call (and its spend) can never run twice. Stale "processing"
+  // rows are resurrected by sweepStaleWork, not claimed here.
+  const claimed = await prisma.generation.updateMany({
+    where: { id: generationId, status: "pending" },
+    data: { status: "processing" },
+  });
+  if (claimed.count === 0) return;
+
   const generation = await prisma.generation.findUnique({
     where: { id: generationId },
     include: { theme: true },
   });
-  if (!generation || generation.status !== "pending") return;
+  if (!generation) return;
 
-  await prisma.generation.update({
-    where: { id: generationId },
-    data: { status: "processing" },
-  });
   publishGenerationEvent({ generationId, status: "processing" });
 
   // Cooperative cancel: POST /generations/:id/cancel flips the row to
@@ -257,6 +346,13 @@ export async function runGeneration(generationId: string): Promise<void> {
       // blue") shouldn't pay for an embeddings call + vector query. Workspace
       // and brand turns always retrieve — documents are their primary source.
       // No Jev verdict = retrieve, exactly as before.
+      // A doc attached seconds ago may still be ingesting — without this
+      // wait retrieval skips it silently and the reply ignores the upload.
+      await waitForScopeIngestion({
+        conversationId: generation.conversationId,
+        workspaceId,
+        brandId: brand?.id ?? null,
+      }).catch(() => {});
       const scopeDocs = generation.conversationId
         ? await findScopeDocuments({
             conversationId: generation.conversationId,
@@ -504,15 +600,26 @@ export async function runGeneration(generationId: string): Promise<void> {
       referenceImageUrls,
       quality: meta.quality ?? "low",
       size: meta.size ?? "auto",
-      // Progressive previews stream through SSE as they arrive from the model.
-      onPartialImage: (b64) =>
+      // Progressive previews stream through SSE as they arrive from the
+      // model — each one is also a checkpoint for Stop, so a cancelled image
+      // job aborts at the next partial instead of running to completion.
+      onPartialImage: (b64) => {
+        pollCancelled();
+        // Provider-specific abort error — it survives the provider's
+        // stream-failure fallback instead of triggering a retry.
+        if (cancelFlag) throw new ImageGenerationAborted();
         publishGenerationEvent({
           generationId,
           status: "processing",
           kind: "image",
           partialImage: `data:image/png;base64,${b64}`,
-        }),
+        });
+      },
     });
+
+    // Stop pressed while the provider was rendering — bail before storage
+    // so we never pay to persist images nobody will see.
+    if (cancelFlag) throw new GenerationCancelled();
 
     const imageUrls = await Promise.all(
       result.images.map((img, i) =>
@@ -547,8 +654,11 @@ export async function runGeneration(generationId: string): Promise<void> {
     }
 
     // Persistent memory snapshot — everything needed to recall or reproduce
-    // this generation later, not just the image.
-    await prisma.memory.create({
+    // this generation later, not just the image. Bookkeeping must never
+    // downgrade a completed job: a failure here used to mark the row failed
+    // and refund quota for images that exist.
+    try {
+      await prisma.memory.create({
       data: {
         userId: generation.userId,
         type: "fact",
@@ -569,11 +679,19 @@ export async function runGeneration(generationId: string): Promise<void> {
           conversationId: generation.conversationId,
         },
       },
-    });
+      });
+    } catch (err) {
+      console.error("[worker] memory snapshot failed:", err);
+    }
 
     publishGenerationEvent({ generationId, status: "completed", imageUrls });
   } catch (err) {
-    if (err instanceof GenerationCancelled) {
+    // ImageGenerationAborted = Stop observed inside onPartialImage; same
+    // handling as a mid-text-stream cancel.
+    if (
+      err instanceof GenerationCancelled ||
+      err instanceof ImageGenerationAborted
+    ) {
       // Stop hit mid-stream — keep the tokens already sent, stay cancelled.
       await prisma.generation
         .update({

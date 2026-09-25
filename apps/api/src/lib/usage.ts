@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "@catgpt/db";
 import { HttpError } from "./errors.js";
 import { env } from "../env.js";
@@ -28,17 +29,37 @@ export async function getImageUsage(userId: string) {
 export async function assertImageQuota(userId: string) {
   const usage = await getImageUsage(userId);
   if (usage.remaining <= 0) {
-    throw new HttpError(
-      429,
-      `Daily image limit reached (${usage.limit}/day). Chatting is still unlimited — image generation resets at midnight UTC.`,
-      "IMAGE_LIMIT",
-    );
+    throw quotaError(usage.limit);
   }
 }
 
-/** Record one image against today's quota. */
-export async function recordImageUsage(userId: string, generationId: string) {
-  await prisma.imageUsage.create({ data: { userId, generationId } });
+export function quotaError(limit: number) {
+  return new HttpError(
+    429,
+    `Daily image limit reached (${limit}/day). Chatting is still unlimited — image generation resets at midnight UTC.`,
+    "IMAGE_LIMIT",
+  );
+}
+
+/**
+ * Record one image against today's quota — atomically. The count and the
+ * insert happen in a single statement, so two requests racing at the limit
+ * cannot both pass (the old count-then-insert let each see room for itself).
+ * Returns false when the quota was already spent.
+ */
+export async function recordImageUsage(
+  userId: string,
+  generationId: string,
+): Promise<boolean> {
+  const start = startOfUtcDay();
+  const inserted = await prisma.$executeRaw`
+    INSERT INTO "ImageUsage" ("id", "userId", "generationId", "createdAt")
+    SELECT ${randomUUID()}, ${userId}, ${generationId}, now()
+    WHERE (
+      SELECT COUNT(*) FROM "ImageUsage"
+      WHERE "userId" = ${userId} AND "createdAt" >= ${start}
+    ) < ${env.IMAGE_DAILY_LIMIT}`;
+  return inserted === 1;
 }
 
 /** Give the quota back when a generation fails. */
