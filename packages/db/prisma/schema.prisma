@@ -193,6 +193,7 @@ model Document {
   chunkCount     Int             @default(0)
   status         String          @default("processing") // processing | ready | failed
   error          String?
+  summaryNotes   String? // condensed notes for long-document summaries; lazily filled, reused on repeat asks
   chunks         DocumentChunk[]
   createdAt      DateTime        @default(now())
 
