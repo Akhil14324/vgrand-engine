@@ -60,6 +60,8 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/jpg": "jpg",
   "image/webp": "webp",
   "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "docx",
 };
 
 export interface StoreImageInput {

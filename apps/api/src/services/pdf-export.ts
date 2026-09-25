@@ -5,7 +5,7 @@ import PDFDocument from "pdfkit";
  * only (Helvetica/Courier) — no font files, renders in a few ms.
  */
 
-interface Segment {
+export interface Segment {
   text: string;
   bold?: boolean;
   italic?: boolean;
@@ -13,7 +13,8 @@ interface Segment {
   link?: string;
 }
 
-type Block =
+export type Block =
+  | { type: "table"; rows: Segment[][][] }
   | { type: "heading"; level: number; segments: Segment[] }
   | { type: "paragraph"; segments: Segment[] }
   | { type: "code"; text: string }
@@ -22,7 +23,7 @@ type Block =
   | { type: "hr" };
 
 /** Inline markdown: **bold**, *italic*, `code`, [text](url). */
-function parseInline(text: string): Segment[] {
+export function parseInline(text: string): Segment[] {
   const re =
     /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
   const segments: Segment[] = [];
@@ -49,13 +50,17 @@ function parseInline(text: string): Segment[] {
 }
 
 /** Split raw markdown into renderable blocks. */
-function parseBlocks(markdown: string): Block[] {
+export function parseBlocks(markdown: string): Block[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
   let i = 0;
 
   const isListItem = (l: string) => /^\s*([-*•]|\d+[.)])\s+/.test(l);
   const listOrdered = (l: string) => /^\s*\d+[.)]\s+/.test(l);
+  const isTableRow = (l: string) => /^\s*\|.*\|\s*$/.test(l);
+  const isTableRule = (l: string) => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(l);
+  const splitTableRow = (l: string) =>
+    l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
 
   while (i < lines.length) {
     const line = lines[i]!;
@@ -99,6 +104,18 @@ function parseBlocks(markdown: string): Block[] {
       blocks.push({ type: "quote", segments: parseInline(buf.join(" ")) });
       continue;
     }
+    if (isTableRow(line)) {
+      const rows: Segment[][][] = [];
+      while (i < lines.length && isTableRow(lines[i]!)) {
+        // The |---|---| separator row carries no content.
+        if (!isTableRule(lines[i]!)) {
+          rows.push(splitTableRow(lines[i]!).map(parseInline));
+        }
+        i++;
+      }
+      if (rows.length) blocks.push({ type: "table", rows });
+      continue;
+    }
     if (isListItem(line)) {
       const ordered = listOrdered(line);
       const items: Segment[][] = [];
@@ -121,6 +138,7 @@ function parseBlocks(markdown: string): Block[] {
       !/^#{1,4}\s/.test(lines[i]!) &&
       !/^\s*>\s?/.test(lines[i]!) &&
       !isListItem(lines[i]!) &&
+      !isTableRow(lines[i]!) &&
       !/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]!)
     ) {
       buf.push(lines[i]!);
@@ -137,6 +155,8 @@ const HEADING_SIZE: Record<number, number> = { 1: 20, 2: 16, 3: 13, 4: 12 };
 export function renderMarkdownPdf(
   title: string,
   markdown: string,
+  /** bare: no "Exported from CatGPT" title block — the markdown is the whole document. */
+  opts: { bare?: boolean } = {},
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -153,22 +173,24 @@ export function renderMarkdownPdf(
       doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
     // Header: title + timestamp, then a rule.
-    doc.font("Helvetica-Bold").fontSize(17).fillColor("#111").text(title, {
-      lineGap: 4,
-    });
-    doc
-      .font("Helvetica")
-      .fontSize(8.5)
-      .fillColor("#888")
-      .text(`Exported from CatGPT · ${new Date().toLocaleString()}`);
-    doc.moveDown(0.4);
-    doc
-      .moveTo(doc.page.margins.left, doc.y)
-      .lineTo(doc.page.width - doc.page.margins.right, doc.y)
-      .strokeColor("#ddd")
-      .lineWidth(0.7)
-      .stroke();
-    doc.moveDown(0.9);
+    if (!opts.bare) {
+      doc.font("Helvetica-Bold").fontSize(17).fillColor("#111").text(title, {
+        lineGap: 4,
+      });
+      doc
+        .font("Helvetica")
+        .fontSize(8.5)
+        .fillColor("#888")
+        .text(`Exported from CatGPT · ${new Date().toLocaleString()}`);
+      doc.moveDown(0.4);
+      doc
+        .moveTo(doc.page.margins.left, doc.y)
+        .lineTo(doc.page.width - doc.page.margins.right, doc.y)
+        .strokeColor("#ddd")
+        .lineWidth(0.7)
+        .stroke();
+      doc.moveDown(0.9);
+    }
 
     const writeSegments = (segments: Segment[], baseSize: number) => {
       segments.forEach((seg, idx) => {
@@ -267,6 +289,17 @@ export function renderMarkdownPdf(
               lineGap: 2.5,
             });
           doc.y = y + h + 16;
+          doc.moveDown(0.55);
+          break;
+        }
+        case "table": {
+          // pdfkit has no table primitive — rows render as pipe-separated
+          // monospace lines, which stays readable and never overflows.
+          const text = block.rows
+            .map((r) => r.map((c) => c.map((s) => s.text).join("")).join(" | "))
+            .join("\n");
+          doc.font("Courier").fontSize(9.5).fillColor("#111");
+          doc.text(text, { lineGap: 2.5 });
           doc.moveDown(0.55);
           break;
         }

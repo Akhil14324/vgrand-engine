@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, FileText, Globe, Loader2, Square, Store, X } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  FileText,
+  Globe,
+  Loader2,
+  Square,
+  Store,
+  X,
+} from "lucide-react";
 import type { GenerationDto, WebSource } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
@@ -10,6 +19,23 @@ import { Badge } from "@/components/ui/badge";
 import { Markdown } from "./markdown";
 import { ActionRow } from "./generation-actions";
 import { SourceChips } from "./source-chips";
+
+/** A file the assistant produced for this turn (e.g. an edited document). */
+interface ReplyFile {
+  url: string;
+  filename: string;
+  mimeType: string;
+}
+
+/**
+ * Supabase public URLs honour ?download=<name>, which sets the saved filename;
+ * stored keys are random hex, so without it the download would be unnamed.
+ * Local /uploads/ URLs are used as-is.
+ */
+function downloadUrl(f: ReplyFile): string {
+  if (!f.url.includes("/storage/v1/object/public/")) return f.url;
+  return `${f.url}${f.url.includes("?") ? "&" : "?"}download=${encodeURIComponent(f.filename)}`;
+}
 
 /**
  * One chat turn: the user's prompt bubble (right) + the assistant reply
@@ -67,6 +93,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
   ];
   const active = selectedId === generation.id;
   const sources = (meta.sources as WebSource[] | undefined) ?? [];
+  const files = Array.isArray(meta.files) ? (meta.files as ReplyFile[]) : [];
   const searching = meta.searching === true;
   const creative = meta.campaignCreative as
     | { index: number; total: number; title?: string }
@@ -175,6 +202,23 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
                 </p>
               )}
               {!inFlight && sources.length > 0 && <SourceChips sources={sources} />}
+              {!inFlight && files.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {files.map((f) => (
+                    <a
+                      key={f.url}
+                      href={downloadUrl(f)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-xs transition-colors hover:bg-accent"
+                    >
+                      <FileText className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="max-w-[16rem] truncate">{f.filename}</span>
+                      <Download className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-2 rounded-xl border px-4 py-3 text-xs text-muted-foreground">

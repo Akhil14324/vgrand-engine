@@ -321,6 +321,45 @@ export async function streamChat(
   return acc;
 }
 
+/* --------------------------- document summaries --------------------------- */
+
+const SUMMARY_INTENT =
+  /\b(summari[sz]e|summari[sz]ation|summary|tl;?\s?dr|recap|key\s+(?:points|takeaways)|gist|main\s+points|brief\s+(?:me|overview)|overview\s+of)\b/i;
+
+/**
+ * Does this turn ask for a whole-document summary (as opposed to a pointed
+ * question about it)? The regex catches the obvious phrasings; otherwise a
+ * confident Jev verdict decides. Callers also require documents in scope.
+ */
+export function wantsDocumentSummary(
+  prompt: string,
+  jevSays: boolean | null = null,
+): boolean {
+  if (SUMMARY_INTENT.test(prompt)) return true;
+  return jevSays === true;
+}
+
+/* ----------------------------- document edits ----------------------------- */
+
+const EDIT_VERB =
+  /\b(edit|rewrite|re-?write|rephrase|reword|paraphrase|proofread|revise|redraft|reformat|shorten|condense|translate|polish|tweak)\b/i;
+const EDIT_OBJECT =
+  /\b(document|doc|docx|pdf|file|resume|cv|letter|report|contract|paper|essay|article|proposal|attachment|attached|uploaded)\b/i;
+
+/**
+ * Does this turn ask to rewrite the attached/previous document itself and
+ * hand back a new file? An edit verb is enough when a file was attached to
+ * THIS message; on later turns it also needs a document noun (or a confident
+ * Jev verdict) so "rewrite this function" in a doc-heavy chat stays chat.
+ */
+export function wantsDocumentEdit(
+  prompt: string,
+  opts: { attachedNow: boolean; jevSays: boolean | null },
+): boolean {
+  if (!EDIT_VERB.test(prompt)) return opts.jevSays === true;
+  return opts.attachedNow || EDIT_OBJECT.test(prompt) || opts.jevSays === true;
+}
+
 /* ---------------------------- code execution ----------------------------- */
 
 const RUN_PREFIX = /^\/run\b/i;

@@ -42,6 +42,19 @@ const envSchema = z.object({
   RAG_TOP_K: z.coerce.number().int().positive().default(6),
   RAG_CHUNK_CHARS: z.coerce.number().int().positive().default(1200),
   RAG_CHUNK_OVERLAP: z.coerce.number().int().nonnegative().default(150),
+  /** OCR for scanned PDF pages — must be a vision-capable chat model (defaults to CHAT_MODEL). */
+  OCR_MODEL: opt(z.string().min(1)),
+  /** A PDF page with fewer extracted characters than this is treated as scanned and OCR'd. */
+  OCR_MIN_PAGE_CHARS: z.coerce.number().int().nonnegative().default(30),
+  /** Document edits: model (defaults to CHAT_MODEL) and the most source text one edit will rewrite. */
+  EDIT_MODEL: opt(z.string().min(1)),
+  /** Sections rewritten in parallel — raise for speed if your OpenAI rate limits allow. */
+  EDIT_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(8),
+  EDIT_MAX_CHARS: z.coerce.number().int().positive().default(600_000),
+  /** Summaries: up to this many chars go to the model in one pass; more is map-reduced. */
+  SUMMARY_DIRECT_CHARS: z.coerce.number().int().positive().default(120_000),
+  /** Hard ceiling on document text read for one summary (200 dense pages ≈ 600k chars). */
+  SUMMARY_MAX_CHARS: z.coerce.number().int().positive().default(800_000),
   /** Jev (TypeSafe AI) — typed evaluations for intent routing + memory gating. */
   TYPESAFE_API_KEY: opt(z.string().min(1)),
   TYPESAFE_BASE_URL: opt(z.string().url()),
@@ -86,6 +99,8 @@ export const env = {
   ...parsed,
   REDIS_URL: parsed.REDIS_URL ?? "redis://localhost:6379",
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
+  OCR_MODEL: parsed.OCR_MODEL ?? parsed.CHAT_MODEL ?? "gpt-4o-mini",
+  EDIT_MODEL: parsed.EDIT_MODEL ?? parsed.CHAT_MODEL ?? "gpt-4o-mini",
   CODE_MODEL: parsed.CODE_MODEL ?? "gpt-4o",
   CAMPAIGN_MODEL: parsed.CAMPAIGN_MODEL ?? parsed.CODE_MODEL ?? "gpt-4o",
   VOICE_STT_MODEL: parsed.VOICE_STT_MODEL ?? "gpt-4o-mini-transcribe",
