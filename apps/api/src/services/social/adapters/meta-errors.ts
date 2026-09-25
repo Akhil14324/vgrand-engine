@@ -15,7 +15,9 @@ export function graphError(status: number, json: Record<string, any>): SocialPub
   };
   const code = err.code;
   const sub = err.error_subcode;
-  const msg = briefProviderMessage(err.message, `Meta request failed (${status})`);
+  const base = briefProviderMessage(err.message, `Meta request failed (${status})`);
+  // Codes are not secret and are what you need to look the error up in Meta's docs.
+  const msg = code ? `${base} (Meta code ${code}${sub ? `/${sub}` : ""})` : base;
 
   if (code === 190) {
     // 463 = expired, 467 = invalid (session ended); other subcodes = revoked/changed password.

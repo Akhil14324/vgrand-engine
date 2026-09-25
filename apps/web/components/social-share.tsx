@@ -175,7 +175,11 @@ function PostRow({
         {(post.status === "pending" || post.status === "posting") && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" />
-            {post.status === "pending" ? "Queued…" : "Posting…"}
+            {post.status === "pending"
+              ? post.attemptCount > 0
+                ? `Retrying (attempt ${post.attemptCount} failed)…`
+                : "Queued…"
+              : "Posting…"}
           </span>
         )}
         {post.status === "posted" && (
@@ -191,6 +195,10 @@ function PostRow({
           </span>
         )}
       </div>
+
+      {post.status === "pending" && post.attemptCount > 0 && post.error && (
+        <p className="mt-1 text-xs text-muted-foreground">Last error: {post.error}</p>
+      )}
 
       {post.status === "posted" && post.remoteUrl && (
         <a
