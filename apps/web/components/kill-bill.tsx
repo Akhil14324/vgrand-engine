@@ -7,9 +7,10 @@ import { API_URL } from "@/lib/config";
 import { apiFetch, apiFetchBlob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
-import { useBrands, useCreateGeneration } from "@/lib/hooks";
+import { useBrands, useBrandVoice, useCreateGeneration } from "@/lib/hooks";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { detectSpeakLanguage } from "@/lib/voice";
 
 type Phase = "idle" | "listening" | "thinking" | "speaking" | "error";
 
@@ -60,6 +61,23 @@ export function KillBill({ onClose }: { onClose: () => void }) {
   const brandId = resolveActiveBrand(brands, chosenBrand)?.id;
   const brandRef = useRef(brandId);
   brandRef.current = brandId;
+  // Saved brand voice (owner-only endpoint — members get nothing and we just
+  // keep the fixed /voice/speak voice). Paired with the brand id it belongs to
+  // so a mid-session brand switch can't borrow the previous brand's voice.
+  const { data: voiceInfo } = useBrandVoice(brandId ?? null);
+  const voiceRef = useRef<{
+    brandId: string;
+    sampleLanguage: string;
+    speakLanguages: string[];
+  } | null>(null);
+  voiceRef.current =
+    brandId && voiceInfo?.voice?.status === "ready"
+      ? {
+          brandId,
+          sampleLanguage: voiceInfo.voice.sampleLanguage,
+          speakLanguages: voiceInfo.speakLanguages,
+        }
+      : null;
 
   const stopListening = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -125,9 +143,26 @@ export function KillBill({ onClose }: { onClose: () => void }) {
 
   const enqueueSpeech = useCallback(
     (text: string, turn: number) => {
-      const p = apiFetchBlob("/voice/speak", { method: "POST", json: { text } }).catch(
-        () => null,
-      );
+      const fixed = () =>
+        apiFetchBlob("/voice/speak", { method: "POST", json: { text } });
+      // Cloned brand voice when the owner has one; a synthesis failure quietly
+      // falls back to the fixed voice so the conversation keeps talking.
+      const voice = voiceRef.current;
+      const p = (
+        voice && voice.brandId === brandRef.current
+          ? apiFetchBlob(`/brands/${voice.brandId}/voice/speak`, {
+              method: "POST",
+              json: {
+                text,
+                language: detectSpeakLanguage(
+                  text,
+                  voice.sampleLanguage,
+                  voice.speakLanguages,
+                ),
+              },
+            }).catch(fixed)
+          : fixed()
+      ).catch(() => null);
       queueRef.current.push(p);
       void playNext(turn);
     },
@@ -237,6 +272,12 @@ export function KillBill({ onClose }: { onClose: () => void }) {
   const listen = useCallback(async () => {
     if (!alive.current) return;
     setError(null);
+    if (typeof window.isSecureContext === "boolean" && !window.isSecureContext) {
+      return fail(new Error("Microphone access requires a secure HTTPS connection."));
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      return fail(new Error("Microphone recording is not supported by this browser."));
+    }
     try {
       streamRef.current ??= await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
@@ -247,9 +288,12 @@ export function KillBill({ onClose }: { onClose: () => void }) {
     if (!alive.current) return;
 
     const stream = streamRef.current;
-    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find(
-      (t) => MediaRecorder.isTypeSupported(t),
-    );
+    const mime =
+      typeof MediaRecorder.isTypeSupported === "function"
+        ? ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find(
+            (t) => MediaRecorder.isTypeSupported(t),
+          )
+        : undefined;
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     const chunks: BlobPart[] = [];
     let spoke = false;
@@ -259,7 +303,10 @@ export function KillBill({ onClose }: { onClose: () => void }) {
       cancelAnimationFrame(rafRef.current);
       if (!alive.current) return;
       if (!spoke) return setPhase("idle");
-      void sendTurn(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+      const chunkType = chunks.find(
+        (chunk): chunk is Blob => chunk instanceof Blob && Boolean(chunk.type),
+      )?.type;
+      void sendTurn(new Blob(chunks, { type: rec.mimeType || chunkType || mime || "audio/webm" }));
     };
 
     audioCtxRef.current ??= new AudioContext();
@@ -328,11 +375,11 @@ export function KillBill({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-background/95 px-6 backdrop-blur">
+    <div className="safe-area-overlay fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-background/95 backdrop-blur">
       <button
         onClick={onClose}
         aria-label="Close Kill Bill"
-        className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="safe-area-top-right absolute rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <X className="h-5 w-5" />
       </button>

@@ -66,20 +66,32 @@ async function upsertUser(
 /**
  * The User row only exists so profile fields stay fresh — req.userId comes
  * from the JWT itself, so a write per request is wasted work. Upsert once per
- * userId per process lifetime, fire-and-forget off the request path.
+ * userId per process lifetime. It must be awaited: tables like Brand FK to
+ * User, so a fire-and-forget upsert races a new user's first write and fails
+ * with a foreign-key violation.
  */
 const syncedUsers = new Set<string>();
+const inflightSyncs = new Map<string, Promise<void>>();
 function syncUser(
   id: string,
   email: string | undefined,
   name?: string | null,
   avatarUrl?: string | null,
-): void {
-  if (syncedUsers.has(id)) return;
-  syncedUsers.add(id);
-  void upsertUser(id, email, name, avatarUrl).catch((err) =>
-    console.error(`[auth] user ${id} profile sync failed:`, err),
-  );
+): Promise<void> {
+  if (syncedUsers.has(id)) return Promise.resolve();
+  let p = inflightSyncs.get(id);
+  if (!p) {
+    p = upsertUser(id, email, name, avatarUrl)
+      .then(() => {
+        syncedUsers.add(id);
+      })
+      .catch((err) =>
+        console.error(`[auth] user ${id} profile sync failed:`, err),
+      )
+      .finally(() => inflightSyncs.delete(id));
+    inflightSyncs.set(id, p);
+  }
+  return p;
 }
 
 /**
@@ -194,7 +206,7 @@ export const authPlugin = fp(async (app) => {
           const meta = claims.user_metadata as
             | Record<string, unknown>
             | undefined;
-          syncUser(
+          await syncUser(
             claims.sub,
             claims.email as string | undefined,
             (meta?.name ?? meta?.full_name) as string | undefined,
@@ -209,7 +221,7 @@ export const authPlugin = fp(async (app) => {
         .catch((err: Error) => ({ data: { user: null }, error: err }));
       if (!error && data.user) {
         req.userId = data.user.id;
-        syncUser(
+        await syncUser(
           data.user.id,
           data.user.email,
           (data.user.user_metadata?.name as string | undefined) ??

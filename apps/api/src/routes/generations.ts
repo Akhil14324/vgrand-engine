@@ -4,6 +4,7 @@ import {
   createGenerationSchema,
   regenerateGenerationSchema,
   type GenerationEvent,
+  type ImageEditOperation,
   type ThemeStyleGuide,
 } from "@catgpt/types";
 import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
@@ -14,7 +15,11 @@ import {
   publishGenerationEvent,
   subscribeGenerationEvents,
 } from "../services/events.js";
-import { classifyIntent, loadChatHistory } from "../services/chat.js";
+import {
+  classifyIntent,
+  isImageCaptionRequest,
+  loadChatHistory,
+} from "../services/chat.js";
 import { renderMarkdownPdf } from "../services/pdf-export.js";
 import { deleteStoredFiles, storeFile } from "../services/storage.js";
 import {
@@ -44,6 +49,17 @@ import { isTrustedImageUrl } from "../lib/urls.js";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const IMAGE_TRIGGER = /create\s+an?\s+image/i;
+
+const EDIT_OPERATION_PROMPTS: Record<Exclude<ImageEditOperation, "edit">, string> = {
+  inpaint:
+    "Edit only the transparent painted area in the mask. Match the surrounding image's lighting, texture, perspective, and style; leave every unmasked pixel unchanged.",
+  outpaint:
+    "Extend the existing image naturally into the transparent border. Preserve the subject, lighting, palette, and composition; do not redraw or crop the original pixels.",
+  remove_background:
+    "Remove the background completely. Keep the main subject exactly as it is - same shape, colours, details and any text - and place it on a clean, plain transparent or white background.",
+  upscale:
+    "Recreate this image at higher fidelity. Preserve the exact subject, layout, colours, text, and composition while improving edge clarity and detail.",
+};
 
 /** Chat title from the first prompt — first line, capped at 60 chars. */
 function deriveTitle(prompt: string): string {
@@ -201,8 +217,14 @@ export async function generationRoutes(app: FastifyInstance) {
     // ("what is wrong with this UI?") is answered as text with vision; only
     // edit-style requests stay image jobs. One small classifier call, and only
     // in this narrow case (attachment, no explicit trigger/parent/campaign).
-    let visionOnly = false;
+    let visionOnly = Boolean(
+      userRefs.length > 0 &&
+        !effectiveParentId &&
+        !IMAGE_TRIGGER.test(body.prompt) &&
+        isImageCaptionRequest(body.prompt),
+    );
     if (
+      !visionOnly &&
       userRefs.length > 0 &&
       !effectiveParentId &&
       !IMAGE_TRIGGER.test(body.prompt) &&
@@ -234,7 +256,10 @@ export async function generationRoutes(app: FastifyInstance) {
 
     // Theme brand references come first — they're the base the edit keeps;
     // any user-attached refs are extra guidance on top.
-    const brandRefs = brand && kind === "image" ? brandReferenceUrls(brand.assets) : [];
+    const brandRefs =
+      brand && kind === "image"
+        ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url)
+        : [];
     const referenceImageUrls =
       kind === "image"
         ? [
@@ -281,6 +306,7 @@ export async function generationRoutes(app: FastifyInstance) {
                       brand.name,
                       (brand.profile ?? {}) as BrandProfile,
                       brand.assets.some((a) => a.kind === "logo"),
+                      brand.mascot,
                     )
                   : "")
               : body.prompt,
@@ -458,13 +484,29 @@ export async function generationRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const parent = await loadOwned(req, id);
     const body = parseBody(regenerateGenerationSchema, req.body);
+    const operation = body.operation ?? "edit";
 
-    const referenceImageUrl = parent.imageUrls[0];
-    if (!referenceImageUrl) {
+    const parentImageUrl = parent.imageUrls[0];
+    if (!parentImageUrl) {
       throw badRequest("Parent generation has no image to edit");
     }
+    const referenceImageUrl = body.referenceImageUrl ?? parentImageUrl;
+    if (body.referenceImageUrl && !isTrustedImageUrl(body.referenceImageUrl)) {
+      throw badRequest("edit base must be uploaded through the app");
+    }
+    if (body.maskImageUrl && !isTrustedImageUrl(body.maskImageUrl)) {
+      throw badRequest("mask image must be uploaded through the app");
+    }
+    if (operation === "inpaint" && !body.maskImageUrl) {
+      throw badRequest("inpaint needs a painted mask");
+    }
+    if (operation === "outpaint" && !body.referenceImageUrl) {
+      throw badRequest("outpaint needs an expanded canvas image");
+    }
     await assertImageQuota(req.userId);
-    const prompt = body.prompt ?? parent.prompt;
+    const prompt =
+      body.prompt ??
+      (operation === "edit" ? parent.prompt : EDIT_OPERATION_PROMPTS[operation]);
     const theme = parent.themeId
       ? await prisma.theme.findUnique({ where: { id: parent.themeId } })
       : null;
@@ -475,7 +517,10 @@ export async function generationRoutes(app: FastifyInstance) {
     // The image being edited leads; extra references from the original carry over.
     const extraRefs = Array.isArray(parentMeta.referenceImageUrls)
       ? (parentMeta.referenceImageUrls as unknown[]).filter(
-          (u): u is string => typeof u === "string" && u !== referenceImageUrl,
+          (u): u is string =>
+            typeof u === "string" &&
+            u !== parentImageUrl &&
+            u !== referenceImageUrl,
         )
       : [];
     const referenceImageUrls = [referenceImageUrl, ...extraRefs].slice(0, 10);
@@ -493,15 +538,21 @@ export async function generationRoutes(app: FastifyInstance) {
                 brand.name,
                 (brand.profile ?? {}) as BrandProfile,
                 brand.assets.some((a) => a.kind === "logo"),
+                brand.mascot,
               )
             : ""),
-        provider: resolveProvider(theme, parent.provider),
+        provider:
+          operation === "edit"
+            ? resolveProvider(theme, parent.provider)
+            : "openai",
         parentId: parent.id,
         metadata: {
           referenceImageUrl,
           referenceImageUrls,
+          maskImageUrl: body.maskImageUrl,
+          editOperation: operation,
           quality: body.quality ?? parentMeta.quality ?? "low",
-          size: parentMeta.size ?? "auto",
+          size: body.size ?? parentMeta.size ?? "auto",
           ...(brand ? { brandId: brand.id } : {}),
         },
       },

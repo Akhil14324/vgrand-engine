@@ -2,6 +2,7 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // Workspace packages ship as TS source; Next transpiles them on demand.
   transpilePackages: ["@catgpt/types"],
   // Monorepo root — keeps output tracing inside the project even though an

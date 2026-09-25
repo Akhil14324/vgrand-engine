@@ -1,6 +1,10 @@
 import { prisma } from "@catgpt/db";
 import { env } from "../env.js";
-import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
+import {
+  buildFinalPrompt,
+  CAMPAIGN_CREATIVE_STYLE,
+  resolveProvider,
+} from "../lib/prompt.js";
 import {
   getImageUsage,
   recordImageUsage,
@@ -20,20 +24,22 @@ import {
   contextMessage,
   toMessages,
   type HistoryTurn,
+  streamChat,
+  streamChatWithSearch,
 } from "./chat.js";
 import { enqueueGeneration } from "./queue.js";
 
 /**
  * Campaign Builder — a sales-focused mode of normal chat, entered with
  * `/campaign`. The assistant interviews the user, then delivers a full
- * revenue-oriented campaign and (by default) three image creatives.
+ * revenue-oriented campaign and (by default) two image creatives.
  *
  * State lives in the conversation itself: once any turn starts with
  * `/campaign`, the rest of that chat stays in campaign mode.
  */
 
 const CAMPAIGN_PREFIX = /^\/campaign\b/i;
-const MAX_CREATIVES = 10;
+const MAX_CREATIVES = 2;
 const DEFAULT_OPENER = "I want to plan a sales campaign.";
 
 export const isCampaignPrompt = (prompt: string) => CAMPAIGN_PREFIX.test(prompt.trim());
@@ -66,7 +72,7 @@ You need real facts to build a campaign that sells. If the user has not given th
 4. Where do they sell and promote today (Instagram, WhatsApp, Google, walk-ins, marketplace...) and what results do they get now?
 5. Marketing budget for this campaign, and who does the work (just them, a team)?
 6. What makes them different from competitors, and any existing offers, reviews, photos or brand colours?
-Rules: skip any question the user already answered; never ask about things you can infer; after at most two rounds of questions, or if the user says "just build it", stop asking and build with clearly labelled assumptions. Answer typos and mixed English/Telugu silently, never comment on spelling.
+Rules: skip any question the user already answered; never ask about things you can infer; after at most two rounds of questions, or if the user says "just build it", stop asking and build with clearly labelled assumptions. Understand Telugu requests, including natural Telugu-English mixing and transliteration. Respond in the user's language unless they ask for another language; keep campaign copy, scripts, and instructions in natural Telugu when the user writes in Telugu. Answer typos silently and never comment on spelling.
 
 ## Phase 2 - The campaign (once you have enough)
 Write a complete, practical, revenue-first campaign in Markdown with these sections:
@@ -86,16 +92,131 @@ Honesty rules: never invent statistics, market sizes, competitor facts, testimon
 ## Images
 The system generates the image creatives for you. After you deliver a full campaign, OR when the user asks for (more) campaign images/creatives/posters, end your message with a final line that is exactly:
 <<CAMPAIGN_READY:N>>
-where N is the number of image creatives to generate: 3 after a full campaign, or EXACTLY the number the user asked for in their latest message (for "2 more" N is 2, not the running total; maximum ${MAX_CREATIVES}). When asked only for more images, reply in one or two sentences saying what you are creating, then the marker line. NEVER output the marker while you are still interviewing, and never mention the marker or explain it.`;
+where N is the number of image creatives to generate: 2 after a full campaign, or the number the user asked for in their latest image request, capped at ${MAX_CREATIVES} (for "2 more" N is 2, not the running total). Never request or generate more than two images for one campaign response. When asked only for more images, reply in one or two sentences saying what you are creating, then the marker line. NEVER output the marker while you are still interviewing, and never mention the marker or explain it.`;
 
 const CREATIVE_SYSTEM = `You write image-generation prompts for sales advertising creatives. Return JSON only: {"creatives":[{"title":"...","prompt":"..."}]}.
 
-Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (square social-media post unless the conversation says otherwise), lighting and style, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. "title" is a short label (max 6 words).
+Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (vertical 4:5 Instagram feed post unless the conversation specifies another platform or aspect ratio), bright, clean, balanced lighting with even exposure, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly, every word letter-perfect. Hard rule on readability: the whole background stays light and clean (white, cream, pastel or bright daylight scene); NEVER place a dark panel, black gradient, smoke, vignette or scrim behind text, and every word must sit on a light, uncluttered area with strong contrast. No dark overlays, muddy color casts, underexposure or heavy shadows anywhere unless the user explicitly asks for a dark or dramatic look. Use the same language as the user's campaign request for on-image copy; use natural Telugu for Telugu prompts unless another language is requested. Do not put social-media captions or hashtags on the image; captions and hashtags are delivered separately as text. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. "title" is a short label (max 6 words).
 
 Never depict real people or public figures — politicians, celebrities, historical leaders. Image providers refuse their likenesses, so the creative would fail. For occasions tied to a person (birth anniversaries, memorial days, founder tributes), use symbolic imagery instead: their iconic objects, signature colours, a famous quote as text, or the event's symbols.`;
 
+export interface CampaignCalendarPlan {
+  dates: string[];
+  days: { date: string; relevantEvent: string | null; reason: string | null }[];
+  sources: { title: string; url: string }[];
+  researchNotes: string;
+  verified: boolean;
+}
 
-/* ----------------------------- marker filtering ---------------------------- */
+function indiaDate(now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function dateList(start: string, count: number): string[] {
+  const [year, month, day] = start.split("-").map(Number);
+  return Array.from({ length: count }, (_, i) => {
+    const date = new Date(Date.UTC(year!, month! - 1, day! + i));
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+export function parseCampaignDateRange(
+  prompt: string,
+  now = new Date(),
+): string[] | null {
+  if (!/(calendar|festival|observance|occasion|holiday|panchang|indian\s+(?:calendar|festival|holiday)|(?:calendar|festival).{0,20}india|భారతీయ క్యాలెండర్|భారత క్యాలెండర్|పండుగ|పండుగలు)/i.test(prompt)) {
+    return null;
+  }
+  const explicit = prompt.match(/\b(20\d{2}-\d{2}-\d{2})\s+(?:to|through|until|–|-)\s*(20\d{2}-\d{2}-\d{2})\b/i);
+  if (explicit) {
+    const start = new Date(`${explicit[1]}T00:00:00Z`);
+    const end = new Date(`${explicit[2]}T00:00:00Z`);
+    const span = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (
+      Number.isFinite(span) &&
+      span > 0 &&
+      span <= 31 &&
+      start.toISOString().slice(0, 10) === explicit[1] &&
+      end.toISOString().slice(0, 10) === explicit[2]
+    ) {
+      return dateList(explicit[1]!, span);
+    }
+  }
+
+  const duration = prompt.match(/\b(?:next|coming|upcoming|for(?: the)? next|over the next)\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fourteen|fifteen|twenty|thirty)\s+(days?|weeks?)\b/i);
+  const counts: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fourteen: 14, fifteen: 15, twenty: 20, thirty: 30 };
+  const amount = duration ? Number(duration[1]) || counts[duration[1]!.toLowerCase()] || 7 : 7;
+  const count = Math.min(31, Math.max(1, duration?.[2]?.startsWith("week") ? amount * 7 : amount));
+  const tomorrow = dateList(indiaDate(now), 2)[1]!;
+  return dateList(tomorrow, count);
+}
+
+export async function prepareCampaignCalendar(
+  prompt: string,
+  campaignContext: string,
+  brand: string | null,
+): Promise<CampaignCalendarPlan | null> {
+  const dates = parseCampaignDateRange(prompt);
+  if (!dates) return null;
+  const emptyDays = dates.map((date) => ({ date, relevantEvent: null, reason: null }));
+  let researchNotes = "";
+  let sources: { title: string; url: string }[] = [];
+  let days: CampaignCalendarPlan["days"] = emptyDays;
+  let verified = false;
+  try {
+    const search = await streamChatWithSearch(
+      `Find verified Indian calendar events falling on these exact dates: ${dates.join(", ")}. Include national days and observances, major festivals, and regional occasions only where relevant to the stated location/audience; include Telugu occasions when the brand location or audience indicates Telugu-speaking. Return a concise date-by-date candidate list, with region and source names. Do not invent events or move lunar-calendar dates. If none are found for a date, say none found.\n\nUser's calendar request:\n${prompt}\n\nBusiness and campaign context:\n${campaignContext.slice(0, 6000)}`,
+      [],
+      [],
+      [],
+      () => {},
+      () => {},
+      brand,
+    );
+    researchNotes = search.text.slice(0, 5000);
+    sources = search.sources;
+    const assessment = await getClient().chat.completions.create({
+      model: env.CAMPAIGN_MODEL,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `You are a calendar-event relevance evaluator. Use only candidate events in the supplied research; never add or infer an event. For every supplied date, select at most one event only if it is directly relevant to the business, audience, location, or campaign. Otherwise return null. Output JSON only with this shape and exactly one entry per requested date: {"days":[{"date":"YYYY-MM-DD","relevantEvent":null,"reason":null}]}.`,
+        },
+        {
+          role: "user",
+          content: `User's calendar request:\n${prompt}\n\nBusiness and campaign context:\n${campaignContext.slice(0, 6000)}\n\nRequested dates:\n${dates.join(", ")}\n\nCalendar search results:\n${researchNotes}`,
+        },
+      ],
+    });
+    const parsed = JSON.parse(assessment.choices[0]?.message.content ?? "{}") as {
+      days?: { date?: string; relevantEvent?: string | null; reason?: string | null }[];
+    };
+    const byDate = new Map((parsed.days ?? []).map((day) => [day.date, day]));
+    if (dates.every((date) => byDate.has(date))) {
+      days = dates.map((date) => {
+        const item = byDate.get(date)!;
+        return {
+          date,
+          relevantEvent: item.relevantEvent?.trim() || null,
+          reason: item.reason?.trim() || null,
+        };
+      });
+      verified = true;
+    }
+  } catch {
+    researchNotes = researchNotes || "Live Indian calendar lookup or event assessment was unavailable.";
+  }
+  return { dates, days, sources, researchNotes, verified };
+}
 
 const MARKER = /<<CAMPAIGN_READY:(\d{1,2})>>/;
 const MARKER_HEAD = "<<CAMPAIGN_READY:";
@@ -158,6 +279,7 @@ export async function streamCampaign(
   memories: string[],
   onDelta: (delta: string) => void,
   brand: string | null = null,
+  calendarPlan: CampaignCalendarPlan | null = null,
 ): Promise<CampaignReply> {
   const stream = await getClient().chat.completions.create({
     model: env.CAMPAIGN_MODEL,
@@ -165,6 +287,13 @@ export async function streamCampaign(
     messages: [
       { role: "system", content: CAMPAIGN_SYSTEM },
       ...brandMessage(brand),
+      ...(calendarPlan
+        ? [
+            {
+              role: "system" as const,
+              content: `Calendar-Aware Content Planning & Generation is active. Dates use India Standard Time (Asia/Kolkata): ${calendarPlan.dates.join(", ")}. Replace the generic posting schedule with exactly one dated content item for each requested date. First follow the per-date relevance assessment below, then combine relevant occasions with the existing business, audience, location, tone, offer, and content-pillar context. Cite a supplied source for each event-based item. For null events, create a normal post from the established strategy; never force or invent a festival. Include each item's content idea, platform/format, caption, and CTA.\n\nCalendar relevance assessment:\n${JSON.stringify(calendarPlan.days)}\n\nCalendar research notes:\n${calendarPlan.researchNotes}\n\nSources:\n${calendarPlan.sources.map((s) => `${s.title}: ${s.url}`).join("\n") || "No sources returned."}\n\nCalendar verification: ${calendarPlan.verified ? "live search and per-date relevance assessment completed" : "live calendar research could not be fully verified; use normal strategy and make no unsupported event claims"}.`},
+          ]
+        : []),
       ...(brand
         ? [
             {
@@ -207,6 +336,48 @@ export async function streamCampaign(
 interface Creative {
   title: string;
   prompt: string;
+}
+
+export async function generateCampaignPostCopy(
+  imageUrl: string,
+  creativePrompt: string,
+  history: HistoryTurn[],
+  brand: string | null,
+): Promise<string> {
+  const campaignContext = history
+    .slice(-8)
+    .map(
+      (turn) =>
+        `User: ${turn.prompt.slice(0, 800)}\nAssistant: ${(turn.textResponse ?? "").slice(-1200)}`,
+    )
+    .join("\n\n")
+    .slice(-6000);
+  let trendNotes = "";
+  try {
+    const trends = await streamChatWithSearch(
+      `Search for current social-media content or hashtag trends genuinely relevant to this campaign and image. Return at most 5 concise, sourced trend notes; do not invent trend data or popularity metrics. If no reliable current trend applies, say so and prefer evergreen relevant tags.\n\nCampaign context:\n${campaignContext}\n\nCreative brief:\n${creativePrompt.slice(0, 1200)}`,
+      [],
+      [],
+      [],
+      () => {},
+      () => {},
+      brand,
+    );
+    trendNotes = trends.text.slice(0, 2500);
+  } catch {
+    trendNotes = "No live trend results were available; use relevant evergreen hashtags and do not claim a tag is trending.";
+  }
+
+  return streamChat(
+    `Analyze the attached generated campaign image itself, then write a ready-to-post social caption and 5–8 relevant hashtags based on the visible image, the campaign context, and these live trend notes. Keep the caption in the language used by the campaign user (use natural Telugu for a Telugu request unless another language was requested). Do not invent prices, offers, features, or claims. Do not put the caption or hashtags in the image; return them only as text in exactly this format:\nCaption: <caption>\n\nHashtags: #tag1 #tag2 ...\n\nCampaign context:\n${campaignContext}\n\nCreative brief:\n${creativePrompt.slice(0, 1200)}\n\nLive trend notes:\n${trendNotes}`,
+    [],
+    [],
+    [],
+    "chat",
+    () => {},
+    brand,
+    [imageUrl],
+  );
 }
 
 async function planCreatives(
@@ -257,16 +428,19 @@ export async function spawnCreatives(params: {
   const brand = params.brandId
     ? await loadBrandContext(params.brandId, userId)
     : null;
-  const brandRefs = brand ? brandReferenceUrls(brand.assets) : [];
+  const brandRefs = brand
+    ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url)
+    : [];
   const guidance = brand
     ? brandImageGuidance(
         brand.name,
         (brand.profile ?? {}) as BrandProfile,
         brand.assets.some((a) => a.kind === "logo"),
+        brand.mascot,
       )
     : "";
   const usage = await getImageUsage(userId);
-  const count = Math.min(requested, usage.remaining);
+  const count = Math.min(requested, MAX_CREATIVES, usage.remaining);
   if (count <= 0) {
     return `\n\n> No image creatives were generated - you have used today's ${usage.limit} images. It resets at midnight UTC.`;
   }
@@ -286,11 +460,14 @@ export async function spawnCreatives(params: {
         conversationId,
         kind: "image",
         prompt: brief.prompt,
-        finalPrompt: buildFinalPrompt(null, brief.prompt) + guidance,
+        finalPrompt:
+          buildFinalPrompt(null, brief.prompt) +
+          guidance +
+          CAMPAIGN_CREATIVE_STYLE,
         provider: resolveProvider(null),
         metadata: {
           quality: env.CAMPAIGN_IMAGE_QUALITY,
-          size: "auto",
+          size: "1088x1360",
           ...(brandRefs.length
             ? { referenceImageUrl: brandRefs[0], referenceImageUrls: brandRefs }
             : {}),

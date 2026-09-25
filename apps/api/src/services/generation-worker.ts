@@ -10,6 +10,7 @@ import {
   type ProviderName,
   type Quality,
   type ImageSize,
+  type ImageEditOperation,
 } from "@catgpt/types";
 import {
   GENERATION_QUEUE,
@@ -49,17 +50,22 @@ import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { refundImageUsage } from "../lib/usage.js";
 import { loadBrandContext } from "../lib/brand.js";
 import {
+  generateCampaignPostCopy,
   isCampaignConversation,
+  prepareCampaignCalendar,
   isCampaignPrompt,
   spawnCreatives,
   streamCampaign,
   stripCampaignPrefix,
 } from "./campaign.js";
 import { env } from "../env.js";
+import { startCampaignScheduler } from "./campaign-autopilot.js";
 
 interface GenerationMetadata {
   referenceImageUrl?: string;
   referenceImageUrls?: string[];
+  maskImageUrl?: string;
+  editOperation?: ImageEditOperation;
   quality?: Quality;
   size?: ImageSize;
   workerAttempts?: number;
@@ -70,6 +76,7 @@ interface GenerationMetadata {
 class GenerationCancelled extends Error {}
 
 export function startGenerationWorker(): Worker | null {
+  startCampaignScheduler();
   if (!env.redisConfigured) {
     // No queue — enqueueGeneration() calls runGeneration() directly. Rows
     // left pending/processing by a previous boot would never resume, so
@@ -496,6 +503,21 @@ export async function runGeneration(generationId: string): Promise<void> {
       if (campaign) {
         // Campaign mode: interview -> full sales plan -> image creatives.
         const userPrompt = stripCampaignPrefix(generation.prompt);
+        const calendarContext = [
+          brandSummary,
+          ...context,
+          ...memories,
+          ...history.slice(-8).map(
+            (turn) => `${turn.prompt}\n${turn.textResponse ?? ""}`,
+          ),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        const calendarPlan = await prepareCampaignCalendar(
+          userPrompt,
+          calendarContext,
+          brandSummary,
+        );
         const reply = await streamCampaign(
           userPrompt,
           history,
@@ -503,6 +525,7 @@ export async function runGeneration(generationId: string): Promise<void> {
           memories,
           onDelta,
           brandSummary,
+          calendarPlan,
         );
         text = reply.text;
         creativesRequested = reply.creativeCount;
@@ -709,6 +732,8 @@ export async function runGeneration(generationId: string): Promise<void> {
       mode,
       referenceImageUrl: referenceImageUrls[0],
       referenceImageUrls,
+      operation: meta.editOperation,
+      maskImageUrl: meta.maskImageUrl,
       quality: meta.quality ?? "low",
       size: meta.size ?? "auto",
       // Progressive previews stream through SSE as they arrive from the
@@ -743,11 +768,35 @@ export async function runGeneration(generationId: string): Promise<void> {
       ),
     );
 
+    let campaignPostCopy: string | null = null;
+    if (
+      meta.campaignCreative &&
+      typeof meta.campaignCreative === "object" &&
+      imageUrls[0] &&
+      generation.conversationId
+    ) {
+      try {
+        const campaignHistory = await loadChatHistory(
+          generation.conversationId,
+          generationId,
+        );
+        campaignPostCopy = await generateCampaignPostCopy(
+          imageUrls[0],
+          generation.prompt,
+          campaignHistory,
+          null,
+        );
+      } catch {
+        console.warn("[worker] campaign post caption generation failed");
+      }
+    }
+
     const finished = await prisma.generation.updateMany({
       where: { id: generationId, status: "processing" },
       data: {
         status: "completed",
         imageUrls,
+        textResponse: campaignPostCopy,
         provider: result.providerUsed,
         model: (result.metadata.model as string | undefined) ?? null,
         metadata: {
@@ -759,10 +808,19 @@ export async function runGeneration(generationId: string): Promise<void> {
     });
     if (finished.count === 0) {
       // Cancelled while the provider was rendering — refund and stop quietly.
+      await prisma.campaignPost.updateMany({
+        where: { generationId },
+        data: { status: "cancelled", error: "Stopped" },
+      });
       await refundImageUsage(generationId).catch(() => {});
       publishGenerationEvent({ generationId, status: "cancelled" });
       return;
     }
+
+    await prisma.campaignPost.updateMany({
+      where: { generationId },
+      data: { status: "ready_for_review", error: null },
+    });
 
     // Persistent memory snapshot — everything needed to recall or reproduce
     // this generation later, not just the image. Bookkeeping must never
@@ -814,6 +872,12 @@ export async function runGeneration(generationId: string): Promise<void> {
           },
         })
         .catch(() => {});
+      await prisma.campaignPost
+        .updateMany({
+          where: { generationId },
+          data: { status: "cancelled", error: "Stopped" },
+        })
+        .catch(() => {});
       await refundImageUsage(generationId).catch(() => {});
       publishGenerationEvent({ generationId, status: "cancelled" });
       return;
@@ -823,6 +887,12 @@ export async function runGeneration(generationId: string): Promise<void> {
     await prisma.generation
       .update({
         where: { id: generationId },
+        data: { status: "failed", error: message },
+      })
+      .catch(() => {});
+    await prisma.campaignPost
+      .updateMany({
+        where: { generationId },
         data: { status: "failed", error: message },
       })
       .catch(() => {});

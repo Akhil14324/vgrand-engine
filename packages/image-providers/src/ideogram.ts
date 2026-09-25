@@ -67,6 +67,8 @@ export class IdeogramProvider implements ImageProvider {
 
 function toAspectRatio(size?: string): string {
   switch (size) {
+    case "1088x1360":
+      return "4x5";
     case "1024x1536":
       return "2x3";
     case "1536x1024":

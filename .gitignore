@@ -5,6 +5,7 @@ node_modules/
 # builds
 dist/
 .next/
+.next-production/
 out/
 *.tsbuildinfo
 
@@ -16,6 +17,8 @@ out/
 # generated
 packages/db/generated/
 apps/api/uploads/
+# Private voice samples — never served or committed.
+apps/api/private-uploads/
 
 # misc
 .DS_Store

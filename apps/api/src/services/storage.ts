@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { env } from "../env.js";
@@ -163,4 +163,185 @@ export async function deleteStoredFiles(
       console.warn("storage cleanup failed:", r.reason);
     }
   }
+}
+
+/* ------------------------- private object storage ------------------------- */
+
+/**
+ * Private objects (consented brand-voice samples). Unlike storeImage these
+ * never produce a URL: the bucket is created non-public and callers only ever
+ * get back the server-side object key. Locally they live under
+ * PRIVATE_UPLOAD_DIR — a separate root from UPLOAD_DIR, whose whole tree is
+ * served by the /uploads static route.
+ */
+const PRIVATE_BUCKET = env.PRIVATE_STORAGE_BUCKET.trim();
+let privateBucketEnsured = false;
+
+async function ensurePrivateBucket(client: SupabaseClient) {
+  if (privateBucketEnsured) return;
+  const { error } = await client.storage.createBucket(PRIVATE_BUCKET, {
+    public: false,
+  });
+  if (error && !/already exists/i.test(error.message)) {
+    console.warn(`private storage bucket create: ${error.message}`);
+    return;
+  }
+  privateBucketEnsured = true;
+}
+
+/** Keys are server-generated; still guard every use — a tampered row must not
+ *  be able to read/unlink outside the private root or hand Supabase a bad key. */
+const PRIVATE_KEY_RE = /^[a-z0-9][a-z0-9/_-]*\.[a-z0-9]{2,5}$/;
+
+function assertPrivateKey(key: string) {
+  if (
+    !PRIVATE_KEY_RE.test(key) ||
+    key.includes("..") ||
+    key.includes("//") ||
+    key.includes("\\")
+  ) {
+    throw new Error("invalid private storage key");
+  }
+}
+
+function privateFilePath(key: string): string {
+  assertPrivateKey(key);
+  const root = path.resolve(env.PRIVATE_UPLOAD_DIR);
+  const publicRoot = path.resolve(env.UPLOAD_DIR);
+  // The static route serves all of UPLOAD_DIR — a private root inside it
+  // (or equal to it) would publish every private object.
+  const rel = path.relative(publicRoot, root);
+  if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+    throw new Error("PRIVATE_UPLOAD_DIR must be outside UPLOAD_DIR");
+  }
+  const target = path.resolve(root, key);
+  const inside = path.relative(root, target);
+  if (inside === "" || inside.startsWith("..") || path.isAbsolute(inside)) {
+    throw new Error("private key escapes storage root");
+  }
+  return target;
+}
+
+/** Server-side key for a new voice sample — callers never supply one. */
+export function newVoiceObjectKey(brandId: string, ext: string): string {
+  return `brand-voices/${brandId}/${randomBytes(12).toString("hex")}.${ext}`;
+}
+
+export async function putPrivateObject(
+  key: string,
+  buffer: Buffer,
+  contentType: string,
+  upsert = false,
+): Promise<void> {
+  assertPrivateKey(key);
+  const client = getSupabase();
+  if (client) {
+    await ensurePrivateBucket(client);
+    const { error } = await client.storage
+      .from(PRIVATE_BUCKET)
+      .upload(key, buffer, { contentType, upsert });
+    if (error) throw new Error("private storage upload failed");
+    return;
+  }
+  const filePath = privateFilePath(key);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, buffer);
+}
+
+/** Read a private object into memory (voice samples are size-capped). */
+export async function readPrivateObject(key: string): Promise<Buffer> {
+  assertPrivateKey(key);
+  const client = getSupabase();
+  if (client) {
+    const { data, error } = await client.storage
+      .from(PRIVATE_BUCKET)
+      .download(key);
+    if (error || !data) throw new Error("private storage read failed");
+    return Buffer.from(await data.arrayBuffer());
+  }
+  try {
+    return await readFile(privateFilePath(key));
+  } catch {
+    throw new Error("private storage read failed");
+  }
+}
+
+/** Idempotent delete — a missing object counts as already gone. */
+export async function deletePrivateObject(key: string): Promise<void> {
+  assertPrivateKey(key);
+  const client = getSupabase();
+  if (client) {
+    const { error } = await client.storage.from(PRIVATE_BUCKET).remove([key]);
+    if (error && !/not found|does not exist/i.test(error.message)) {
+      throw new Error("private storage delete failed");
+    }
+    return;
+  }
+  try {
+    await unlink(privateFilePath(key));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error("private storage delete failed");
+    }
+  }
+}
+
+async function privateObjectsWithPrefix(prefix: string): Promise<string[]> {
+  if (
+    !/^[a-z0-9][a-z0-9/_-]*\/$/.test(prefix) ||
+    prefix.includes("..") ||
+    prefix.includes("//") ||
+    prefix.includes("\\")
+  ) {
+    throw new Error("invalid private storage prefix");
+  }
+  const client = getSupabase();
+  if (client) {
+    const keys: string[] = [];
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await client.storage
+        .from(PRIVATE_BUCKET)
+        .list(prefix.slice(0, -1), { limit: 100, offset });
+      if (error) throw new Error("private storage listing failed");
+      const entries = data ?? [];
+      keys.push(
+        ...entries
+          .filter((entry) => entry.id)
+          .map((entry) => `${prefix}${entry.name}`),
+      );
+      if (entries.length < 100) return keys;
+      offset += entries.length;
+    }
+  }
+  const directory = path.dirname(privateFilePath(`${prefix}placeholder.wav`));
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error("private storage listing failed");
+  }
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => `${prefix}${entry.name}`);
+}
+
+export async function deletePrivateObjectsWithPrefix(prefix: string): Promise<void> {
+  const keys = await privateObjectsWithPrefix(prefix);
+  const client = getSupabase();
+  if (client) {
+    for (let i = 0; i < keys.length; i += 100) {
+      const { error } = await client.storage
+        .from(PRIVATE_BUCKET)
+        .remove(keys.slice(i, i + 100));
+      if (error) throw new Error("private storage delete failed");
+    }
+    return;
+  }
+  await Promise.all(keys.map((key) => deletePrivateObject(key)));
+}
+
+export async function deleteBrandVoiceCache(brandId: string): Promise<void> {
+  await deletePrivateObjectsWithPrefix(`brand-voice-cache/${brandId}/`);
 }

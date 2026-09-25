@@ -67,7 +67,7 @@ export function StudioShell() {
   if (!user) return null;
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="app-safe-screen flex overflow-hidden">
       <Sidebar />
       {socialNotice && (
         <div

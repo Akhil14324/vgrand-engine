@@ -889,6 +889,9 @@ export function Composer() {
           <kbd className="rounded border px-1 font-mono">Enter</kbd> to send
         </span>
       </div>
+      <p className="mx-auto mt-1 max-w-4xl text-center text-[11px] text-muted-foreground/80">
+        CatGPT can make mistakes — cross-check your output.
+      </p>
       {(create.isError || uploadError) && (
         <p className="mt-1 text-center text-xs text-destructive">
           {uploadError ?? create.error?.message}

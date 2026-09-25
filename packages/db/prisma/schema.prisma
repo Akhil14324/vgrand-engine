@@ -9,28 +9,29 @@ datasource db {
 }
 
 model User {
-  id             String            @id @default(uuid())
-  email          String            @unique
-  name           String?
-  avatarUrl      String?
-  createdAt      DateTime          @default(now())
-  generations    Generation[]
-  memories       Memory[]
-  conversations  Conversation[]
-  documents      Document[]
-  workspaces     Workspace[]
-  imageUsage     ImageUsage[]
-  brands         Brand[]
-  memberships    WorkspaceMember[]
-  teamMessages   TeamMessage[]
-  socialAccounts SocialAccount[]
-  socialPosts    SocialPost[]
+  id                String            @id @default(uuid())
+  email             String            @unique
+  name              String?
+  avatarUrl         String?
+  createdAt         DateTime          @default(now())
+  generations       Generation[]
+  memories          Memory[]
+  conversations     Conversation[]
+  documents         Document[]
+  workspaces        Workspace[]
+  imageUsage        ImageUsage[]
+  brands            Brand[]
+  memberships       WorkspaceMember[]
+  teamMessages      TeamMessage[]
+  socialAccounts    SocialAccount[]
+  socialPosts       SocialPost[]
+  voiceAttestations BrandVoice[]
+  campaignPlans     CampaignPlan[]
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
-// injected into prompts, plus uploaded assets and documents. A user has one
-// personal brand (workspaceId null); a workspace can hold many brands, kept
-// separate like channels in one server.
+// injected into prompts, plus uploaded assets and documents. A user can own
+// multiple personal brands; a workspace can hold many separately managed brands.
 model Brand {
   id          String       @id @default(uuid())
   userId      String
@@ -42,7 +43,10 @@ model Brand {
   profile     Json         @default("{}")
   summary     String       @default("") @db.Text // compact digest used in prompts
   assets      BrandAsset[]
+  mascot      BrandMascot?
+  voice       BrandVoice?
   documents   Document[]
+  campaignPlans CampaignPlan[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -54,12 +58,43 @@ model BrandAsset {
   id        String   @id @default(uuid())
   brandId   String
   brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  kind      String // logo | product | reference
+  kind      String // logo | product | mascot | reference
   url       String
   label     String?
+  mascot    BrandMascot?
   createdAt DateTime @default(now())
 
   @@index([brandId])
+}
+
+// One privately saved voice per brand: the consented reference recording that
+// conditions the selected TTS model. `storageKey` is an opaque server-side
+// object key — never a public or signed URL, and it is never serialized into
+// DTOs. Deleting the Brand removes this row only; the stored audio object is
+// cleaned up separately by the API.
+model BrandVoice {
+  id              String    @id @default(uuid())
+  brandId         String    @unique
+  brand           Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  storageKey      String // private object key for the reference audio
+  // Language the sample was recorded in — the code reported by the selected
+  // model adapter (e.g. "te"), not a hard-coded app-level list.
+  sampleLanguage  String
+  scriptText      String    @db.Text // exact transcript the speaker read
+  consentType     String // own_voice | authorized_voice
+  consentedAt     DateTime
+  attestedById    String?
+  attestedBy      User?     @relation(fields: [attestedById], references: [id], onDelete: SetNull)
+  status          String    @default("enrolling") // enrolling | ready | failed
+  enrolledAt      DateTime? // set when the sample finished enrolling
+  // Sanitized diagnostic for Brand settings only — a transient synthesis
+  // failure is recorded here and must not flip a still-valid sample to failed.
+  lastSynthesisError   String?   @db.Text
+  lastSynthesisErrorAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([attestedById])
 }
 
 // Permanent per-image ledger behind the daily quota. No relation to
@@ -110,6 +145,7 @@ model Conversation {
   generations Generation[]
   documents   Document[]
   shares      ConversationShare[]
+  campaignPlans CampaignPlan[]
   workspaceId String?
   workspace   Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   createdAt   DateTime            @default(now())
@@ -154,6 +190,8 @@ model Generation {
   conversationId String? // chat this generation belongs to
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   shareLinks     ShareLink[]
+  approvalLinks  ApprovalLink[]
+  campaignPost   CampaignPost?
   memories       Memory[]
   socialPosts    SocialPost[]
   createdAt      DateTime      @default(now())
@@ -357,4 +395,82 @@ model SocialPost {
 
   @@index([generationId])
   @@index([userId, createdAt(sort: Desc)])
+}
+
+// One active mascot identity per brand. The canonical image is a normal brand
+// asset, so existing asset cleanup and storage rules still apply.
+model BrandMascot {
+  id          String     @id @default(uuid())
+  brandId     String     @unique
+  brand       Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  assetId     String     @unique
+  asset       BrandAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  name        String
+  description String     @db.Text
+  status      String     @default("active") // active | archived
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([brandId])
+}
+
+// A client-facing review link for one generated asset. The token is the only
+// credential needed to view/respond; owner routes can revoke it.
+model ApprovalLink {
+  id            String     @id @default(uuid())
+  generationId  String
+  generation    Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  token         String     @unique
+  status        String     @default("pending") // pending | approved | changes_requested
+  reviewerName  String?
+  reviewerEmail String?
+  comment       String?    @db.Text
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  respondedAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([generationId])
+}
+
+// An internal autopilot plan. Posts generate drafts on schedule; publishing is
+// deliberately outside this model and always requires approval first.
+model CampaignPlan {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandId        String
+  brand          Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  title          String
+  status         String        @default("active") // active | paused | completed
+  timezone       String        @default("Asia/Kolkata")
+  posts          CampaignPost[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([brandId])
+}
+
+model CampaignPost {
+  id           String       @id @default(uuid())
+  planId       String
+  plan         CampaignPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  generationId String?      @unique
+  generation   Generation?  @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  scheduledFor DateTime
+  platform     String?
+  prompt       String       @db.Text
+  caption      String?      @db.Text
+  status       String       @default("scheduled") // scheduled | generating | ready_for_review | approved | failed | cancelled
+  error        String?      @db.Text
+  approvedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([planId, scheduledFor])
+  @@index([status, scheduledFor])
 }

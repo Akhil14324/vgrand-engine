@@ -72,6 +72,14 @@ const envSchema = z.object({
   /** Project JWT secret — enables in-process token verification (no getUser call). */
   SUPABASE_JWT_SECRET: opt(z.string().min(1)),
   STORAGE_BUCKET: opt(z.string().min(1)),
+  /** Private bucket for consented voice samples — created with public:false. */
+  PRIVATE_STORAGE_BUCKET: opt(z.string().min(1)),
+  /** Local fallback root for private objects — MUST stay outside UPLOAD_DIR. */
+  PRIVATE_UPLOAD_DIR: opt(z.string().min(1)),
+  /** Internal-only voice model service (e.g. http://127.0.0.1:8765). */
+  VOICE_MODEL_URL: opt(z.string().url()),
+  /** Shared-secret header for the internal voice service (optional locally). */
+  VOICE_SERVICE_TOKEN: opt(z.string().min(1)),
 
   /** Max image generations per user per UTC day. Chat is unlimited. */
   IMAGE_DAILY_LIMIT: z.coerce.number().int().positive().default(50),
@@ -124,7 +132,11 @@ export const env = {
   JEV_MODEL: parsed.JEV_MODEL ?? "jev-latest",
   TYPESAFE_BASE_URL: parsed.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
+  PRIVATE_STORAGE_BUCKET: parsed.PRIVATE_STORAGE_BUCKET ?? "brand-voice-samples",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
+  PRIVATE_UPLOAD_DIR: parsed.PRIVATE_UPLOAD_DIR ?? "./private-uploads",
+  VOICE_MODEL_URL: parsed.VOICE_MODEL_URL ?? null,
+  VOICE_SERVICE_TOKEN: parsed.VOICE_SERVICE_TOKEN ?? null,
   YOUTUBE_VISIBILITY: parsed.YOUTUBE_VISIBILITY ?? "private",
   META_GRAPH_VERSION: parsed.META_GRAPH_VERSION ?? "v23.0",
   // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults

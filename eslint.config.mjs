@@ -8,6 +8,10 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/.next/**",
+      "**/.next-production/**",
+      "**/.venv*/**",
+      "**/.local/**",
+      "**/__pycache__/**",
       "**/dist/**",
       "**/coverage/**",
       "**/.turbo/**",

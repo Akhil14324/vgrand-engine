@@ -7,7 +7,26 @@ import { Button } from "@/components/ui/button";
 /** Registers the service worker (production only). */
 export function PwaRegister() {
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+    if (!("serviceWorker" in navigator)) return;
+    if (process.env.NODE_ENV !== "production") {
+      void navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) =>
+          Promise.all(registrations.map((registration) => registration.unregister())),
+        )
+        .catch(() => {});
+      void caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key.startsWith("catgpt-static-") || key.startsWith("catgpt-pages-"))
+              .map((key) => caches.delete(key)),
+          ),
+        )
+        .catch(() => {});
+      return;
+    }
     const register = () =>
       navigator.serviceWorker.register("/sw.js").catch(() => {
         // Not fatal - the app simply is not installable/offline-capable.

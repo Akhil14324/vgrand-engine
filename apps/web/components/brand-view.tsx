@@ -5,14 +5,19 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  CalendarClock,
+  Check,
+  Copy,
   FileText,
   ImagePlus,
   Loader2,
   Megaphone,
   Plus,
+  Sparkles,
   Store,
   Trash2,
   Upload,
+  Wand2,
   X,
 } from "lucide-react";
 import {
@@ -26,14 +31,23 @@ import {
   useAddBrandAsset,
   useBrandDocuments,
   useBrands,
+  useCampaignPlans,
   useCreateBrand,
+  useCreateCampaignPlan,
   useDeleteBrand,
   useDeleteBrandAsset,
+  useDeleteBrandMascot,
   useDeleteDocument,
+  useGenerateBrandMascot,
+  useGeneration,
   useUpdateBrand,
+  useUpdateCampaignPlan,
+  useUpdateCampaignPost,
+  useUpsertBrandMascot,
   useWorkspaces,
 } from "@/lib/hooks";
 import { useBrandMode } from "@/lib/brand-mode";
+import { VoiceSection } from "@/components/voice-section";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -78,12 +92,18 @@ function BrandContent() {
   const { data: brands, isLoading } = useBrands();
   const { data: workspaces } = useWorkspaces();
   const createBrand = useCreateBrand();
+  const { setBrandId } = useBrandMode();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [personalName, setPersonalName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const personal = brands?.find((b) => b.workspaceId === null) ?? null;
-  const active = brands?.find((b) => b.id === activeId) ?? personal ?? brands?.[0] ?? null;
+  const personalBrands = (brands ?? []).filter((b) => b.workspaceId === null);
+  const active =
+    brands?.find((b) => b.id === activeId) ?? personalBrands[0] ?? brands?.[0] ?? null;
+  const selectBrand = (id: string) => {
+    setActiveId(id);
+    setBrandId(id);
+  };
 
   const create = (name: string, workspaceId?: string) => {
     setError(null);
@@ -91,7 +111,7 @@ function BrandContent() {
       { name: name.trim(), workspaceId },
       {
         onSuccess: (b) => {
-          setActiveId(b.id);
+          selectBrand(b.id);
           setPersonalName("");
         },
         onError: (e) => setError(e.message),
@@ -100,7 +120,7 @@ function BrandContent() {
   };
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="app-safe-screen flex flex-col">
       <header className="flex items-center gap-3 border-b px-3 py-2.5 sm:px-4">
         <Button variant="ghost" size="icon" asChild>
           <Link href="/" aria-label="Back to studio">
@@ -116,33 +136,42 @@ function BrandContent() {
         {/* Brand list: personal brand + brands grouped by workspace */}
         <aside className="max-h-64 overflow-y-auto border-b p-3 md:max-h-none md:border-b-0 md:border-r">
           <p className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">
-            Your brand
+            Your brands
           </p>
-          {personal ? (
+          {personalBrands.map((brand) => (
             <BrandRow
-              brand={personal}
-              active={active?.id === personal.id}
-              onClick={() => setActiveId(personal.id)}
+              key={brand.id}
+              brand={brand}
+              active={active?.id === brand.id}
+              onClick={() => selectBrand(brand.id)}
             />
-          ) : (
-            <form
-              className="flex gap-2"
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault();
-                if (personalName.trim()) create(personalName);
-              }}
+          ))}
+          <form
+            className="mt-2 flex gap-2"
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              if (personalName.trim()) create(personalName);
+            }}
+          >
+            <Input
+              value={personalName}
+              onChange={(e) => setPersonalName(e.target.value)}
+              placeholder={
+                personalBrands.length ? "Add another brand…" : "Brand name…"
+              }
+              className="h-8 text-sm"
+              aria-label="New brand name"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="secondary"
+              disabled={!personalName.trim() || createBrand.isPending}
+              aria-label="Create brand"
             >
-              <Input
-                value={personalName}
-                onChange={(e) => setPersonalName(e.target.value)}
-                placeholder="Brand name…"
-                className="h-8 text-sm"
-              />
-              <Button type="submit" size="sm" variant="secondary" disabled={createBrand.isPending}>
-                <Plus />
-              </Button>
-            </form>
-          )}
+              {createBrand.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+            </Button>
+          </form>
 
           {(workspaces ?? []).map((w) => (
             <WorkspaceBrands
@@ -151,7 +180,7 @@ function BrandContent() {
               workspaceName={w.name}
               brands={(brands ?? []).filter((b) => b.workspaceId === w.id)}
               activeId={active?.id ?? null}
-              onSelect={setActiveId}
+              onSelect={selectBrand}
               onCreate={(name) => create(name, w.id)}
             />
           ))}
@@ -284,6 +313,15 @@ interface FormState {
   colors: string[];
   tagline: string;
   tone: string;
+  typography: string;
+  visualStyle: string;
+  photographyStyle: string;
+  logoRules: string;
+  requiredPhrases: string;
+  forbiddenWords: string;
+  forbiddenClaims: string;
+  defaultCta: string;
+  contentLanguages: string;
 }
 
 const n2s = (n: number | undefined) => (n === undefined ? "" : String(n));
@@ -292,6 +330,13 @@ const s2n = (s: string) => {
   if (!t) return undefined;
   const n = Number(t);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
+};
+const list = (s: string) => {
+  const items = s
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length ? items : undefined;
 };
 
 function toForm(b: BrandDto): FormState {
@@ -319,6 +364,15 @@ function toForm(b: BrandDto): FormState {
     colors: p.colors ?? [],
     tagline: p.tagline ?? "",
     tone: p.tone ?? "",
+    typography: p.typography ?? "",
+    visualStyle: p.visualStyle ?? "",
+    photographyStyle: p.photographyStyle ?? "",
+    logoRules: p.logoRules ?? "",
+    requiredPhrases: (p.requiredPhrases ?? []).join("\n"),
+    forbiddenWords: (p.forbiddenWords ?? []).join(", "),
+    forbiddenClaims: (p.forbiddenClaims ?? []).join("\n"),
+    defaultCta: p.defaultCta ?? "",
+    contentLanguages: (p.contentLanguages ?? []).join(", "),
   };
 }
 
@@ -346,6 +400,15 @@ function toProfile(f: FormState): BrandProfile {
     colors: f.colors.length ? f.colors : undefined,
     tagline: str(f.tagline),
     tone: str(f.tone),
+    typography: str(f.typography),
+    visualStyle: str(f.visualStyle),
+    photographyStyle: str(f.photographyStyle),
+    logoRules: str(f.logoRules),
+    requiredPhrases: list(f.requiredPhrases),
+    forbiddenWords: list(f.forbiddenWords),
+    forbiddenClaims: list(f.forbiddenClaims),
+    defaultCta: str(f.defaultCta),
+    contentLanguages: list(f.contentLanguages),
   };
 }
 
@@ -609,10 +672,83 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
               placeholder="e.g. warm, playful, premium"
             />
           </Q>
+          <Q label="Typography / lettering">
+            <Input
+              value={form.typography}
+              onChange={(e) => set("typography", e.target.value)}
+              placeholder="e.g. rounded modern lettering, no serif fonts"
+            />
+          </Q>
+          <Q label="Visual style">
+            <Input
+              value={form.visualStyle}
+              onChange={(e) => set("visualStyle", e.target.value)}
+              placeholder="e.g. clean Telugu retail posters, bright daylight"
+            />
+          </Q>
+          <Q label="Photography style">
+            <Input
+              value={form.photographyStyle}
+              onChange={(e) => set("photographyStyle", e.target.value)}
+              placeholder="e.g. real product photos, natural light, no stock look"
+            />
+          </Q>
+          <Q label="Default call to action">
+            <Input
+              value={form.defaultCta}
+              onChange={(e) => set("defaultCta", e.target.value)}
+              placeholder="e.g. Order on WhatsApp today"
+            />
+          </Q>
+        </div>
+        <Q label="Logo usage rules">
+          <Textarea
+            rows={2}
+            value={form.logoRules}
+            onChange={(e) => set("logoRules", e.target.value)}
+            placeholder="e.g. Keep clear space around the logo; never stretch it or place it on busy backgrounds."
+          />
+        </Q>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Q label="Approved phrases (one per line)">
+            <Textarea
+              rows={3}
+              value={form.requiredPhrases}
+              onChange={(e) => set("requiredPhrases", e.target.value)}
+              placeholder="e.g. Freshly made every morning"
+            />
+          </Q>
+          <Q label="Words to avoid (comma separated)">
+            <Textarea
+              rows={3}
+              value={form.forbiddenWords}
+              onChange={(e) => set("forbiddenWords", e.target.value)}
+              placeholder="e.g. cheap, guaranteed, miracle"
+            />
+          </Q>
+          <Q label="Claims to avoid (one per line)">
+            <Textarea
+              rows={3}
+              value={form.forbiddenClaims}
+              onChange={(e) => set("forbiddenClaims", e.target.value)}
+              placeholder="e.g. No. 1 in India, doctor recommended"
+            />
+          </Q>
+          <Q label="Content languages (comma separated)">
+            <Textarea
+              rows={3}
+              value={form.contentLanguages}
+              onChange={(e) => set("contentLanguages", e.target.value)}
+              placeholder="e.g. Telugu, English"
+            />
+          </Q>
         </div>
       </Section>
 
       <AssetsSection brand={brand} />
+      <MascotSection brand={brand} />
+      <CampaignSection brand={brand} />
+      <VoiceSection brand={brand} />
       <DocumentsSection brand={brand} />
 
       <div className="flex flex-col items-start gap-2 rounded-xl border bg-accent/30 p-4">
@@ -690,6 +826,414 @@ function AssetsSection({ brand }: { brand: BrandDto }) {
           ))}
         </div>
       )}
+    </Section>
+  );
+}
+
+function MascotSection({ brand }: { brand: BrandDto }) {
+  const generate = useGenerateBrandMascot();
+  const upsert = useUpsertBrandMascot();
+  const remove = useDeleteBrandMascot();
+  const [name, setName] = useState(brand.mascot?.name ?? "");
+  const [description, setDescription] = useState(
+    brand.mascot?.description ?? "",
+  );
+  const [candidateId, setCandidateId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const candidate = useGeneration(candidateId);
+  const candidateUrl = candidate.data?.imageUrls[0];
+
+  const mascotName = () => name.trim() || `${brand.name} mascot`;
+  const mascotDescription = () =>
+    description.trim() || `A distinctive reusable mascot for ${brand.name}.`;
+
+  const saveUrl = (url: string) => {
+    setError(null);
+    upsert.mutate(
+      {
+        brandId: brand.id,
+        url,
+        name: mascotName(),
+        description: mascotDescription(),
+      },
+      {
+        onSuccess: () => setCandidateId(null),
+        onError: (e) => setError(e.message),
+      },
+    );
+  };
+
+  const upload = async (files: FileList) => {
+    const file = files[0];
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { url } = await apiFetch<{ url: string }>("/uploads", {
+        method: "POST",
+        body: form,
+      });
+      saveUrl(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section
+      title="Brand mascot"
+      hint="One saved character identity per brand. Its image leads the references whenever this brand generates visuals."
+    >
+      {brand.mascot && (
+        <div className="flex items-start gap-3 rounded-lg border bg-accent/20 p-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={brand.mascot.url}
+            alt={brand.mascot.name}
+            className="h-20 w-20 rounded-lg border object-cover"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{brand.mascot.name}</p>
+            <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
+              {brand.mascot.description}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Remove mascot"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate(brand.id)}
+          >
+            {remove.isPending ? <Loader2 className="animate-spin" /> : <X />}
+          </Button>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Q label="Mascot name">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Mintu the cat"
+          />
+        </Q>
+        <Q label="Character direction">
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. playful teal cat chef, simple rounded shapes"
+          />
+        </Q>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <FilePick
+          accept="image/*"
+          label="Upload mascot"
+          busy={busy || upsert.isPending}
+          onFiles={upload}
+        />
+        <Button
+          variant="outline"
+          disabled={generate.isPending}
+          onClick={() =>
+            generate.mutate(
+              {
+                brandId: brand.id,
+                name: name.trim() || undefined,
+                description: description.trim() || undefined,
+              },
+              {
+                onSuccess: (res) => setCandidateId(res.generationId),
+                onError: (e) => setError(e.message),
+              },
+            )
+          }
+        >
+          {generate.isPending ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            <Sparkles />
+          )}
+          Generate mascot
+        </Button>
+      </div>
+      {candidateId && (
+        <div className="rounded-lg border p-3">
+          {candidate.data?.status === "completed" && candidateUrl ? (
+            <div className="flex items-start gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={candidateUrl}
+                alt="Generated mascot candidate"
+                className="h-28 w-28 rounded-lg border object-cover"
+              />
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Review the character, then save it as the brand's canonical
+                  mascot.
+                </p>
+                <Button
+                  size="sm"
+                  disabled={upsert.isPending}
+                  onClick={() => saveUrl(candidateUrl)}
+                >
+                  {upsert.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Check />
+                  )}
+                  Use as mascot
+                </Button>
+              </div>
+            </div>
+          ) : candidate.data?.status === "failed" ? (
+            <p className="text-xs text-destructive">
+              {candidate.data.error ?? "Mascot generation failed"}
+            </p>
+          ) : (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Generating mascot candidate…
+            </p>
+          )}
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </Section>
+  );
+}
+
+function CampaignSection({ brand }: { brand: BrandDto }) {
+  const plans = useCampaignPlans(brand.id);
+  const create = useCreateCampaignPlan();
+  const updatePlan = useUpdateCampaignPlan();
+  const updatePost = useUpdateCampaignPost();
+  const [days, setDays] = useState(7);
+  const [platform, setPlatform] = useState("Instagram");
+  const [instructions, setInstructions] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [startAt, setStartAt] = useState(() => {
+    const date = new Date(Date.now() + 86_400_000);
+    date.setMinutes(0, 0, 0);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  });
+
+  const submit = () => {
+    setError(null);
+    create.mutate(
+      {
+        brandId: brand.id,
+        startAt: new Date(startAt).toISOString(),
+        days,
+        platform,
+        instructions: instructions.trim() || undefined,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      { onError: (e) => setError(e.message) },
+    );
+  };
+
+  return (
+    <Section
+      title="Content calendar autopilot"
+      hint="Creates dated draft posts and images on schedule. Approving a draft never publishes it — you still export or post it yourself."
+    >
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Q label="First post">
+          <Input
+            type="datetime-local"
+            value={startAt}
+            onChange={(e) => setStartAt(e.target.value)}
+          />
+        </Q>
+        <Q label="Days">
+          <Input
+            type="number"
+            min={1}
+            max={14}
+            value={days}
+            onChange={(e) =>
+              setDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))
+            }
+          />
+        </Q>
+        <Q label="Platform">
+          <Input value={platform} onChange={(e) => setPlatform(e.target.value)} />
+        </Q>
+        <div className="flex items-end">
+          <Button
+            onClick={submit}
+            disabled={create.isPending || !startAt || !platform.trim()}
+          >
+            {create.isPending ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <CalendarClock />
+            )}
+            Create drafts
+          </Button>
+        </div>
+      </div>
+      <Q label="Autopilot instructions">
+        <Textarea
+          rows={2}
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          placeholder="e.g. Focus on weekday offers, local pickup, and festival posts when verified."
+        />
+      </Q>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {(plans.data ?? []).map((plan) => (
+        <div key={plan.id} className="rounded-lg border">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">{plan.title}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {plan.posts.length} drafts · {plan.timezone}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {plan.posts.some((post) => post.status === "scheduled") && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={updatePlan.isPending}
+                  onClick={() =>
+                    updatePlan.mutate({ planId: plan.id, action: "generate_all" })
+                  }
+                >
+                  {updatePlan.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Wand2 />
+                  )}
+                  Generate all now
+                </Button>
+              )}
+              <Badge variant="outline">{plan.status}</Badge>
+            </div>
+          </div>
+          <div className="divide-y">
+            {plan.posts.map((post) => (
+              <div key={post.id} className="flex gap-3 px-3 py-3">
+                {post.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={post.imageUrl}
+                    alt={post.prompt}
+                    className="h-20 w-20 rounded-md border object-cover"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-md border bg-accent/30">
+                    {post.status === "generating" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Wand2 className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-medium">
+                      {new Date(post.scheduledFor).toLocaleString()}
+                    </p>
+                    <Badge variant="outline" className="text-[10px]">
+                      {post.platform ?? "post"}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      {post.status.replaceAll("_", " ")}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {post.caption ?? post.prompt}
+                  </p>
+                  {post.error && (
+                    <p className="mt-1 text-[11px] text-destructive">{post.error}</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {post.status === "scheduled" && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={updatePost.isPending}
+                        onClick={() =>
+                          updatePost.mutate({
+                            postId: post.id,
+                            action: "generate_now",
+                          })
+                        }
+                      >
+                        <Wand2 /> Generate now
+                      </Button>
+                    )}
+                    {post.status === "ready_for_review" && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={updatePost.isPending}
+                        onClick={() =>
+                          updatePost.mutate({ postId: post.id, action: "approve" })
+                        }
+                      >
+                        <Check /> Approve draft
+                      </Button>
+                    )}
+                    {["scheduled", "ready_for_review", "failed"].includes(
+                      post.status,
+                    ) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={updatePost.isPending}
+                        onClick={() =>
+                          updatePost.mutate({ postId: post.id, action: "cancel" })
+                        }
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {["failed", "cancelled"].includes(post.status) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={updatePost.isPending}
+                        onClick={() =>
+                          updatePost.mutate({ postId: post.id, action: "retry" })
+                        }
+                      >
+                        Retry now
+                      </Button>
+                    )}
+                    {post.caption && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(post.caption!);
+                          setCopiedId(post.id);
+                          setTimeout(() => setCopiedId(null), 1500);
+                        }}
+                      >
+                        {copiedId === post.id ? <Check /> : <Copy />}
+                        {copiedId === post.id ? "Copied" : "Copy caption"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </Section>
   );
 }

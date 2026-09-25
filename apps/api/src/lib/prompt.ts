@@ -12,6 +12,15 @@ import { env } from "../env.js";
  */
 export const DEFAULT_PROMPT_TEMPLATE = `Create a high-quality, polished image based on the following description. Compose it like a professional designer or photographer would: clear subject, intentional lighting, clean composition. If the request includes text, render it crisply and spell it exactly as given.`;
 
+/**
+ * Appended to every campaign creative prompt (interactive + autopilot). The
+ * planner asks for this too, but restating it in the final image prompt keeps
+ * it from being diluted by the brief's wording — this is what stops the model
+ * defaulting to a dark scrim panel behind text.
+ */
+export const CAMPAIGN_CREATIVE_STYLE =
+  "\nHard style rules: bright, even lighting and a light, clean background; no dark panels, gradients, smoke, vignettes or scrims anywhere; every on-image word sits on a light, uncluttered area with strong contrast and is spelled exactly as written.";
+
 export function buildFinalPrompt(
   theme: Pick<Theme, "promptTemplate" | "styleGuide"> | null,
   prompt: string,

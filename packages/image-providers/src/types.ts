@@ -1,4 +1,9 @@
-import type { ImageSize, ProviderName, Quality } from "@catgpt/types";
+import type {
+  ImageEditOperation,
+  ImageSize,
+  ProviderName,
+  Quality,
+} from "@catgpt/types";
 
 /** "draft" = fresh generation (flare), "edit" = iterate on a reference (sunburst). */
 export type GenerationMode = "draft" | "edit";
@@ -11,6 +16,11 @@ export interface GenerateParams {
   /** All reference images (first == referenceImageUrl). Providers that only
    * accept one image use the first. */
   referenceImageUrls?: string[];
+  /** Structured edit request metadata; masked operations require a provider
+   * that accepts an explicit mask. */
+  operation?: ImageEditOperation;
+  /** Optional uploaded PNG mask; transparent pixels mark the editable area. */
+  maskImageUrl?: string;
   quality?: Quality;
   size?: ImageSize;
   n?: number;

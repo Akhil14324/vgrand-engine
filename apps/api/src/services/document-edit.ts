@@ -26,7 +26,7 @@ export const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /** Latin-1 plus common typographic punctuation — what pdfkit's built-in fonts can draw. */
-const PDF_SAFE_TEXT = /^[\t\n\r -~ -ÿ–—‘-”•…€]*$/;
+const PDF_SAFE_TEXT = /^[\t\n\r -~\u00a0-\u00ff–—‘-”•…€]*$/;
 
 const SECTION_CHARS = 14_000;
 

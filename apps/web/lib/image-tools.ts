@@ -57,6 +57,34 @@ export async function resizeCover(
   return toBlob(canvas);
 }
 
+export async function imageDimensions(url: string) {
+  const img = await load(url);
+  const size = { width: img.width, height: img.height };
+  img.close();
+  return size;
+}
+
+/** Put the source on a larger transparent canvas without cropping it. */
+export async function outpaintContain(
+  url: string,
+  w: number,
+  h: number,
+): Promise<Blob> {
+  const img = await load(url);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available");
+  ctx.imageSmoothingQuality = "high";
+  const scale = Math.min(w / img.width, h / img.height);
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  img.close();
+  return toBlob(canvas);
+}
+
 /** Enlarge by `factor` (default 2x), capped so the long side stays <= 4096. */
 export async function enlarge(url: string, factor = 2): Promise<Blob> {
   const img = await load(url);

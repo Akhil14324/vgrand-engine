@@ -10,6 +10,7 @@ export type Quality = (typeof QUALITIES)[number];
 
 export const IMAGE_SIZES = [
   "auto",
+  "1088x1360",
   "1024x1024",
   "1024x1536",
   "1536x1024",
@@ -33,6 +34,44 @@ export type GenerationKind = (typeof GENERATION_KINDS)[number];
 
 export const DOCUMENT_STATUSES = ["processing", "ready", "failed"] as const;
 export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
+
+export const BRAND_VOICE_STATUSES = ["enrolling", "ready", "failed"] as const;
+export type BrandVoiceStatus = (typeof BRAND_VOICE_STATUSES)[number];
+
+export const BRAND_VOICE_CONSENT_TYPES = [
+  "own_voice",
+  "authorized_voice",
+] as const;
+export type BrandVoiceConsentType = (typeof BRAND_VOICE_CONSENT_TYPES)[number];
+
+export const IMAGE_EDIT_OPERATIONS = [
+  "edit",
+  "inpaint",
+  "outpaint",
+  "remove_background",
+  "upscale",
+] as const;
+export type ImageEditOperation = (typeof IMAGE_EDIT_OPERATIONS)[number];
+
+export const APPROVAL_STATUSES = [
+  "pending",
+  "approved",
+  "changes_requested",
+] as const;
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+export const CAMPAIGN_PLAN_STATUSES = ["active", "paused", "completed"] as const;
+export type CampaignPlanStatus = (typeof CAMPAIGN_PLAN_STATUSES)[number];
+
+export const CAMPAIGN_POST_STATUSES = [
+  "scheduled",
+  "generating",
+  "ready_for_review",
+  "approved",
+  "failed",
+  "cancelled",
+] as const;
+export type CampaignPostStatus = (typeof CAMPAIGN_POST_STATUSES)[number];
 
 /* ---------------------------------- DTOs ---------------------------------- */
 
@@ -162,6 +201,60 @@ export interface PublicShareDto {
   createdAt: string;
 }
 
+export interface ApprovalLinkDto {
+  id: string;
+  generationId: string;
+  token: string;
+  url: string;
+  status: ApprovalStatus;
+  reviewerName: string | null;
+  reviewerEmail: string | null;
+  comment: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  respondedAt: string | null;
+  createdAt: string;
+}
+
+/** Public, unauthenticated client-review view returned by GET /approvals/:token. */
+export interface PublicApprovalDto {
+  prompt: string;
+  imageUrls: string[];
+  status: ApprovalStatus;
+  reviewerName: string | null;
+  comment: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface CampaignPostDto {
+  id: string;
+  planId: string;
+  generationId: string | null;
+  scheduledFor: string;
+  platform: string | null;
+  prompt: string;
+  caption: string | null;
+  status: CampaignPostStatus;
+  error: string | null;
+  approvedAt: string | null;
+  imageUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CampaignPlanDto {
+  id: string;
+  brandId: string;
+  conversationId: string | null;
+  title: string;
+  status: CampaignPlanStatus;
+  timezone: string;
+  posts: CampaignPostDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 /* ------------------------------ request bodies ----------------------------- */
 
 export const createGenerationSchema = z.object({
@@ -192,10 +285,54 @@ export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;
 export const regenerateGenerationSchema = z.object({
   prompt: z.string().min(1).max(4000).optional(),
   quality: z.enum(QUALITIES).optional(),
+  size: z.enum(IMAGE_SIZES).optional(),
+  /** Structured image-edit primitive; plain "edit" preserves current behavior. */
+  operation: z.enum(IMAGE_EDIT_OPERATIONS).optional(),
+  /** Optional uploaded replacement base (used by outpaint's expanded canvas). */
+  referenceImageUrl: z.string().url().optional(),
+  /** Uploaded PNG mask for inpainting; transparent pixels mark the edit area. */
+  maskImageUrl: z.string().url().optional(),
 });
 export type RegenerateGenerationRequest = z.infer<
   typeof regenerateGenerationSchema
 >;
+
+export const createApprovalLinkSchema = z.object({
+  reviewerName: z.string().max(120).optional(),
+  reviewerEmail: z.string().email().max(200).optional(),
+  expiresInDays: z.number().int().min(1).max(30).optional(),
+});
+export type CreateApprovalLinkRequest = z.infer<typeof createApprovalLinkSchema>;
+
+export const approvalResponseSchema = z.object({
+  action: z.enum(["approve", "request_changes"]),
+  reviewerName: z.string().max(120).optional(),
+  comment: z.string().max(2000).optional(),
+});
+export type ApprovalResponseRequest = z.infer<typeof approvalResponseSchema>;
+
+export const createCampaignPlanSchema = z.object({
+  brandId: z.string().uuid(),
+  conversationId: z.string().uuid().optional(),
+  title: z.string().min(1).max(120).optional(),
+  /** ISO timestamp for the first post; subsequent posts are one day apart. */
+  startAt: z.string().datetime(),
+  days: z.number().int().min(1).max(14).default(7),
+  platform: z.string().min(1).max(60).default("Instagram"),
+  instructions: z.string().max(1600).optional(),
+  timezone: z.string().min(1).max(80).optional(),
+});
+export type CreateCampaignPlanRequest = z.infer<typeof createCampaignPlanSchema>;
+
+export const updateCampaignPostSchema = z.object({
+  action: z.enum(["approve", "cancel", "retry", "generate_now"]),
+});
+export type UpdateCampaignPostRequest = z.infer<typeof updateCampaignPostSchema>;
+
+export const updateCampaignPlanSchema = z.object({
+  action: z.enum(["generate_all"]),
+});
+export type UpdateCampaignPlanRequest = z.infer<typeof updateCampaignPlanSchema>;
 
 export const createThemeSchema = z.object({
   slug: z
@@ -309,10 +446,19 @@ export const brandProfileSchema = z.object({
   colors: z.array(hexColor).max(6).optional(),
   tagline: z.string().max(160).optional(),
   tone: z.string().max(300).optional(),
+  typography: z.string().max(300).optional(),
+  visualStyle: z.string().max(300).optional(),
+  photographyStyle: z.string().max(300).optional(),
+  logoRules: z.string().max(500).optional(),
+  requiredPhrases: z.array(z.string().max(120)).max(8).optional(),
+  forbiddenWords: z.array(z.string().max(60)).max(20).optional(),
+  forbiddenClaims: z.array(z.string().max(160)).max(20).optional(),
+  defaultCta: z.string().max(160).optional(),
+  contentLanguages: z.array(z.string().max(40)).max(4).optional(),
 });
 export type BrandProfile = z.infer<typeof brandProfileSchema>;
 
-export const BRAND_ASSET_KINDS = ["logo", "product", "reference"] as const;
+export const BRAND_ASSET_KINDS = ["logo", "product", "mascot", "reference"] as const;
 export type BrandAssetKind = (typeof BRAND_ASSET_KINDS)[number];
 
 export const createBrandSchema = z.object({
@@ -343,6 +489,53 @@ export interface BrandAssetDto {
   kind: BrandAssetKind;
   url: string;
   label: string | null;
+}
+
+export interface BrandMascotDto {
+  id: string;
+  brandId: string;
+  assetId: string;
+  url: string;
+  name: string;
+  description: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const upsertBrandMascotSchema = z.object({
+  url: z.string().url(),
+  name: z.string().min(1).max(80),
+  description: z.string().min(1).max(1200),
+});
+export type UpsertBrandMascotRequest = z.infer<typeof upsertBrandMascotSchema>;
+
+export const generateBrandMascotSchema = z.object({
+  name: z.string().max(80).optional(),
+  description: z.string().max(1200).optional(),
+  prompt: z.string().max(1600).optional(),
+  quality: z.enum(QUALITIES).optional(),
+});
+export type GenerateBrandMascotRequest = z.infer<typeof generateBrandMascotSchema>;
+
+/**
+ * Client-safe view of a brand's saved voice. Deliberately excludes the private
+ * storage key, any filesystem path or object/signed URL, and consent secrets.
+ */
+export interface BrandVoiceDto {
+  id: string;
+  brandId: string;
+  /** Language the sample was read in — adapter-reported code (e.g. "te"). */
+  sampleLanguage: string;
+  /** Exact script the speaker read, shown when reviewing/re-recording. */
+  scriptText: string;
+  status: BrandVoiceStatus;
+  enrolledAt: string | null;
+  /** Sanitized diagnostic only — never a raw provider error. */
+  lastSynthesisError: string | null;
+  lastSynthesisErrorAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Plain arithmetic on the user's own numbers — no benchmarks, no guesses. */
@@ -405,6 +598,9 @@ export interface BrandDto {
   profile: BrandProfile;
   snapshot: BrandSnapshot;
   assets: BrandAssetDto[];
+  mascot: BrandMascotDto | null;
+  /** Present when the endpoint includes it; null = no saved voice yet. */
+  voice?: BrandVoiceDto | null;
   documentCount: number;
   createdAt: string;
   updatedAt: string;

@@ -7,13 +7,20 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  ApprovalLinkDto,
   BrandAssetDto,
   BrandDto,
+  BrandMascotDto,
+  BrandVoiceDto,
+  CampaignPlanDto,
   ConversationDto,
+  CreateApprovalLinkRequest,
   CreateBrandAssetRequest,
   CreateBrandRequest,
+  CreateCampaignPlanRequest,
   CreateGenerationRequest,
   DocumentDto,
+  GenerateBrandMascotRequest,
   GenerationDto,
   GenerationKind,
   MemoryDto,
@@ -28,11 +35,15 @@ import type {
   SocialPreviewsDto,
   ThemeDto,
   UpdateBrandRequest,
+  UpdateCampaignPlanRequest,
+  UpdateCampaignPostRequest,
   UpdateConversationRequest,
+  UpsertBrandMascotRequest,
   WorkspaceDetailDto,
   WorkspaceDto,
 } from "@catgpt/types";
 import {
+  ApiRequestError,
   SOCIAL_CHANNEL,
   SOCIAL_CONNECT_WINDOW,
   apiFetch,
@@ -80,6 +91,11 @@ export function useGeneration(id: string | null) {
     queryKey: ["generation", id],
     queryFn: () => apiFetch<GenerationDto>(`/generations/${id}`),
     enabled: Boolean(id),
+    refetchInterval: (query) =>
+      query.state.data?.status === "pending" ||
+      query.state.data?.status === "processing"
+        ? 2000
+        : false,
   });
 }
 
@@ -297,6 +313,56 @@ export function useShareGeneration() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<ShareLinkDto>(`/share/${id}`, { method: "POST" }),
+  });
+}
+
+export function useGenerationApprovals(
+  generationId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["approvals", generationId],
+    enabled: !!generationId && enabled,
+    queryFn: () =>
+      apiFetch<{ items: ApprovalLinkDto[] }>(
+        `/generations/${generationId}/approvals`,
+      ),
+    select: (d) => d.items,
+  });
+}
+
+export function useCreateApprovalLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      generationId,
+      ...body
+    }: CreateApprovalLinkRequest & { generationId: string }) =>
+      apiFetch<ApprovalLinkDto>(`/generations/${generationId}/approvals`, {
+        method: "POST",
+        json: body,
+      }),
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ["approvals", v.generationId] }),
+  });
+}
+
+export function useRevokeApprovalLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      generationId,
+      approvalId,
+    }: {
+      generationId: string;
+      approvalId: string;
+    }) =>
+      apiFetch<void>(
+        `/generations/${generationId}/approvals/${approvalId}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ["approvals", v.generationId] }),
   });
 }
 
@@ -525,6 +591,127 @@ export function useDeleteBrandAsset() {
   });
 }
 
+export function useGenerateBrandMascot() {
+  return useMutation({
+    mutationFn: ({
+      brandId,
+      ...body
+    }: GenerateBrandMascotRequest & { brandId: string }) =>
+      apiFetch<{ generationId: string; status: string }>(
+        `/brands/${brandId}/mascot/generate`,
+        { method: "POST", json: body },
+      ),
+  });
+}
+
+export function useUpsertBrandMascot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      brandId,
+      ...body
+    }: UpsertBrandMascotRequest & { brandId: string }) =>
+      apiFetch<BrandMascotDto>(`/brands/${brandId}/mascot`, {
+        method: "PUT",
+        json: body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+export function useDeleteBrandMascot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (brandId: string) =>
+      apiFetch<void>(`/brands/${brandId}/mascot`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+/* ------------------------------- brand voice ------------------------------ */
+
+export interface BrandVoiceInfo {
+  voice: BrandVoiceDto | null;
+  /** Languages with a verified enrollment script (server-reported). */
+  languages: string[];
+  /** Languages the saved voice can synthesize (server-reported). */
+  speakLanguages: string[];
+}
+
+/**
+ * Owner-only voice metadata. A workspace member (or missing voice service
+ * permission) gets a 404 from the API — surfaced here as "no voice", which is
+ * exactly what the UI should show.
+ */
+export function useBrandVoice(brandId: string | null) {
+  return useQuery({
+    queryKey: ["brand-voice", brandId],
+    enabled: !!brandId,
+    staleTime: 30_000,
+    retry: false,
+    queryFn: () =>
+      apiFetch<BrandVoiceInfo>(`/brands/${brandId}/voice`).catch((e) => {
+        if (e instanceof ApiRequestError && e.status === 404) {
+          return { voice: null, languages: [], speakLanguages: [] };
+        }
+        throw e;
+      }),
+  });
+}
+
+export function useBrandVoiceScript(brandId: string | null, language: string | null) {
+  return useQuery({
+    queryKey: ["brand-voice-script", brandId, language],
+    enabled: !!brandId && !!language,
+    staleTime: 300_000,
+    queryFn: () =>
+      apiFetch<{ language: string; text: string }>(
+        `/brands/${brandId}/voice/script?language=${encodeURIComponent(language!)}`,
+      ),
+  });
+}
+
+export function useSaveBrandVoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      brandId,
+      ...fields
+    }: {
+      brandId: string;
+      file: Blob;
+      language: string;
+      consentType: string;
+    }) => {
+      const form = new FormData();
+      form.append("language", fields.language);
+      form.append("consent", "true");
+      form.append("consentType", fields.consentType);
+      form.append("file", fields.file, "voice.wav");
+      return apiFetch<BrandVoiceDto>(`/brands/${brandId}/voice`, {
+        method: "POST",
+        body: form,
+      });
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["brand-voice", v.brandId] });
+      qc.invalidateQueries({ queryKey: ["brands"] });
+    },
+  });
+}
+
+export function useDeleteBrandVoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (brandId: string) =>
+      apiFetch<void>(`/brands/${brandId}/voice`, { method: "DELETE" }),
+    onSuccess: (_d, brandId) => {
+      qc.invalidateQueries({ queryKey: ["brand-voice", brandId] });
+      qc.invalidateQueries({ queryKey: ["brands"] });
+    },
+  });
+}
+
 /** Documents in a brand's knowledge base; polls while any is still ingesting. */
 export function useBrandDocuments(brandId: string | null) {
   return useQuery({
@@ -649,6 +836,31 @@ export function useSocialPosts(generationId: string, enabled: boolean) {
   });
 }
 
+/* ------------------------------ campaign plans ----------------------------- */
+
+export function useCampaignPlans(brandId: string | null) {
+  return useQuery({
+    queryKey: ["campaigns", brandId],
+    enabled: !!brandId,
+    queryFn: () =>
+      apiFetch<{ items: CampaignPlanDto[] }>(
+        `/campaigns?brandId=${encodeURIComponent(brandId!)}`,
+      ),
+    select: (d) => d.items,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((plan) =>
+        plan.posts.some(
+          (post) =>
+            post.status === "generating" ||
+            (post.status === "scheduled" &&
+              new Date(post.scheduledFor).getTime() <= Date.now() + 120_000),
+        ),
+      )
+        ? 5000
+        : false,
+  });
+}
+
 export function useRetrySocialPost(generationId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -732,4 +944,69 @@ export function useSocialConnectReturn() {
   }, [notice]);
 
   return notice;
+}
+
+export function useCreateCampaignPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateCampaignPlanRequest) =>
+      apiFetch<CampaignPlanDto>("/campaigns", {
+        method: "POST",
+        json: body,
+      }),
+    onSuccess: (plan) =>
+      qc.invalidateQueries({ queryKey: ["campaigns", plan.brandId] }),
+  });
+}
+
+export function useUpdateCampaignPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      planId,
+      ...body
+    }: UpdateCampaignPlanRequest & { planId: string }) =>
+      apiFetch<CampaignPlanDto>(`/campaigns/${planId}`, {
+        method: "PATCH",
+        json: body,
+      }),
+    onSuccess: (plan) =>
+      qc.setQueryData<{ items: CampaignPlanDto[] }>(
+        ["campaigns", plan.brandId],
+        (cur) =>
+          cur
+            ? {
+                items: cur.items.map((item) =>
+                  item.id === plan.id ? plan : item,
+                ),
+              }
+            : cur,
+      ),
+  });
+}
+
+export function useUpdateCampaignPost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      postId,
+      ...body
+    }: UpdateCampaignPostRequest & { postId: string }) =>
+      apiFetch<CampaignPlanDto>(`/campaign-posts/${postId}`, {
+        method: "PATCH",
+        json: body,
+      }),
+    onSuccess: (plan) =>
+      qc.setQueryData<{ items: CampaignPlanDto[] }>(
+        ["campaigns", plan.brandId],
+        (cur) =>
+          cur
+            ? {
+                items: cur.items.map((item) =>
+                  item.id === plan.id ? plan : item,
+                ),
+              }
+            : cur,
+      ),
+  });
 }

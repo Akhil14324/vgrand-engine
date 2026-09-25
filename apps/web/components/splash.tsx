@@ -31,7 +31,11 @@ export function Splash() {
     const t = setTimeout(() => {
       if (!started.current) setFading(true);
     }, 2500);
-    return () => clearTimeout(t);
+    const max = setTimeout(() => setFading(true), 8000);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(max);
+    };
   }, [ready]);
 
   useEffect(() => {

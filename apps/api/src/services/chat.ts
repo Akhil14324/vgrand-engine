@@ -39,8 +39,10 @@ export async function loadChatHistory(
   // the user said - keeping them would bloat and confuse the model's context.
   return rows
     .filter(
-      (r) =>
-        !(r.metadata as Record<string, unknown> | null)?.campaignCreative,
+      (r) => {
+        const metadata = r.metadata as Record<string, unknown> | null;
+        return !metadata?.campaignCreative && !metadata?.campaignDraft;
+      },
     )
     .slice(0, take)
     .reverse()
@@ -117,6 +119,10 @@ export function userContent(
   ];
 }
 
+export function isImageCaptionRequest(prompt: string): boolean {
+  return /\b(?:captions?|hashtags?|alt text|social media copy)\b|(?:క్యాప్షన్|క్యాప్షన్లు|శీర్షిక|హ్యాష్.?ట్యాగ్|వివరించు)/i.test(prompt);
+}
+
 const CLASSIFY_SYSTEM = `You classify messages sent to CatGPT, an AI image-generation studio. Reply with exactly one word: IMAGE or CHAT.
 
 IMAGE: the user wants an image created or edited — poster, logo, scene, artwork, UI mock, photo — including follow-ups like "make it darker" or "same but at night" when the conversation already produced images.
@@ -137,6 +143,9 @@ export async function classifyIntent(
   history: HistoryTurn[],
   opts: { hasImage?: boolean } = {},
 ): Promise<GenerationKind> {
+  if (opts.hasImage && isImageCaptionRequest(prompt)) {
+    return "text";
+  }
   if (jevConfigured()) {
     try {
       // State is an array of text turns, most recent last — capped so a long
@@ -152,7 +161,7 @@ export async function classifyIntent(
         intent: {
           type: "choice",
           instructions: opts.hasImage
-            ? "Classify the user's latest message for CatGPT, an AI image-generation studio. The user attached an image: questions ABOUT the image (what is it, what is wrong with it, describe/read/analyze/compare it, give feedback) are chat; requests to CHANGE or build on it (edit, restyle, remove or add something, make a poster/variation from it) are image."
+            ? "Classify the user's latest message for CatGPT, an AI image-generation studio. The user attached an image: requests for captions, hashtags, alt text, or social-media copy about the image, and questions ABOUT the image (what is it, what is wrong with it, describe/read/analyze/compare it, give feedback) are chat; requests to CHANGE or build on it (edit, restyle, remove or add something, make a poster/variation from it) are image."
             : "Classify the user's latest message for CatGPT, an AI image-generation studio.",
           criteria: {
             image:
@@ -181,7 +190,7 @@ export async function classifyIntent(
         {
           role: "system",
           content: opts.hasImage
-            ? `${CLASSIFY_SYSTEM}\n\nThe user attached an image to this message. Questions ABOUT the image (what is it, what is wrong with it, describe/read/analyze/compare it, give feedback) are CHAT. Requests to CHANGE or build on it (edit, restyle, remove or add something, make a poster/variation from it) are IMAGE.`
+            ? `${CLASSIFY_SYSTEM}\n\nThe user attached an image to this message. Requests for captions, hashtags, alt text, or social-media copy about the image, and questions ABOUT the image (what is it, what is wrong with it, describe/read/analyze/compare it, give feedback) are CHAT. Requests to CHANGE or build on it (edit, restyle, remove or add something, make a poster/variation from it) are IMAGE.`
             : CLASSIFY_SYSTEM,
         },
         ...toMessages(history),

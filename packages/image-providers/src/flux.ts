@@ -94,6 +94,8 @@ export class FluxProvider implements ImageProvider {
 
 function toDimensions(size?: string): { width: number; height: number } {
   switch (size) {
+    case "1088x1360":
+      return { width: 1088, height: 1360 };
     case "1024x1536":
       return { width: 1024, height: 1536 };
     case "1536x1024":

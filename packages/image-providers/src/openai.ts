@@ -117,11 +117,15 @@ export class OpenAIImageProvider implements ImageProvider {
       if (params.mode === "edit" && refs.length > 0) {
         const files = await Promise.all(refs.map(fetchImageFile));
         const image = files.length === 1 ? files[0]! : files;
+        const mask = params.maskImageUrl
+          ? await fetchImageFile(params.maskImageUrl)
+          : undefined;
         const res = await client.images.edit({
           model,
           image,
+          ...(mask ? { mask } : {}),
           prompt: params.prompt,
-          size: size === "auto" ? undefined : size,
+          size: size === "auto" ? undefined : (size as never),
           quality,
         });
         return {
@@ -139,7 +143,7 @@ export class OpenAIImageProvider implements ImageProvider {
             model,
             prompt: params.prompt,
             n: params.n ?? 1,
-            size: size === "auto" ? undefined : size,
+            size: size === "auto" ? undefined : (size as never),
             quality,
             stream: true,
             partial_images: 2,
@@ -175,7 +179,7 @@ export class OpenAIImageProvider implements ImageProvider {
         model,
         prompt: params.prompt,
         n: params.n ?? 1,
-        size: size === "auto" ? undefined : size,
+        size: size === "auto" ? undefined : (size as never),
         quality,
         moderation: "low",
       });

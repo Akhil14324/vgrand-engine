@@ -261,6 +261,11 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
             </div>
           </div>
         )}
+        {image && creative && generation.textResponse && (
+          <div className="w-full max-w-md rounded-xl border bg-card p-4">
+            <Markdown>{generation.textResponse}</Markdown>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <ActionRow generation={generation} />
