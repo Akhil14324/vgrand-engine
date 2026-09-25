@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, FileText, Globe, Loader2, Square, Store, X } from "lucide-react";
 import type { GenerationDto, WebSource } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
@@ -16,12 +16,48 @@ import { SourceChips } from "./source-chips";
  * (left) — an image for kind="image", a text bubble for kind="text".
  * Images open a lightbox on click.
  */
+/**
+ * Smooth reveal for streamed replies. Deltas arrive in ~60ms bursts which
+ * reads as chunky jumps — this eases the rendered text toward the full
+ * target a few characters per frame, catching up faster the further behind
+ * it is. Once the turn finishes it snaps to the complete text.
+ */
+function useSmoothReveal(text: string, active: boolean): string {
+  const targetRef = useRef(text);
+  targetRef.current = text;
+  const [shown, setShown] = useState<number | null>(null); // null = fully shown
+
+  useEffect(() => {
+    if (!active) {
+      setShown(null);
+      return;
+    }
+    setShown((s) => s ?? 0);
+    const id = setInterval(() => {
+      setShown((s) => {
+        const cur = s ?? 0;
+        const target = targetRef.current.length;
+        if (cur >= target) return cur; // React bails on identical state
+        const step = Math.max(3, Math.ceil((target - cur) / 14));
+        return Math.min(target, cur + step);
+      });
+    }, 16);
+    return () => clearInterval(id);
+  }, [active]);
+
+  return active && shown !== null ? text.slice(0, shown) : text;
+}
+
 export function ChatTurn({ generation }: { generation: GenerationDto }) {
   const { select, selectedId } = useStudio();
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const inFlight =
     generation.status === "pending" || generation.status === "processing";
   useGenerationStream(generation.id, inFlight);
+  const shownText = useSmoothReveal(
+    generation.textResponse ?? "",
+    inFlight && generation.kind === "text",
+  );
 
   const image = generation.imageUrls[0];
   const meta = (generation.metadata ?? {}) as Record<string, unknown>;
@@ -129,7 +165,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
         ) : generation.kind === "text" ? (
           generation.textResponse ? (
             <div className="max-w-[85%] sm:max-w-[75%]">
-              <Markdown>{generation.textResponse}</Markdown>
+              <Markdown>{shownText}</Markdown>
               {inFlight && (
                 <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary/70 align-text-bottom" />
               )}

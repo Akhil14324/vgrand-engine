@@ -314,8 +314,10 @@ export async function runGeneration(generationId: string): Promise<void> {
           });
       // One lookup serves both the RAG scope and the chat mode below —
       // a workspace conversation pulls every workspace doc and switches
-      // to the grounded "analyze the workspace" system prompt.
-      const [history, conversation] = await Promise.all([
+      // to the grounded "analyze the workspace" system prompt. The brand
+      // context rides the same Promise.all instead of waiting its turn.
+      const brandId = typeof meta.brandId === "string" ? meta.brandId : null;
+      const [history, conversation, brand] = await Promise.all([
         generation.conversationId
           ? loadChatHistory(generation.conversationId, generation.id)
           : Promise.resolve([]),
@@ -325,14 +327,9 @@ export async function runGeneration(generationId: string): Promise<void> {
               select: { workspaceId: true },
             })
           : Promise.resolve(null),
+        brandId ? loadBrandContext(brandId, generation.userId) : null,
       ]);
       const workspaceId = conversation?.workspaceId ?? null;
-      // Brand mode (toggle on): the compact digest goes into the prompt and the
-      // brand's documents join retrieval. Toggle off = brandId absent = common answer.
-      const brandId = typeof meta.brandId === "string" ? meta.brandId : null;
-      const brand = brandId
-        ? await loadBrandContext(brandId, generation.userId)
-        : null;
       const brandSummary = brand?.summary?.trim() || null;
       // Pictures to look at (vision turn): the model answers about them.
       const visionImages = Array.isArray(meta.visionImageUrls)
@@ -348,11 +345,17 @@ export async function runGeneration(generationId: string): Promise<void> {
       // No Jev verdict = retrieve, exactly as before.
       // A doc attached seconds ago may still be ingesting — without this
       // wait retrieval skips it silently and the reply ignores the upload.
-      await waitForScopeIngestion({
-        conversationId: generation.conversationId,
-        workspaceId,
-        brandId: brand?.id ?? null,
-      }).catch(() => {});
+      // Only worth a DB query when the turn could actually have documents.
+      const attachedDocs = Array.isArray(meta.attachedDocuments)
+        ? meta.attachedDocuments
+        : [];
+      if (attachedDocs.length > 0 || workspaceId || brand) {
+        await waitForScopeIngestion({
+          conversationId: generation.conversationId,
+          workspaceId,
+          brandId: brand?.id ?? null,
+        }).catch(() => {});
+      }
       const scopeDocs = generation.conversationId
         ? await findScopeDocuments({
             conversationId: generation.conversationId,

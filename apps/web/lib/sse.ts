@@ -59,10 +59,17 @@ const pendingDeltas = new Map<string, string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function queueDelta(qc: QueryClient, generationId: string, delta: string) {
+  const firstOfBurst = pendingDeltas.size === 0 && !flushTimer;
   pendingDeltas.set(
     generationId,
     (pendingDeltas.get(generationId) ?? "") + delta,
   );
+  // The very first token renders immediately — perceived speed is
+  // time-to-first-token — then the rest of the burst batches per ~60ms.
+  if (firstOfBurst) {
+    flushDeltas(qc);
+    return;
+  }
   if (!flushTimer) {
     flushTimer = setTimeout(() => flushDeltas(qc), 60);
   }
