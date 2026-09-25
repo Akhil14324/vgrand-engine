@@ -33,6 +33,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { SocialShareButton } from "@/components/social-share";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -397,6 +398,7 @@ export function ActionRow({
         </Tooltip>
       )}
       {ready && <RegenerateButton generation={generation} />}
+      {ready && <SocialShareButton generation={generation} />}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

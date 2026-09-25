@@ -454,3 +454,129 @@ export const teamMessageSchema = z.object({
   body: z.string().trim().min(1).max(2000),
 });
 export const addMemberSchema = z.object({ email: z.string().email() });
+
+/* ---------------------------- social publishing ---------------------------- */
+
+export const SOCIAL_PLATFORMS = ["instagram", "facebook", "x", "youtube"] as const;
+export const socialPlatformSchema = z.enum(SOCIAL_PLATFORMS);
+export type SocialPlatform = z.infer<typeof socialPlatformSchema>;
+
+/** OAuth providers behind the platforms: Meta covers Instagram + Facebook. */
+export const SOCIAL_CONNECTORS = ["meta", "x", "youtube"] as const;
+export const socialConnectorSchema = z.enum(SOCIAL_CONNECTORS);
+export type SocialConnector = z.infer<typeof socialConnectorSchema>;
+
+export const SOCIAL_ACCOUNT_STATUSES = [
+  "active",
+  "expired",
+  "revoked",
+  "reauth_required",
+] as const;
+export type SocialAccountStatus = (typeof SOCIAL_ACCOUNT_STATUSES)[number];
+
+export const SOCIAL_POST_STATUSES = ["pending", "posting", "posted", "failed"] as const;
+export type SocialPostStatus = (typeof SOCIAL_POST_STATUSES)[number];
+
+export const SOCIAL_FAILURE_CODES = [
+  "AUTH_EXPIRED",
+  "AUTH_REVOKED",
+  "RATE_LIMITED",
+  "INVALID_MEDIA",
+  "INVALID_CONTENT",
+  "PROVIDER_ERROR",
+  "UNKNOWN",
+] as const;
+export type SocialFailureCode = (typeof SOCIAL_FAILURE_CODES)[number];
+
+/** Failures a retry can plausibly fix; everything else needs a new post/reconnect. */
+export const RETRYABLE_SOCIAL_FAILURES: readonly SocialFailureCode[] = [
+  "RATE_LIMITED",
+  "PROVIDER_ERROR",
+  "UNKNOWN",
+];
+
+export const X_MAX_CHARS = 280;
+
+/** Which connectors are configured server-side (true = credentials present). */
+export type SocialPlatformsDto = Record<SocialConnector, boolean>;
+
+/** Tokens are never part of this shape - see the API's toSocialAccountDto. */
+export interface SocialAccountDto {
+  id: string;
+  platform: SocialPlatform;
+  workspaceId: string | null;
+  handle: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  status: SocialAccountStatus;
+  /** Non-secret hints only, e.g. YouTube { visibility: "private" }. */
+  metadata: { visibility?: "private" | "public" } | null;
+}
+
+const trimmed = (max: number) => z.string().trim().min(1).max(max);
+
+export const socialPreviewSchema = z.object({
+  instagram: z
+    .object({
+      caption: z.string().trim().max(2200),
+      hashtags: z.array(z.string().trim().min(1).max(100)).max(30),
+    })
+    .optional(),
+  facebook: z.object({ caption: z.string().trim().max(5000) }).optional(),
+  x: z.object({ caption: z.string().trim().max(X_MAX_CHARS) }).optional(),
+  youtube: z
+    .object({
+      title: z.string().trim().max(100),
+      description: z.string().trim().max(5000),
+      tags: z.array(z.string().trim().min(1).max(100)).max(30),
+    })
+    .optional(),
+});
+export type SocialPreview = z.infer<typeof socialPreviewSchema>;
+export type SocialPreviewsDto = SocialPreview;
+
+export const socialPreviewRequestSchema = z.object({
+  platforms: z.array(socialPlatformSchema).min(1).max(4),
+});
+export type SocialPreviewRequest = z.infer<typeof socialPreviewRequestSchema>;
+
+/** What the user approved for one account. Shape is checked per platform server-side. */
+export const socialPostContentSchema = z.object({
+  caption: z.string().trim().max(5000).optional(),
+  hashtags: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
+  title: trimmed(100).optional(),
+  description: z.string().trim().max(5000).optional(),
+  tags: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
+});
+export type SocialPostContent = z.infer<typeof socialPostContentSchema>;
+
+export const socialPostRequestSchema = z.object({
+  accountId: z.string().uuid(),
+  content: socialPostContentSchema,
+});
+export type SocialPostRequest = z.infer<typeof socialPostRequestSchema>;
+
+export const socialPostCreateRequestSchema = z.object({
+  posts: z.array(socialPostRequestSchema).min(1).max(12),
+});
+export type SocialPostCreateRequest = z.infer<typeof socialPostCreateRequestSchema>;
+
+export interface SocialPostDto {
+  id: string;
+  generationId: string;
+  accountId: string;
+  platform: SocialPlatform;
+  accountHandle: string | null;
+  accountDisplayName: string | null;
+  accountStatus: SocialAccountStatus;
+  status: SocialPostStatus;
+  failureCode: SocialFailureCode | null;
+  error: string | null;
+  remoteUrl: string | null;
+  attemptCount: number;
+  /** YouTube posts stay private while the Google app is unverified. */
+  visibility: "private" | "public" | null;
+  retryable: boolean;
+  postedAt: string | null;
+  createdAt: string;
+}

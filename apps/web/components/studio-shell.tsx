@@ -14,7 +14,11 @@ import {
 import { useAuth } from "@/lib/auth";
 import { ChatMenu } from "@/components/chat-menu";
 import { PENDING_JOIN_KEY } from "@/lib/config";
-import { useConversation, useThemes } from "@/lib/hooks";
+import {
+  useConversation,
+  useSocialConnectReturn,
+  useThemes,
+} from "@/lib/hooks";
 import { useBrandMode } from "@/lib/brand-mode";
 import { THEME_ICONS } from "@/lib/theme-icons";
 import { useStudio } from "@/lib/store";
@@ -30,6 +34,7 @@ export function StudioShell() {
   const { activeConversationId, sidebarCollapsed, toggleSidebar, startNewChat } =
     useStudio();
   const { data: conversation } = useConversation(activeConversationId);
+  const socialNotice = useSocialConnectReturn();
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -64,6 +69,18 @@ export function StudioShell() {
   return (
     <div className="flex h-dvh overflow-hidden">
       <Sidebar />
+      {socialNotice && (
+        <div
+          role="status"
+          className={`fixed left-1/2 top-3 z-[60] -translate-x-1/2 rounded-md border px-3 py-2 text-sm shadow-lg ${
+            socialNotice.ok
+              ? "border-primary/40 bg-background text-foreground"
+              : "border-destructive/40 bg-background text-destructive"
+          }`}
+        >
+          {socialNotice.text}
+        </div>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Slim top bar — chat title centered, like ChatGPT's header */}

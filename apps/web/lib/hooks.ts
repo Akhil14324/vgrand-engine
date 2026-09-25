@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -19,13 +20,24 @@ import type {
   Paginated,
   RegenerateGenerationRequest,
   ShareLinkDto,
+  SocialAccountDto,
+  SocialPlatformsDto,
+  SocialPostContent,
+  SocialPostDto,
+  SocialPreviewRequest,
+  SocialPreviewsDto,
   ThemeDto,
   UpdateBrandRequest,
   UpdateConversationRequest,
   WorkspaceDetailDto,
   WorkspaceDto,
 } from "@catgpt/types";
-import { apiFetch } from "./api";
+import {
+  SOCIAL_CHANNEL,
+  SOCIAL_CONNECT_WINDOW,
+  apiFetch,
+  openSocialConnectPopup,
+} from "./api";
 
 /* --------------------------------- themes --------------------------------- */
 
@@ -526,4 +538,198 @@ export function useBrandDocuments(brandId: string | null) {
         ? 2000
         : false,
   });
+}
+
+/* ---------------------------- social publishing --------------------------- */
+
+const socialAccountsKey = (workspaceId: string | null) =>
+  ["social", "accounts", workspaceId ?? "personal"] as const;
+
+export function useSocialPlatforms() {
+  return useQuery({
+    queryKey: ["social", "platforms"],
+    queryFn: () => apiFetch<SocialPlatformsDto>("/social/platforms"),
+    staleTime: 60_000,
+  });
+}
+
+/** Accounts usable in this scope: the workspace's shared ones plus the user's own. */
+export function useSocialAccounts(workspaceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: socialAccountsKey(workspaceId),
+    enabled,
+    queryFn: () =>
+      apiFetch<{ items: SocialAccountDto[] }>(
+        `/social/accounts${workspaceId ? `?workspaceId=${workspaceId}` : ""}`,
+      ),
+    select: (d) => d.items,
+  });
+}
+
+/**
+ * Starts OAuth in a popup. The window is opened synchronously (popup blockers),
+ * then sent to the provider URL. Closing it - or the return page broadcasting a
+ * result - refreshes the account list. Falls back to a full-page redirect when
+ * popups are blocked.
+ */
+export function useConnectSocial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { platform: string; workspaceId: string | null }) => {
+      const popup = openSocialConnectPopup();
+      try {
+        const { url } = await apiFetch<{ url: string }>(
+          `/social/connect/${input.platform}${input.workspaceId ? `?workspaceId=${input.workspaceId}` : ""}`,
+        );
+        if (!popup) {
+          window.location.assign(url);
+          return;
+        }
+        popup.location.href = url;
+        const timer = window.setInterval(() => {
+          if (popup.closed) {
+            window.clearInterval(timer);
+            void qc.invalidateQueries({ queryKey: ["social", "accounts"] });
+          }
+        }, 800);
+      } catch (e) {
+        popup?.close();
+        throw e;
+      }
+    },
+  });
+}
+
+export function useDeleteSocialAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/social/accounts/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["social"] }),
+  });
+}
+
+export function useSocialPreview(generationId: string) {
+  return useMutation({
+    mutationFn: (body: SocialPreviewRequest) =>
+      apiFetch<SocialPreviewsDto>(`/generations/${generationId}/social-preview`, {
+        method: "POST",
+        json: body,
+      }),
+  });
+}
+
+export function useCreateSocialPosts(generationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (posts: { accountId: string; content: SocialPostContent }[]) =>
+      apiFetch<{ items: SocialPostDto[] }>(`/generations/${generationId}/social-posts`, {
+        method: "POST",
+        json: { posts },
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["social", "posts", generationId] }),
+  });
+}
+
+/** Polls every 2.5s while any post is pending/posting, then stops. */
+export function useSocialPosts(generationId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["social", "posts", generationId],
+    enabled,
+    queryFn: () =>
+      apiFetch<{ items: SocialPostDto[] }>(`/generations/${generationId}/social-posts`),
+    select: (d) => d.items,
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (p) => p.status === "pending" || p.status === "posting",
+      )
+        ? 2500
+        : false,
+  });
+}
+
+export function useRetrySocialPost(generationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (postId: string) =>
+      apiFetch<SocialPostDto>(`/social-posts/${postId}/retry`, { method: "POST" }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["social", "posts", generationId] }),
+  });
+}
+
+/**
+ * The OAuth return page lands on /?social=connected:{connector} or
+ * /?social=error:{code}. This reads and strips that param, tells the opener
+ * window (BroadcastChannel) and closes itself when it is the popup; the main
+ * window also listens, shows the notice and refreshes accounts.
+ */
+export function useSocialConnectReturn() {
+  const qc = useQueryClient();
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    const describe = (result: string) => {
+      const [kind, value = ""] = result.split(":");
+      if (kind === "connected") {
+        const names: Record<string, string> = {
+          meta: "Facebook / Instagram",
+          x: "X",
+          youtube: "YouTube",
+        };
+        return { ok: true, text: `${names[value] ?? "Account"} connected` };
+      }
+      const errors: Record<string, string> = {
+        access_denied: "Connection cancelled",
+        invalid_state: "That connection link expired - try again",
+        expired: "That connection link expired - try again",
+        consumed: "That connection link was already used - try again",
+        platform_mismatch: "Connection failed - try again",
+        no_pages: "No Facebook Pages were found for that login",
+        no_channel: "No YouTube channel was found on that Google account",
+        no_refresh_token: "Google did not grant offline access - try again",
+        forbidden: "Only the workspace owner can connect shared accounts",
+        not_configured: "That platform is not configured on this server",
+      };
+      return { ok: false, text: errors[value] ?? "Couldn't connect the account" };
+    };
+
+    const show = (result: string) => {
+      setNotice(describe(result));
+      void qc.invalidateQueries({ queryKey: ["social", "accounts"] });
+    };
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(SOCIAL_CHANNEL);
+      channel.onmessage = (e: MessageEvent<{ result?: string }>) => {
+        if (typeof e.data?.result === "string") show(e.data.result);
+      };
+    } catch {
+      // BroadcastChannel unavailable - the popup-closed poll still refreshes accounts.
+    }
+
+    const param = new URLSearchParams(window.location.search).get("social");
+    if (param) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("social");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      channel?.postMessage({ result: param });
+      if (window.name === SOCIAL_CONNECT_WINDOW) {
+        window.close();
+      } else {
+        show(param);
+      }
+    }
+    return () => channel?.close();
+  }, [qc]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+
+  return notice;
 }

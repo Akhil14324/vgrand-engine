@@ -14,10 +14,13 @@ import {
 import {
   GENERATION_QUEUE,
   INGEST_QUEUE,
+  SOCIAL_QUEUE,
   createRedisConnection,
   type GenerationJob,
   type IngestJob,
+  type SocialPostJob,
 } from "./queue.js";
+import { recoverSocialPosts, runSocialPost } from "./social/publish.js";
 import { publishGenerationEvent } from "./events.js";
 import { storeImage } from "./storage.js";
 import {
@@ -73,6 +76,9 @@ export function startGenerationWorker(): Worker | null {
     // kick them off again here.
     console.log("[worker] no REDIS_URL — processing generations inline");
     void recoverPendingGenerations();
+    void recoverSocialPosts().catch((err) =>
+      console.error("[worker] social recovery failed:", err),
+    );
     const sweeper = setInterval(
       () =>
         void sweepStaleWork().catch((err) =>
@@ -106,10 +112,25 @@ export function startGenerationWorker(): Worker | null {
       runDocumentIngestion(job.data.documentId, job.data.mimeType),
     { connection: createRedisConnection(), concurrency: 2 },
   );
-  worker.on("closing", () => void ingestWorker.close());
+  // One job per SocialPost; BullMQ owns the 3-attempt exponential backoff, so a
+  // retryable failure on a non-final attempt throws to hand control back to it.
+  const socialWorker = new Worker(
+    SOCIAL_QUEUE,
+    async (job: Job<SocialPostJob>) => {
+      const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+      const outcome = await runSocialPost(job.data.socialPostId, { finalAttempt });
+      if (outcome === "retry") throw new Error("retryable social post failure");
+    },
+    { connection: createRedisConnection(), concurrency: 4 },
+  );
+  worker.on("closing", () => {
+    void ingestWorker.close();
+    void socialWorker.close();
+  });
   for (const [name, w] of [
     ["worker", worker],
     ["ingest", ingestWorker],
+    ["social", socialWorker],
   ] as const) {
     w.on("error", (err) => console.error(`[${name}] error:`, err));
     w.on("failed", (job, err) =>
@@ -132,6 +153,9 @@ const MAX_SWEEP_RETRIES = 2;
  * treatment — they had no recovery path at all.
  */
 async function sweepStaleWork() {
+  await recoverSocialPosts().catch((err) =>
+    console.error("[worker] social recovery failed:", err),
+  );
   const cutoff = new Date(Date.now() - STALE_PROCESSING_MS);
   const stale = await prisma.generation.findMany({
     where: { status: "processing", createdAt: { lt: cutoff } },

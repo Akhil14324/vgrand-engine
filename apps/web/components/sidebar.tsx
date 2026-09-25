@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Archive,
   ArchiveRestore,
@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   Search,
+  Settings,
   Share2,
   Sparkles,
   SquarePen,
@@ -427,6 +428,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <ImageUsage />
         </div>
         <InstallButton />
+        <SettingsMenu onNavigate={onNavigate} />
         <Button
           variant="ghost"
           size="icon"
@@ -438,6 +440,48 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Account settings: legal pages plus a confirmed route to the data-deletion request page. */
+function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
+  const router = useRouter();
+  const go = (href: string) => {
+    onNavigate?.();
+    router.push(href);
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground"
+          aria-label="Settings"
+        >
+          <Settings />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => go("/privacy")}>Privacy Policy</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => go("/terms")}>Terms of Service</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          onClick={() => {
+            if (
+              window.confirm(
+                "Request deletion of your data?\n\nThis opens the data deletion page, where you can email a request to delete your account and everything associated with it. Nothing is deleted until you send that request.",
+              )
+            ) {
+              go("/data-deletion");
+            }
+          }}
+        >
+          Delete my data…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

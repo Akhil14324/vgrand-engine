@@ -6,6 +6,14 @@ export const GENERATION_QUEUE = "image-generation";
 /** Separate queue so a burst of PDF uploads can't hold up anyone's chat turn. */
 export const INGEST_QUEUE = "document-ingestion";
 
+/** One job per SocialPost - a failing platform never blocks the others. */
+export const SOCIAL_QUEUE = "social-posts";
+export const SOCIAL_MAX_ATTEMPTS = 3;
+export const SOCIAL_BACKOFF_MS = 30_000;
+
+export interface SocialPostJob {
+  socialPostId: string;
+}
 export interface GenerationJob {
   generationId: string;
 }
@@ -112,6 +120,37 @@ export async function enqueueDocumentIngestion(
     "ingest-document",
     { documentId, mimeType },
     { jobId: `ingest-${documentId}` },
+  );
+}
+
+/**
+ * Publish one SocialPost. BullMQ: jobId = SocialPost id (duplicate enqueues
+ * dedupe), 3 attempts, exponential backoff. `force` first drops the finished
+ * job that would otherwise make BullMQ ignore the re-add (manual retry, recovery);
+ * a live/locked job can't be removed, so it keeps deduping. No Redis: runs
+ * in-process with the same attempt count and backoff schedule.
+ */
+export async function enqueueSocialPost(
+  socialPostId: string,
+  opts: { force?: boolean } = {},
+) {
+  if (!env.redisConfigured) {
+    const { runSocialPostInline } = await import("./social/publish.js");
+    void runSocialPostInline(socialPostId).catch((err) =>
+      console.error(`[inline] social post ${socialPostId} failed:`, err),
+    );
+    return;
+  }
+  const queue = getQueue<SocialPostJob>(SOCIAL_QUEUE);
+  if (opts.force) await queue.remove(socialPostId).catch(() => {});
+  await queue.add(
+    "publish",
+    { socialPostId },
+    {
+      jobId: socialPostId,
+      attempts: SOCIAL_MAX_ATTEMPTS,
+      backoff: { type: "exponential", delay: SOCIAL_BACKOFF_MS },
+    },
   );
 }
 

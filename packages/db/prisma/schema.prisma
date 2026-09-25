@@ -9,20 +9,22 @@ datasource db {
 }
 
 model User {
-  id            String            @id @default(uuid())
-  email         String            @unique
-  name          String?
-  avatarUrl     String?
-  createdAt     DateTime          @default(now())
-  generations   Generation[]
-  memories      Memory[]
-  conversations Conversation[]
-  documents     Document[]
-  workspaces    Workspace[]
-  imageUsage    ImageUsage[]
-  brands        Brand[]
-  memberships   WorkspaceMember[]
-  teamMessages  TeamMessage[]
+  id             String            @id @default(uuid())
+  email          String            @unique
+  name           String?
+  avatarUrl      String?
+  createdAt      DateTime          @default(now())
+  generations    Generation[]
+  memories       Memory[]
+  conversations  Conversation[]
+  documents      Document[]
+  workspaces     Workspace[]
+  imageUsage     ImageUsage[]
+  brands         Brand[]
+  memberships    WorkspaceMember[]
+  teamMessages   TeamMessage[]
+  socialAccounts SocialAccount[]
+  socialPosts    SocialPost[]
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
@@ -76,18 +78,19 @@ model ImageUsage {
 // A named collection of documents + chats — "analyze everything here" context
 // that persists across conversations (replaces the old Library/boards).
 model Workspace {
-  id            String            @id @default(uuid())
-  userId        String
-  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name          String
-  documents     Document[]
-  conversations Conversation[]
-  brands        Brand[]
-  members       WorkspaceMember[]
-  invites       WorkspaceInvite[]
-  teamMessages  TeamMessage[]
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id             String            @id @default(uuid())
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  documents      Document[]
+  conversations  Conversation[]
+  brands         Brand[]
+  members        WorkspaceMember[]
+  invites        WorkspaceInvite[]
+  teamMessages   TeamMessage[]
+  socialAccounts SocialAccount[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   @@index([userId, updatedAt(sort: Desc)])
 }
@@ -152,6 +155,7 @@ model Generation {
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   shareLinks     ShareLink[]
   memories       Memory[]
+  socialPosts    SocialPost[]
   createdAt      DateTime      @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
@@ -277,4 +281,80 @@ model ShareLink {
   token        String     @unique
   expiresAt    DateTime?
   createdAt    DateTime   @default(now())
+}
+
+// A connected social profile/page/channel. workspaceId null = personal scope.
+// Tokens are AES-256-GCM encrypted (lib/social-crypto.ts) and never leave the
+// server. status: active | expired | revoked | reauth_required. The unique key
+// cannot dedupe personal accounts (NULL workspaceId is distinct in Postgres),
+// so the migration adds a partial unique index for that case.
+model SocialAccount {
+  id                String       @id @default(uuid())
+  userId            String
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId       String?
+  workspace         Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform          String // instagram | facebook | x | youtube
+  externalAccountId String
+  handle            String?
+  displayName       String?
+  avatarUrl         String?
+  accessTokenEnc    String
+  refreshTokenEnc   String?
+  tokenExpiresAt    DateTime?
+  scopes            String[]
+  metadata          Json?
+  status            String       @default("active")
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  posts             SocialPost[]
+
+  @@unique([workspaceId, userId, platform, externalAccountId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+// Short-lived OAuth handshake. Only sha256(state) is stored; single-use.
+model SocialOAuthSession {
+  id              String    @id @default(uuid())
+  stateHash       String    @unique
+  userId          String
+  workspaceId     String?
+  platform        String
+  codeVerifierEnc String?
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+// One row per (generation, account). `content` is the immutable snapshot the
+// user approved; retries never re-derive it.
+// status: pending | posting | posted | failed.
+model SocialPost {
+  id            String        @id @default(uuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId   String?
+  generation    Generation    @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  generationId  String
+  account       SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId     String
+  content       Json
+  mediaUrl      String
+  status        String        @default("pending")
+  attemptCount  Int           @default(0)
+  lastAttemptAt DateTime?
+  postedAt      DateTime?
+  providerState Json?
+  failureCode   String?
+  remoteId      String?
+  remoteUrl     String?
+  error         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([generationId])
+  @@index([userId, createdAt(sort: Desc)])
 }

@@ -66,3 +66,16 @@ export async function apiFetch<T>(
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+/** Name of the OAuth popup - the return page checks it to know it should close itself. */
+export const SOCIAL_CONNECT_WINDOW = "catgpt-social-connect";
+export const SOCIAL_CHANNEL = "catgpt-social";
+
+/**
+ * Must be called synchronously inside the click handler: browsers only allow a
+ * popup opened during the user gesture, and the OAuth URL arrives from an async
+ * request. The caller navigates it once the URL is known.
+ */
+export function openSocialConnectPopup(): Window | null {
+  return window.open("about:blank", SOCIAL_CONNECT_WINDOW, "popup=yes,width=560,height=700");
+}

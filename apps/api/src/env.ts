@@ -79,6 +79,19 @@ const envSchema = z.object({
   /** Parallel generation jobs per worker process (chat turns and images). */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),
   UPLOAD_DIR: opt(z.string().min(1)),
+
+  /** Social publishing. SOCIAL_TOKEN_KEY = 64 hex chars (openssl rand -hex 32); validated on use. */
+  SOCIAL_TOKEN_KEY: opt(z.string().min(1)),
+  META_APP_ID: opt(z.string().min(1)),
+  META_APP_SECRET: opt(z.string().min(1)),
+  /** Graph API version, e.g. "v23.0". Meta retires old versions - bump when needed. */
+  META_GRAPH_VERSION: opt(z.string().regex(/^v\d+\.\d+$/)),
+  X_CLIENT_ID: opt(z.string().min(1)),
+  X_CLIENT_SECRET: opt(z.string().min(1)),
+  GOOGLE_CLIENT_ID: opt(z.string().min(1)),
+  GOOGLE_CLIENT_SECRET: opt(z.string().min(1)),
+  /** Set to "public" once the Google OAuth app is verified; until then uploads are private. */
+  YOUTUBE_VISIBILITY: opt(z.enum(["private", "public"])),
 });
 
 /**
@@ -112,12 +125,26 @@ export const env = {
   TYPESAFE_BASE_URL: parsed.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai",
   STORAGE_BUCKET: parsed.STORAGE_BUCKET ?? "generated-images",
   UPLOAD_DIR: parsed.UPLOAD_DIR ?? "./uploads",
+  YOUTUBE_VISIBILITY: parsed.YOUTUBE_VISIBILITY ?? "private",
+  META_GRAPH_VERSION: parsed.META_GRAPH_VERSION ?? "v23.0",
   // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults
   // to a separate worker process (pnpm --filter @catgpt/api worker).
   WORKER_INLINE: parsed.WORKER_INLINE ?? !parsed.REDIS_URL,
   /** True only when REDIS_URL was explicitly provided — otherwise jobs run inline. */
   get redisConfigured(): boolean {
     return Boolean(parsed.REDIS_URL);
+  },
+  /** Meta needs the app credentials plus the token key to store what it returns. */
+  get metaConfigured(): boolean {
+    return Boolean(this.META_APP_ID && this.META_APP_SECRET && this.SOCIAL_TOKEN_KEY);
+  },
+  get xConfigured(): boolean {
+    return Boolean(this.X_CLIENT_ID && this.X_CLIENT_SECRET && this.SOCIAL_TOKEN_KEY);
+  },
+  get youtubeConfigured(): boolean {
+    return Boolean(
+      this.GOOGLE_CLIENT_ID && this.GOOGLE_CLIENT_SECRET && this.SOCIAL_TOKEN_KEY,
+    );
   },
   /** True when enough Supabase config exists to verify JWTs + use Storage. */
   get supabaseConfigured(): boolean {
