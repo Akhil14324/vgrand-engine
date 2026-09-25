@@ -39,6 +39,74 @@ export class OpenAIImageProvider implements ImageProvider {
     const client = this.getClient();
     const model =
       params.mode === "edit" ? OPENAI_EDIT_MODEL : OPENAI_DRAFT_MODEL;
+
+    try {
+      return await this.callApi(client, model, params);
+    } catch (err) {
+      if (!isSafetyRejection(err)) {
+        // callApi already wraps in ProviderError — don't double-prefix it.
+        if (err instanceof ProviderError) throw err;
+        throw new ProviderError(this.name, describeError(err), err);
+      }
+      // Self-heal once: the input filter refused a real-person/sensitive
+      // likeness. Rewrite the prompt to depict the same intent symbolically
+      // and retry — a refused portrait becomes the occasion's objects,
+      // colours and motifs instead of a failed job.
+      const rewritten = await this.depersonalize(client, params.prompt).catch(
+        () => null,
+      );
+      if (!rewritten || rewritten === params.prompt) throw err;
+      try {
+        const res = await this.callApi(client, model, {
+          ...params,
+          prompt: rewritten,
+        });
+        return {
+          ...res,
+          metadata: {
+            ...res.metadata,
+            promptSanitized: true,
+            sanitizedPrompt: rewritten,
+          },
+        };
+      } catch (retryErr) {
+        // The symbolic rewrite was refused too — surface the friendly message.
+        if (retryErr instanceof ProviderError) throw retryErr;
+        throw new ProviderError(this.name, describeError(retryErr), retryErr);
+      }
+    }
+  }
+
+  /**
+   * A refused prompt usually names a real person or sensitive subject. One
+   * cheap chat call rewrites it to symbolic imagery while preserving the
+   * occasion, product, offer and exact on-image text.
+   */
+  private async depersonalize(
+    client: OpenAI,
+    prompt: string,
+  ): Promise<string | null> {
+    const res = await client.chat.completions.create({
+      model: process.env.CHAT_MODEL?.trim() || "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 300,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You rewrite image-generation prompts that were refused because they could depict a real person or other sensitive subject. Keep the user's intent — the occasion, product, offer, mood, and any on-image text (kept verbatim, in quotes) — but replace every real person, public figure or graphic subject with symbolic or abstract imagery that fits (iconic objects, colours, places, motifs). Return ONLY the rewritten prompt, nothing else.",
+        },
+        { role: "user", content: prompt.slice(0, 4000) },
+      ],
+    });
+    return res.choices[0]?.message.content?.trim() || null;
+  }
+
+  private async callApi(
+    client: OpenAI,
+    model: string,
+    params: GenerateParams,
+  ): Promise<GenerateResult> {
     const quality = params.quality ?? "low";
     const size = params.size ?? "auto";
 
@@ -122,6 +190,22 @@ export class OpenAIImageProvider implements ImageProvider {
 }
 
 /** Unwrap the SDK's APIError to the provider's own message (quota, model, etc). */
+const SAFETY_RE =
+  /safety system|content[_ ]?policy|moderation_blocked|declined this prompt/i;
+
+/** Matches the provider's input-filter refusal — through wrapped causes too. */
+function isSafetyRejection(err: unknown): boolean {
+  let e: unknown = err;
+  while (e) {
+    const msg =
+      (e as { error?: { message?: string } }).error?.message ??
+      (e instanceof Error ? e.message : "");
+    if (SAFETY_RE.test(msg)) return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function describeError(err: unknown): string {
   const e = err as {
     error?: { message?: string };
