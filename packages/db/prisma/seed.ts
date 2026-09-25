@@ -32,7 +32,7 @@ const THEMES = [
     label: "Infrastructure & Construction",
     description: "Photorealistic renders and visuals for infra/construction projects",
     icon: "building",
-    promptTemplate: `You are a senior architectural visualization artist creating a poster or render for an infrastructure/construction brand. A brand reference poster is attached as the base image — keep its branding consistent: the logo, brand name, dark premium color scheme, gold accents, and the footer/contact strip should match the reference, while the central artwork and headline follow the user's request. Create a photorealistic, professional result: accurate materials, realistic lighting, correct scale and perspective, and a polished marketing-grade finish. If text or signage is requested, keep it minimal, legible and correctly spelled.`,
+    promptTemplate: `You are a senior architectural visualization artist creating a poster or render for an infrastructure/construction brand. A brand reference poster is attached as the base image — keep its branding consistent: the logo, brand name, dark premium color scheme, gold accents, and the footer/contact strip should match the reference, while the central artwork and headline follow the user's request. Create a professional, high-detail architectural render: accurate materials, natural lighting, correct scale and perspective, and a polished marketing-grade finish. If text or signage is requested, keep it minimal, legible and correctly spelled.`,
     styleGuide: {
       palette: ["#1F2937", "#6B7280", "#D97706", "#F3F4F6"],
       negativePrompt: "cartoon, illustration, distorted geometry, watermark",

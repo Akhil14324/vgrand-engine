@@ -75,6 +75,10 @@ export class OpenAIImageProvider implements ImageProvider {
             quality,
             stream: true,
             partial_images: 2,
+            // Marketing/design studio: the least restrictive documented level
+            // cuts false-positive rejections on photorealistic renders and
+            // product shots. Input-side prompt checks still apply.
+            moderation: "low",
           });
           let lastB64: string | undefined;
           for await (const evt of stream) {
@@ -105,6 +109,7 @@ export class OpenAIImageProvider implements ImageProvider {
         n: params.n ?? 1,
         size: size === "auto" ? undefined : size,
         quality,
+        moderation: "low",
       });
       return {
         images: mapImages(res.data ?? []),
