@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, ArrowLeft, GitCompare, ListChecks, Loader2, Plus, Send, Trash2 } from "lucide-react";
@@ -15,6 +15,7 @@ import {
 } from "@catgpt/types";
 import { Labeled, fmtDay, fmtDateTime } from "@/components/camp-shell";
 import { ResultsPanel } from "@/components/camp-results";
+import { InsightsPanel, LearningCard, RevisionPanel } from "@/components/campaign-insights";
 import {
   useApplySync,
   useAskStrategy,
@@ -88,6 +89,11 @@ function Body({ s }: { s: StrategyDto }) {
             <span>Version {s.version}</span>
             {s.approvedAt && <span>Approved {fmtDay(s.approvedAt)}</span>}
             {s.sourceRef?.recommendation && <span>From Guava: {s.sourceRef.recommendation}</span>}
+            {s.sourceRef?.learnings && s.sourceRef.learnings.length > 0 && (
+              <span title={s.sourceRef.learnings.map((l) => l.title).join(", ")}>
+                Informed by {s.sourceRef.learnings.length} earlier campaign(s), as evidence only
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -134,6 +140,7 @@ function Body({ s }: { s: StrategyDto }) {
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="assistant">Assistant</TabsTrigger>
           <TabsTrigger value="work">Work</TabsTrigger>
+          <TabsTrigger value="insights">Insights</TabsTrigger>
           <TabsTrigger value="results">Results and review</TabsTrigger>
         </TabsList>
         <TabsContent value="plan" className="mt-4">
@@ -145,8 +152,13 @@ function Body({ s }: { s: StrategyDto }) {
         <TabsContent value="work" className="mt-4">
           <WorkTab s={s} onConvert={() => setConvertOpen(true)} />
         </TabsContent>
-        <TabsContent value="results" className="mt-4">
+        <TabsContent value="insights" className="mt-4">
+          <InsightsPanel strategyId={s.id} />
+        </TabsContent>
+        <TabsContent value="results" className="mt-4 space-y-4">
           <ResultsPanel strategyId={s.id} canManage={s.canManage} review={s.review} reviewedAt={s.reviewedAt} />
+          <RevisionPanel strategyId={s.id} canManage={s.canManage} status={s.status} />
+          <LearningCard strategyId={s.id} canManage={s.canManage} status={s.status} />
         </TabsContent>
       </Tabs>
 
@@ -628,7 +640,7 @@ function ConvertDialog({ s, onClose }: { s: StrategyDto; onClose: () => void }) 
     );
   };
 
-  const row = (x: { dedupeKey: string; title: string; dueAt: string; exists: boolean }, isTask: boolean, priority?: string) => {
+  const row = (x: { dedupeKey: string; title: string; dueAt: string; exists: boolean }) => {
     const e = edits[x.dedupeKey] ?? {};
     return (
       <li key={x.dedupeKey} className={`grid gap-2 rounded-md border p-2 sm:grid-cols-[auto_1fr_9rem_10rem] ${x.exists ? "opacity-60" : ""}`}>
@@ -646,7 +658,6 @@ function ConvertDialog({ s, onClose }: { s: StrategyDto; onClose: () => void }) 
             </option>
           ))}
         </Select>
-        {isTask && priority && null}
       </li>
     );
   };
@@ -666,11 +677,11 @@ function ConvertDialog({ s, onClose }: { s: StrategyDto; onClose: () => void }) 
           <div className="space-y-4">
             <section className="space-y-2">
               <h4 className="text-sm font-semibold">Deliverables ({p.deliverables.length})</h4>
-              <ul className="space-y-2">{p.deliverables.map((d) => row(d, false))}</ul>
+              <ul className="space-y-2">{p.deliverables.map((d) => row(d))}</ul>
             </section>
             <section className="space-y-2">
               <h4 className="text-sm font-semibold">Tasks ({p.tasks.length})</h4>
-              <ul className="space-y-2">{p.tasks.map((t) => row(t, true, t.priority))}</ul>
+              <ul className="space-y-2">{p.tasks.map((t) => row(t))}</ul>
             </section>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>
@@ -692,7 +703,6 @@ function CompareDialog({ s, onClose }: { s: StrategyDto; onClose: () => void }) 
   const vs = s.versions.map((v) => v.version);
   const [to, setTo] = useState(vs[0]!);
   const [from, setFrom] = useState(vs[1] ?? vs[0]!);
-  useEffect(() => undefined, []);
   const diff = useCompareVersions(s.id, from, to);
   const label = (v: number) => {
     const x = s.versions.find((y) => y.version === v);

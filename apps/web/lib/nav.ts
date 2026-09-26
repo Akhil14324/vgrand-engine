@@ -5,6 +5,7 @@ import {
   Compass,
   ListChecks,
   Target,
+  TrendingUp,
   Store,
   type LucideIcon,
 } from "lucide-react";
@@ -26,4 +27,5 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: Compass, label: "Guava", href: "/guava" },
   { icon: Target, label: "B Camp", href: "/bcamp" },
   { icon: ListChecks, label: "Execution", href: "/execution" },
+  { icon: TrendingUp, label: "Growth", href: "/growth" },
 ];

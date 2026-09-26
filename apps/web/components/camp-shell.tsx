@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, ListChecks, Target } from "lucide-react";
+import { ArrowLeft, ListChecks, Target, TrendingUp } from "lucide-react";
 import type { BrandDto } from "@catgpt/types";
 import { RequireAuth } from "@/components/require-auth";
 import { useActiveBusiness } from "@/lib/bcamp-hooks";
@@ -23,7 +23,7 @@ export function CampShell({
 }: {
   title: string;
   subtitle: string;
-  current: "bcamp" | "execution";
+  current: "growth" | "bcamp" | "execution";
   children: (brand: BrandDto) => React.ReactNode;
 }) {
   return (
@@ -43,11 +43,12 @@ function ShellInner({
 }: {
   title: string;
   subtitle: string;
-  current: "bcamp" | "execution";
+  current: "growth" | "bcamp" | "execution";
   children: (brand: BrandDto) => React.ReactNode;
 }) {
   const { brands, isLoading, brand, setBrandId } = useActiveBusiness();
   const tabs = [
+    { key: "growth", href: "/growth", label: "Growth", icon: TrendingUp },
     { key: "bcamp", href: "/bcamp", label: "Strategy", icon: Target },
     { key: "execution", href: "/execution", label: "Execution", icon: ListChecks },
   ] as const;

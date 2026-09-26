@@ -4,11 +4,15 @@ import { useState } from "react";
 import { AlertTriangle, Loader2, Plus, Trash2 } from "lucide-react";
 import {
   RESULT_METRICS,
+  RESULT_METRIC_LABELS,
   RESULT_SOURCE_LABELS,
+  metricsForIndustry,
+  type ResultMetric,
   type ResultsSummaryDto,
   type StrategyReview,
 } from "@catgpt/types";
-import { useAddResult, useDeleteResult, useResults, useReviewStrategy } from "@/lib/bcamp-hooks";
+import { useAddResult, useDeleteResult, useResults, useReviewStrategy, useStrategy } from "@/lib/bcamp-hooks";
+import { useGuavaProfile } from "@/lib/guava-hooks";
 import { Labeled, fmtDay } from "@/components/camp-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -95,12 +99,13 @@ export function ResultsBody({
           <ul className="divide-y text-sm">
             {data.results.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center gap-2 py-2">
-                <span className="font-medium capitalize">{r.metric}</span>
+                <span className="font-medium">{r.metric === "other" ? (r.label ?? "Other") : (RESULT_METRIC_LABELS[r.metric as ResultMetric] ?? r.metric)}</span>
                 <span>{r.value.toLocaleString()}</span>
                 <Badge variant={SOURCE_VARIANT[r.source]}>{RESULT_SOURCE_LABELS[r.source]}</Badge>
                 <span className="text-xs text-muted-foreground">
                   {fmtDay(r.periodStart)} to {fmtDay(r.periodEnd)}
                   {r.channel ? ` · ${r.channel}` : ""}
+                  {r.enteredBy ? ` · recorded by ${r.enteredBy}` : ""}
                   {r.sourceNote ? ` · ${r.sourceNote}` : ""}
                 </span>
                 {canManage && r.source !== "observed" && (
@@ -141,7 +146,11 @@ function AddResult({ strategyId }: { strategyId: string }) {
   const add = useAddResult();
   const today = new Date().toISOString().slice(0, 10);
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ metric: "leads", value: "", source: "user_entered", note: "", start: today, end: today, channel: "" });
+  const strategy = useStrategy(strategyId).data;
+  const profile = useGuavaProfile(strategy?.brandId ?? null).data;
+  const suggested = metricsForIndustry(profile?.industry ?? profile?.suggestedIndustry);
+  const [f, setF] = useState({ metric: "", value: "", source: "user_entered", note: "", start: today, end: today, channel: "", label: "" });
+  const metric = f.metric || suggested[0]!;
   if (!open)
     return (
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
@@ -151,10 +160,12 @@ function AddResult({ strategyId }: { strategyId: string }) {
   const submit = () => {
     const value = Number(f.value);
     if (!Number.isFinite(value) || f.value === "") return toast.error("Enter a number");
+    if (metric === "other" && !f.label.trim()) return toast.error("Name what you measured");
     add.mutate(
       {
         strategyId,
-        metric: f.metric as never,
+        metric: metric as ResultMetric,
+        label: metric === "other" ? f.label.trim() : undefined,
         value,
         source: f.source as "user_entered" | "estimate",
         sourceNote: f.note,
@@ -175,14 +186,28 @@ function AddResult({ strategyId }: { strategyId: string }) {
   return (
     <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2">
       <Labeled label="What was measured">
-        <Select value={f.metric} onChange={(e) => setF({ ...f, metric: e.target.value })}>
-          {RESULT_METRICS.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
+        <Select value={metric} onChange={(e) => setF({ ...f, metric: e.target.value })}>
+          <optgroup label="Suggested for your business">
+            {suggested.map((m) => (
+              <option key={m} value={m}>
+                {RESULT_METRIC_LABELS[m]}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="All measures">
+            {RESULT_METRICS.filter((m) => !suggested.includes(m)).map((m) => (
+              <option key={m} value={m}>
+                {RESULT_METRIC_LABELS[m]}
+              </option>
+            ))}
+          </optgroup>
         </Select>
       </Labeled>
+      {metric === "other" && (
+        <Labeled label="Name it" hint="e.g. Brochure downloads, WhatsApp enquiries">
+          <Input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+        </Labeled>
+      )}
       <Labeled label="Amount">
         <Input inputMode="decimal" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />
       </Labeled>
@@ -204,6 +229,9 @@ function AddResult({ strategyId }: { strategyId: string }) {
       <Labeled label="Channel (optional)">
         <Input value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })} placeholder="instagram, walk-in…" />
       </Labeled>
+      <p className="text-xs text-muted-foreground sm:col-span-2">
+        This is recorded as your statement, with your name, the period and the source. The platform does not verify it.
+      </p>
       <div className="flex items-end gap-2">
         <Button size="sm" onClick={submit} disabled={add.isPending || f.note.trim().length < 2}>
           {add.isPending && <Loader2 className="animate-spin" />} Save
@@ -239,6 +267,13 @@ function ReviewCard({
     ) : (
       <p className="text-muted-foreground">Nothing to add.</p>
     );
+  const Block = ({ title, items }: { title: string; items?: string[] }) =>
+    items && items.length ? (
+      <div>
+        <h4 className="font-medium">{title}</h4>
+        <List items={items} />
+      </div>
+    ) : null;
   return (
     <Card className="space-y-3 p-4">
       <div className="flex items-center gap-2">
@@ -265,6 +300,7 @@ function ReviewCard({
             <h4 className="font-medium">What happened</h4>
             <p className="text-muted-foreground">{shown.happened}</p>
           </div>
+          <Block title="What we can reasonably conclude" items={shown.conclusions} />
           <div>
             <h4 className="font-medium">What the data supports</h4>
             <List items={shown.supported} />
@@ -273,10 +309,11 @@ function ReviewCard({
             <h4 className="font-medium">What remains unknown</h4>
             <List items={shown.unknown} />
           </div>
-          <div>
-            <h4 className="font-medium">Suggested changes for next time</h4>
-            <List items={shown.changes} />
-          </div>
+          <Block title="Keep" items={shown.keep} />
+          <Block title="Stop" items={shown.stop} />
+          <Block title="Change" items={shown.change} />
+          <Block title="What the next campaign could test" items={shown.nextTest} />
+          <Block title="Other suggestions" items={shown.changes} />
         </div>
       )}
     </Card>

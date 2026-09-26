@@ -43,8 +43,13 @@ export async function buildResultsSummary(strategy: Pick<Strategy, "id" | "title
   const deliverablesByStatus: Record<string, number> = {};
   for (const d of dels) deliverablesByStatus[d.status] = (deliverablesByStatus[d.status] ?? 0) + 1;
 
+  const names = rows.length
+    ? new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.enteredById))] } }, select: { id: true, name: true, email: true } })).map((u) => [u.id, u.name || u.email]))
+    : new Map<string, string>();
   const results: ResultRow[] = rows.map((r) => ({
     id: r.id,
+    label: r.label,
+    enteredBy: names.get(r.enteredById) ?? null,
     metric: r.metric,
     value: r.value,
     source: r.source as ResultSource,
@@ -107,6 +112,7 @@ export async function addResult(userId: string, body: CreateResultRequest) {
       deliverableId: body.deliverableId ?? null,
       channel: body.channel || null,
       metric: body.metric,
+      label: body.metric === "other" ? (body.label || null) : null,
       value: body.value,
       source: body.source,
       sourceNote: body.sourceNote,
@@ -352,6 +358,7 @@ export async function getExecutionDashboard(userId: string, brandId: string): Pr
     deliverables: dDtos,
     results,
     members: [...ctx.people.values()],
+    canManage: await canManageBrand(userId, brandId),
   };
 }
 
@@ -415,6 +422,9 @@ export async function updateDeliverable(userId: string, id: string, body: { titl
       ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
     },
   });
+  if (body.dueAt && d.dueAt && new Date(body.dueAt).getTime() !== d.dueAt.getTime()) {
+    await log({ strategyId: d.strategyId, deliverableId: id, userId, kind: "rescheduled", note: `Due date moved to ${body.dueAt.slice(0, 10)}`, data: { from: d.dueAt.toISOString(), to: body.dueAt } });
+  }
   if (body.assigneeId !== undefined && body.assigneeId !== d.assigneeId) {
     await log({ strategyId: d.strategyId, deliverableId: id, userId, kind: "assigned", note: body.assigneeId ? "Assigned" : "Unassigned", data: { from: d.assigneeId, to: body.assigneeId } });
   }
@@ -551,6 +561,9 @@ export async function updateTask(
   await prisma.execTask.update({ where: { id }, data });
   if (body.status && body.status !== t.status) {
     await log({ strategyId: t.strategyId, taskId: id, userId, kind: "status", note: `${t.status} -> ${body.status}${body.blockedReason ? `: ${body.blockedReason}` : ""}` });
+  }
+  if (body.dueAt && t.dueAt && new Date(body.dueAt).getTime() !== t.dueAt.getTime()) {
+    await log({ strategyId: t.strategyId, taskId: id, userId, kind: "rescheduled", note: `Due date moved to ${body.dueAt.slice(0, 10)}`, data: { from: t.dueAt.toISOString(), to: body.dueAt } });
   }
   if (body.assigneeId !== undefined && body.assigneeId !== t.assigneeId) {
     await log({ strategyId: t.strategyId, taskId: id, userId, kind: "assigned", note: body.assigneeId ? "Assigned" : "Unassigned", data: { from: t.assigneeId, to: body.assigneeId } });

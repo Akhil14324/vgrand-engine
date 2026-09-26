@@ -98,9 +98,60 @@ export const RESULT_METRICS = [
   "inquiries",
   "orders",
   "revenue",
+  "qualified_leads",
+  "site_visits",
+  "bookings",
+  "reservations",
+  "repeat_purchases",
+  "avg_order_value",
   "other",
 ] as const;
 export type ResultMetric = (typeof RESULT_METRICS)[number];
+
+export const RESULT_METRIC_LABELS: Record<ResultMetric, string> = {
+  spend: "Spend",
+  reach: "Reach",
+  engagement: "Engagement",
+  clicks: "Clicks or visits to your page",
+  leads: "Leads",
+  inquiries: "Inquiries",
+  orders: "Orders",
+  revenue: "Revenue",
+  qualified_leads: "Qualified leads",
+  site_visits: "Site visits",
+  bookings: "Bookings",
+  reservations: "Reservations",
+  repeat_purchases: "Repeat purchases",
+  avg_order_value: "Average order value",
+  other: "Other (name it)",
+};
+
+/** Averages are not summed across rows; the most recent entry is shown instead. */
+export const NON_ADDITIVE_METRICS: string[] = ["avg_order_value"];
+
+/** Metrics that describe business outcomes (as opposed to activity or attention). */
+export const OUTCOME_METRIC_LIST: string[] = [
+  "leads",
+  "qualified_leads",
+  "inquiries",
+  "site_visits",
+  "bookings",
+  "reservations",
+  "orders",
+  "repeat_purchases",
+  "revenue",
+];
+/** Attention metrics: likes and views are not sales. */
+export const ATTENTION_METRIC_LIST: string[] = ["reach", "engagement", "clicks"];
+
+/** Suggested measures per Guava industry key. Presets only - any metric can be recorded. */
+export const INDUSTRY_METRICS: Record<string, ResultMetric[]> = {
+  real_estate: ["inquiries", "qualified_leads", "site_visits", "bookings", "spend"],
+  restaurant: ["orders", "reservations", "repeat_purchases", "avg_order_value", "spend"],
+  general: ["leads", "orders", "revenue", "spend"],
+};
+export const metricsForIndustry = (industry: string | null | undefined): ResultMetric[] =>
+  INDUSTRY_METRICS[industry ?? ""] ?? INDUSTRY_METRICS.general!;
 export const RESULT_SOURCES = ["observed", "user_entered", "estimate"] as const;
 export type ResultSource = (typeof RESULT_SOURCES)[number];
 export const RESULT_SOURCE_LABELS: Record<ResultSource, string> = {
@@ -526,6 +577,8 @@ export interface ResultRow {
   sourceNote: string | null;
   periodStart: string;
   periodEnd: string;
+  /** Custom name when the metric is "other". */
+  label?: string | null;
   enteredBy?: string | null;
 }
 
@@ -541,9 +594,15 @@ export function kpiMetric(kpi: string): ResultMetric | null {
   const t = kpi.toLowerCase();
   const table: [RegExp, ResultMetric][] = [
     [/revenue|sales value|turnover/, "revenue"],
-    [/order|booking|reservation|purchase|sale/, "orders"],
+    [/qualified lead/, "qualified_leads"],
+    [/site.?visit/, "site_visits"],
+    [/booking/, "bookings"],
+    [/reservation/, "reservations"],
+    [/repeat/, "repeat_purchases"],
+    [/average (order|bill)|order value/, "avg_order_value"],
+    [/order|purchase|sale/, "orders"],
     [/inquir|enquir/, "inquiries"],
-    [/lead|sign.?up|site visit|visit/, "leads"],
+    [/lead|sign.?up|visit/, "leads"],
     [/click|traffic/, "clicks"],
     [/reach|impression|view/, "reach"],
     [/engage|like|comment|share/, "engagement"],
@@ -555,7 +614,10 @@ export function summarizeResults(rows: ResultRow[]): MetricSummary[] {
   const map = new Map<string, MetricSummary>();
   for (const r of rows) {
     const m = map.get(r.metric) ?? { metric: r.metric, bySource: {}, rows: 0 };
-    m.bySource[r.source] = (m.bySource[r.source] ?? 0) + r.value;
+    if (NON_ADDITIVE_METRICS.includes(r.metric)) {
+      // Rows arrive newest first; keep the latest figure per source.
+      if (m.bySource[r.source] === undefined) m.bySource[r.source] = r.value;
+    } else m.bySource[r.source] = (m.bySource[r.source] ?? 0) + r.value;
     m.rows++;
     map.set(r.metric, m);
   }
@@ -568,7 +630,7 @@ export interface MeasurementGaps {
   outcomesTracked: boolean;
 }
 
-const OUTCOME_METRICS: ResultMetric[] = ["leads", "inquiries", "orders", "revenue"];
+const OUTCOME_METRICS: string[] = OUTCOME_METRIC_LIST;
 
 /** What cannot be concluded yet, stated plainly. Never claims attribution. */
 export function measurementGaps(plan: StrategyPlan, rows: ResultRow[]): MeasurementGaps {
@@ -618,6 +680,12 @@ export interface StrategyReview {
   supported: string[];
   unknown: string[];
   changes: string[];
+  /** Added later; older stored reviews do not have these. */
+  conclusions?: string[];
+  keep?: string[];
+  stop?: string[];
+  change?: string[];
+  nextTest?: string[];
   /** Interpretation by the AI: never data. */
   generatedAt: string;
 }
@@ -626,7 +694,7 @@ export interface StrategyDto extends StrategySummaryDto {
   plan: StrategyPlan;
   warnings: PlanWarning[];
   sourceText: string | null;
-  sourceRef: { diagnosisId?: string; recommendation?: string } | null;
+  sourceRef: { diagnosisId?: string; recommendation?: string; learnings?: { id: string; title: string }[] } | null;
   canManage: boolean;
   messages: StrategyMessageDto[];
   versions: { version: number; label: string | null; createdAt: string }[];
@@ -760,6 +828,8 @@ export interface ExecutionDashboardDto {
   deliverables: DeliverableDto[];
   results: ResultsSummaryDto[];
   members: PersonDto[];
+  /** Owners approve, assign and edit; members do the work. */
+  canManage: boolean;
 }
 
 export interface BcampDashboardDto {
@@ -868,6 +938,7 @@ export const createResultSchema = z
     deliverableId: z.string().uuid().optional(),
     channel: z.string().trim().max(60).optional(),
     metric: z.enum(RESULT_METRICS),
+    label: z.string().trim().max(80).optional(),
     value: z.number().finite().min(0).max(1e12),
     source: z.enum(["user_entered", "estimate"]),
     sourceNote: z.string().trim().min(2).max(500),

@@ -54,6 +54,8 @@ model Brand {
   guavaDiagnoses GuavaDiagnosis[]
   guidelines  BrandGuidelines?
   strategies  Strategy[]
+  learnings   CampaignLearning[]
+  suggestionDecisions SuggestionDecision[]
   complianceChecks ComplianceCheck[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -645,6 +647,8 @@ model Strategy {
   tasks        ExecTask[]
   events       ExecEvent[]
   results      CampaignResult[]
+  revisions    StrategyRevision[]
+  learning     CampaignLearning?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
@@ -780,7 +784,9 @@ model CampaignResult {
   deliverableId String?
   deliverable   Deliverable? @relation(fields: [deliverableId], references: [id], onDelete: SetNull)
   channel       String?
-  metric        String // spend | reach | engagement | clicks | leads | inquiries | orders | revenue | other
+  metric        String // see RESULT_METRICS in @catgpt/types
+  // Free-text name when metric is "other" (a business-specific event).
+  label         String?
   value         Float
   source        String
   sourceNote    String?      @db.Text
@@ -790,4 +796,58 @@ model CampaignResult {
   createdAt     DateTime     @default(now())
 
   @@index([strategyId, periodEnd(sort: Desc)])
+}
+
+// A proposed change to an approved plan. Nothing changes until an owner approves:
+// approving saves a new StrategyVersion; existing work is then synced item by item.
+model StrategyRevision {
+  id           String   @id @default(uuid())
+  strategyId   String
+  strategy     Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  baseVersion  Int
+  proposedPlan Json
+  rationale    String   @default("") @db.Text
+  changes      Json
+  focus        String[]
+  status       String   @default("pending") // pending | approved | rejected | superseded
+  createdById  String
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  @@index([strategyId, status])
+}
+
+// What a business learned from one campaign. One row per campaign (updated in
+// place); it is a record of evidence and comparability, not a rule.
+model CampaignLearning {
+  id          String   @id @default(uuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  strategyId  String   @unique
+  strategy    Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  snapshot    Json
+  nextStep    String?  @db.Text
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([brandId, updatedAt(sort: Desc)])
+}
+
+// The decision made on a computed next-best-action. Suggestions themselves are
+// recomputed from live data, so only decisions are stored.
+model SuggestionDecision {
+  id          String    @id @default(uuid())
+  brandId     String
+  brand       Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  key         String
+  status      String // accepted | dismissed | deferred
+  deferUntil  DateTime?
+  note        String?   @db.Text
+  decidedById String
+  decidedAt   DateTime  @default(now())
+
+  @@unique([brandId, key])
 }
