@@ -87,6 +87,13 @@ export function Markdown({
               {children}
             </a>
           ),
+          // Wide tables scroll inside the bubble instead of forcing the page
+          // (and its edges) off-screen on mobile.
+          table: ({ children }) => (
+            <div className="my-2 overflow-x-auto rounded-lg border">
+              <table className="m-0">{children}</table>
+            </div>
+          ),
         }}
       >
         {children}

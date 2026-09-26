@@ -8,19 +8,19 @@ import {
   Megaphone,
   Menu,
   PanelLeftOpen,
-  Sparkles,
+  Plus,
   SquarePen,
+  Store,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { ChatMenu } from "@/components/chat-menu";
 import { PENDING_JOIN_KEY } from "@/lib/config";
 import {
+  useBrands,
   useConversation,
   useSocialConnectReturn,
-  useThemes,
 } from "@/lib/hooks";
 import { useBrandMode } from "@/lib/brand-mode";
-import { THEME_ICONS } from "@/lib/theme-icons";
 import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
@@ -181,9 +181,10 @@ export function StudioShell() {
 
 /** Empty state — greeting + centered pill composer, like ChatGPT's home. */
 function Hero() {
-  const { armTheme, pendingTurn } = useStudio();
-  const { setDraft } = useBrandMode();
-  const { data: themes } = useThemes();
+  const router = useRouter();
+  const { pendingTurn } = useStudio();
+  const { setBrandId, setDraft } = useBrandMode();
+  const { data: brands } = useBrands();
   // First message of a new chat: show it the instant Send is hit, right here,
   // until the POST resolves and the chat opens. The slot is shared with the
   // heading so Composer keeps its place in the tree (and its state).
@@ -205,27 +206,38 @@ function Hero() {
       <div
         className={`mt-5 grid w-full max-w-4xl grid-cols-1 gap-2 sm:grid-cols-3 ${sending ? "hidden" : ""}`}
       >
-        {(themes ?? []).map((t) => {
-          const Icon = (t.icon && THEME_ICONS[t.icon]) || Sparkles;
-          return (
-            <button
-              key={t.id}
-              onClick={() => {
-                armTheme(t);
-                setDraft("create an image of a ");
-              }}
-              className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
-            >
-              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">/{t.slug}</span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                  {t.description ?? t.label}
-                </span>
+        {(brands ?? []).map((b) => (
+          <button
+            key={b.id}
+            onClick={() => {
+              setBrandId(b.id);
+              setDraft("create an image of a ");
+            }}
+            className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+          >
+            <Store className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{b.name}</span>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {b.category ??
+                  b.profile.tagline ??
+                  "On-brand images, copy and campaigns"}
               </span>
-            </button>
-          );
-        })}
+            </span>
+          </button>
+        ))}
+        <button
+          onClick={() => router.push("/brand")}
+          className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+        >
+          <Plus className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">New brand</span>
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              Brand kit, mascot, voice and calendar
+            </span>
+          </span>
+        </button>
         <button
           onClick={() => setDraft("/campaign ")}
           className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"

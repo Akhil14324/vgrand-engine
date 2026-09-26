@@ -95,6 +95,8 @@ function BrandContent() {
   const { setBrandId } = useBrandMode();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [personalName, setPersonalName] = useState("");
+  const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
+  const [mobileWs, setMobileWs] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const personalBrands = (brands ?? []).filter((b) => b.workspaceId === null);
@@ -113,6 +115,7 @@ function BrandContent() {
         onSuccess: (b) => {
           selectBrand(b.id);
           setPersonalName("");
+          setMobileCreateOpen(false);
         },
         onError: (e) => setError(e.message),
       },
@@ -133,8 +136,88 @@ function BrandContent() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[260px_1fr]">
-        {/* Brand list: personal brand + brands grouped by workspace */}
-        <aside className="max-h-64 overflow-y-auto border-b p-3 md:max-h-none md:border-b-0 md:border-r">
+        {/* Mobile brand picker — horizontal chips; the sidebar below only
+            renders at md and up so phones don't get the cramped list. */}
+        <div className="border-b md:hidden">
+          <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2">
+            {(brands ?? []).map((b) => (
+              <button
+                key={b.id}
+                onClick={() => selectBrand(b.id)}
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
+                  active?.id === b.id
+                    ? "border-primary bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-accent",
+                )}
+              >
+                <Store className="h-3.5 w-3.5" />
+                <span className="max-w-32 truncate">{b.name}</span>
+              </button>
+            ))}
+            <button
+              onClick={() => setMobileCreateOpen((v) => !v)}
+              aria-expanded={mobileCreateOpen}
+              className={cn(
+                "flex shrink-0 items-center gap-1 rounded-full border border-dashed px-3 py-1.5 text-xs",
+                mobileCreateOpen
+                  ? "border-primary text-primary"
+                  : "text-muted-foreground hover:bg-accent",
+              )}
+            >
+              <Plus className="h-3.5 w-3.5" /> New brand
+            </button>
+          </div>
+          {mobileCreateOpen && (
+            <form
+              className="flex items-center gap-2 px-3 pb-2.5"
+              onSubmit={(e: FormEvent) => {
+                e.preventDefault();
+                if (personalName.trim())
+                  create(personalName, mobileWs || undefined);
+              }}
+            >
+              {(workspaces ?? []).length > 0 && (
+                <select
+                  value={mobileWs}
+                  onChange={(e) => setMobileWs(e.target.value)}
+                  className="h-8 shrink-0 rounded-md border bg-background px-2 text-xs"
+                  aria-label="Add brand to"
+                >
+                  <option value="">Personal</option>
+                  {(workspaces ?? []).map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Input
+                value={personalName}
+                onChange={(e) => setPersonalName(e.target.value)}
+                placeholder="Brand name…"
+                className="h-8 min-w-0 flex-1 text-sm"
+                aria-label="New brand name"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                variant="secondary"
+                disabled={!personalName.trim() || createBrand.isPending}
+              >
+                {createBrand.isPending ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  "Create"
+                )}
+              </Button>
+            </form>
+          )}
+          {error && <p className="px-3 pb-2 text-xs text-destructive">{error}</p>}
+        </div>
+
+        {/* Brand list: personal brand + brands grouped by workspace (desktop) */}
+        <aside className="hidden overflow-y-auto border-r p-3 md:block">
           <p className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">
             Your brands
           </p>
@@ -204,7 +287,7 @@ function BrandContent() {
                 that are built around your real numbers.
               </p>
               <p className="text-xs text-muted-foreground">
-                Enter a name on the left to begin.
+                Select a brand or create a new one to begin.
               </p>
             </div>
           )}
@@ -331,13 +414,19 @@ const s2n = (s: string) => {
   const n = Number(t);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 };
-const list = (s: string) => {
+const list = (s: string, max?: number, itemMax = 400) => {
   const items = s
     .split(/[\n,]/)
     .map((item) => item.trim())
     .filter(Boolean);
-  return items.length ? items : undefined;
+  if (!items.length) return undefined;
+  return (max ? items.slice(0, max) : items).map((item) =>
+    item.slice(0, itemMax),
+  );
 };
+
+const countListItems = (s: string) =>
+  s.split(/[\n,]/).map((item) => item.trim()).filter(Boolean).length;
 
 function toForm(b: BrandDto): FormState {
   const p = b.profile;
@@ -404,11 +493,11 @@ function toProfile(f: FormState): BrandProfile {
     visualStyle: str(f.visualStyle),
     photographyStyle: str(f.photographyStyle),
     logoRules: str(f.logoRules),
-    requiredPhrases: list(f.requiredPhrases),
-    forbiddenWords: list(f.forbiddenWords),
-    forbiddenClaims: list(f.forbiddenClaims),
+    requiredPhrases: list(f.requiredPhrases, 8, 120),
+    forbiddenWords: list(f.forbiddenWords, 20, 60),
+    forbiddenClaims: list(f.forbiddenClaims, 20, 160),
     defaultCta: str(f.defaultCta),
-    contentLanguages: list(f.contentLanguages),
+    contentLanguages: list(f.contentLanguages, 4, 40),
   };
 }
 
@@ -463,15 +552,15 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={form.name}
-          onChange={(e) => set("name", e.target.value)}
-          className="h-10 max-w-xs text-base font-semibold"
+          onChange={(e) => set("name", e.target.value.slice(0, 120))}
+          className="h-10 w-full text-base font-semibold sm:max-w-xs"
           aria-label="Brand name"
         />
         <Input
           value={form.category}
-          onChange={(e) => set("category", e.target.value)}
+          onChange={(e) => set("category", e.target.value.slice(0, 120))}
           placeholder="Category / niche — e.g. Food & beverage"
-          className="h-10 max-w-xs"
+          className="h-10 w-full sm:max-w-xs"
           aria-label="Category"
         />
         <div className="ml-auto flex items-center gap-2">
@@ -539,12 +628,12 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
           <Textarea
             rows={3}
             value={form.description}
-            onChange={(e) => set("description", e.target.value)}
+            onChange={(e) => set("description", e.target.value.slice(0, 1200))}
             placeholder="e.g. We make small-batch pickles from family recipes and deliver across Hyderabad."
           />
         </Q>
         <Q label="Where do you sell? (city, region or online)">
-          <Input value={form.location} onChange={(e) => set("location", e.target.value)} />
+          <Input value={form.location} onChange={(e) => set("location", e.target.value.slice(0, 200))} />
         </Q>
         <Q label="How long have you been running?">
           <div className="flex flex-wrap gap-1.5">
@@ -559,7 +648,7 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
 
       <Section title="What you sell">
         <Q label="Your main products or services">
-          <Textarea rows={2} value={form.offer} onChange={(e) => set("offer", e.target.value)} />
+          <Textarea rows={2} value={form.offer} onChange={(e) => set("offer", e.target.value.slice(0, 800))} />
         </Q>
         <div className="grid gap-3 sm:grid-cols-2">
           <Q label="Average selling price">
@@ -573,13 +662,13 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
 
       <Section title="Your customers">
         <Q label="Who buys from you?">
-          <Textarea rows={2} value={form.customers} onChange={(e) => set("customers", e.target.value)} />
+          <Textarea rows={2} value={form.customers} onChange={(e) => set("customers", e.target.value.slice(0, 800))} />
         </Q>
         <Q label="What problem do you solve for them?">
-          <Textarea rows={2} value={form.painPoints} onChange={(e) => set("painPoints", e.target.value)} />
+          <Textarea rows={2} value={form.painPoints} onChange={(e) => set("painPoints", e.target.value.slice(0, 800))} />
         </Q>
         <Q label="Why do they choose you over others?">
-          <Textarea rows={2} value={form.differentiator} onChange={(e) => set("differentiator", e.target.value)} />
+          <Textarea rows={2} value={form.differentiator} onChange={(e) => set("differentiator", e.target.value.slice(0, 800))} />
         </Q>
       </Section>
 
@@ -622,12 +711,12 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
           <Textarea
             rows={3}
             value={form.problems}
-            onChange={(e) => set("problems", e.target.value)}
+            onChange={(e) => set("problems", e.target.value.slice(0, 1000))}
             placeholder="e.g. Few repeat buyers, low Instagram reach, customers ask for discounts…"
           />
         </Q>
         <Q label="Main competitors">
-          <Textarea rows={2} value={form.competitors} onChange={(e) => set("competitors", e.target.value)} />
+          <Textarea rows={2} value={form.competitors} onChange={(e) => set("competitors", e.target.value.slice(0, 600))} />
         </Q>
       </Section>
 
@@ -663,40 +752,40 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
         </Q>
         <div className="grid gap-3 sm:grid-cols-2">
           <Q label="Tagline">
-            <Input value={form.tagline} onChange={(e) => set("tagline", e.target.value)} />
+            <Input value={form.tagline} onChange={(e) => set("tagline", e.target.value.slice(0, 160))} />
           </Q>
           <Q label="Tone of voice">
             <Input
               value={form.tone}
-              onChange={(e) => set("tone", e.target.value)}
+              onChange={(e) => set("tone", e.target.value.slice(0, 300))}
               placeholder="e.g. warm, playful, premium"
             />
           </Q>
           <Q label="Typography / lettering">
             <Input
               value={form.typography}
-              onChange={(e) => set("typography", e.target.value)}
+              onChange={(e) => set("typography", e.target.value.slice(0, 300))}
               placeholder="e.g. rounded modern lettering, no serif fonts"
             />
           </Q>
           <Q label="Visual style">
             <Input
               value={form.visualStyle}
-              onChange={(e) => set("visualStyle", e.target.value)}
+              onChange={(e) => set("visualStyle", e.target.value.slice(0, 300))}
               placeholder="e.g. clean Telugu retail posters, bright daylight"
             />
           </Q>
           <Q label="Photography style">
             <Input
               value={form.photographyStyle}
-              onChange={(e) => set("photographyStyle", e.target.value)}
+              onChange={(e) => set("photographyStyle", e.target.value.slice(0, 300))}
               placeholder="e.g. real product photos, natural light, no stock look"
             />
           </Q>
           <Q label="Default call to action">
             <Input
               value={form.defaultCta}
-              onChange={(e) => set("defaultCta", e.target.value)}
+              onChange={(e) => set("defaultCta", e.target.value.slice(0, 160))}
               placeholder="e.g. Order on WhatsApp today"
             />
           </Q>
@@ -705,12 +794,12 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
           <Textarea
             rows={2}
             value={form.logoRules}
-            onChange={(e) => set("logoRules", e.target.value)}
+            onChange={(e) => set("logoRules", e.target.value.slice(0, 500))}
             placeholder="e.g. Keep clear space around the logo; never stretch it or place it on busy backgrounds."
           />
         </Q>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Q label="Approved phrases (one per line)">
+          <Q label={<ListLimit text="Approved phrases (one per line)" value={form.requiredPhrases} max={8} />}>
             <Textarea
               rows={3}
               value={form.requiredPhrases}
@@ -718,7 +807,7 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
               placeholder="e.g. Freshly made every morning"
             />
           </Q>
-          <Q label="Words to avoid (comma separated)">
+          <Q label={<ListLimit text="Words to avoid (comma separated)" value={form.forbiddenWords} max={20} />}>
             <Textarea
               rows={3}
               value={form.forbiddenWords}
@@ -726,7 +815,7 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
               placeholder="e.g. cheap, guaranteed, miracle"
             />
           </Q>
-          <Q label="Claims to avoid (one per line)">
+          <Q label={<ListLimit text="Claims to avoid (one per line)" value={form.forbiddenClaims} max={20} />}>
             <Textarea
               rows={3}
               value={form.forbiddenClaims}
@@ -734,7 +823,7 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
               placeholder="e.g. No. 1 in India, doctor recommended"
             />
           </Q>
-          <Q label="Content languages (comma separated)">
+          <Q label={<ListLimit text="Content languages (comma separated)" value={form.contentLanguages} max={4} />}>
             <Textarea
               rows={3}
               value={form.contentLanguages}
@@ -887,7 +976,7 @@ function MascotSection({ brand }: { brand: BrandDto }) {
   return (
     <Section
       title="Brand mascot"
-      hint="One saved character identity per brand. Its image leads the references whenever this brand generates visuals."
+      hint="One saved character identity per brand. It can cameo in generated visuals as a small supporting accent — it never takes over the post."
     >
       {brand.mascot && (
         <div className="flex items-start gap-3 rounded-lg border bg-accent/20 p-3">
@@ -1374,12 +1463,34 @@ function Section({
   );
 }
 
-function Q({ label, children }: { label: string; children: ReactNode }) {
+function Q({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** Field label with a live item counter — warns when over the schema cap. */
+function ListLimit({
+  text,
+  value,
+  max,
+}: {
+  text: string;
+  value: string;
+  max: number;
+}) {
+  const n = countListItems(value);
+  return (
+    <span>
+      {text}{" "}
+      <span className={cn("font-normal", n > max && "text-destructive")}>
+        ({n}/{max}
+        {n > max ? " — extras won't be saved" : ""})
+      </span>
+    </span>
   );
 }
 

@@ -262,7 +262,7 @@ export async function loadBrandContext(brandId: string, userId?: string) {
   });
 }
 
-/** Canonical mascot first, then logo and product photos - capped so references stay light. */
+/** Logo first, then mascot, products, references - capped so references stay light. */
 export function brandReferenceUrls(
   assets: { kind: string; url: string }[],
   mascotUrl?: string | null,
@@ -275,8 +275,8 @@ export function brandReferenceUrls(
   const references = assets.filter((a) => a.kind === "reference");
   return [
     ...new Set([
-      ...mascotUrls,
       ...logos.slice(0, 1).map((a) => a.url),
+      ...mascotUrls,
       ...products.map((a) => a.url),
       ...references.map((a) => a.url),
     ]),
@@ -314,7 +314,7 @@ export function brandImageGuidance(
   if (profile.defaultCta) parts.push(`Preferred CTA: "${profile.defaultCta}".`);
   if (mascot?.status === "active") {
     parts.push(
-      `Mascot "${mascot.name}": ${mascot.description}. When a character appears, use the mascot reference image and preserve its recognizable silhouette, palette, facial features, and personality; do not redesign it.`,
+      `Optional mascot "${mascot.name}": ${mascot.description}. It is a supporting brand character, never the main subject — include it only as a small cameo or corner accent when a character naturally fits the brief, and never let it dominate the composition. If it appears, match the mascot reference image exactly (silhouette, palette, facial features); do not redesign it.`,
     );
   }
   if (hasLogo) {

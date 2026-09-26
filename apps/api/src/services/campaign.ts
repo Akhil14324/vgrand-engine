@@ -98,7 +98,7 @@ const CREATIVE_SYSTEM = `You write image-generation prompts for sales advertisin
 
 Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (vertical 4:5 Instagram feed post unless the conversation specifies another platform or aspect ratio), bright, clean, balanced lighting with even exposure, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly, every word letter-perfect. Hard rule on readability: the whole background stays light and clean (white, cream, pastel or bright daylight scene); NEVER place a dark panel, black gradient, smoke, vignette or scrim behind text, and every word must sit on a light, uncluttered area with strong contrast. No dark overlays, muddy color casts, underexposure or heavy shadows anywhere unless the user explicitly asks for a dark or dramatic look. Use the same language as the user's campaign request for on-image copy; use natural Telugu for Telugu prompts unless another language is requested. Do not put social-media captions or hashtags on the image; captions and hashtags are delivered separately as text. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. "title" is a short label (max 6 words).
 
-Never depict real people or public figures — politicians, celebrities, historical leaders. Image providers refuse their likenesses, so the creative would fail. For occasions tied to a person (birth anniversaries, memorial days, founder tributes), use symbolic imagery instead: their iconic objects, signature colours, a famous quote as text, or the event's symbols.`;
+Never depict real people or public figures — politicians, celebrities, historical leaders. Image providers refuse their likenesses, so the creative would fail. For occasions tied to a person (birth anniversaries, memorial days, founder tributes), use symbolic imagery instead: their iconic objects, signature colours, a famous quote as text, or the event's symbols. If a brand mascot or character appears in a brief, render it as a small supporting cameo or accent — never the focal subject; the product and offer lead the composition.`;
 
 export interface CampaignCalendarPlan {
   dates: string[];
@@ -158,13 +158,16 @@ export function parseCampaignDateRange(
   return dateList(tomorrow, count);
 }
 
-export async function prepareCampaignCalendar(
-  prompt: string,
-  campaignContext: string,
+/**
+ * Look up verified Indian calendar events for an explicit set of dates
+ * (YYYY-MM-DD) and score each for relevance to the business. Used by both the
+ * /campaign chat planner and the brand-page autopilot scheduler.
+ */
+export async function researchCalendarEvents(
+  dates: string[],
+  context: string,
   brand: string | null,
-): Promise<CampaignCalendarPlan | null> {
-  const dates = parseCampaignDateRange(prompt);
-  if (!dates) return null;
+): Promise<CampaignCalendarPlan> {
   const emptyDays = dates.map((date) => ({ date, relevantEvent: null, reason: null }));
   let researchNotes = "";
   let sources: { title: string; url: string }[] = [];
@@ -172,7 +175,7 @@ export async function prepareCampaignCalendar(
   let verified = false;
   try {
     const search = await streamChatWithSearch(
-      `Find verified Indian calendar events falling on these exact dates: ${dates.join(", ")}. Include national days and observances, major festivals, and regional occasions only where relevant to the stated location/audience; include Telugu occasions when the brand location or audience indicates Telugu-speaking. Return a concise date-by-date candidate list, with region and source names. Do not invent events or move lunar-calendar dates. If none are found for a date, say none found.\n\nUser's calendar request:\n${prompt}\n\nBusiness and campaign context:\n${campaignContext.slice(0, 6000)}`,
+      `Find verified Indian calendar events falling on these exact dates: ${dates.join(", ")}. Include national days and observances, major festivals, and regional occasions only where relevant to the stated location/audience; include Telugu occasions when the brand location or audience indicates Telugu-speaking. Return a concise date-by-date candidate list, with region and source names. Do not invent events or move lunar-calendar dates. If none are found for a date, say none found.\n\nBusiness and campaign context:\n${context.slice(0, 6000)}`,
       [],
       [],
       [],
@@ -193,7 +196,7 @@ export async function prepareCampaignCalendar(
         },
         {
           role: "user",
-          content: `User's calendar request:\n${prompt}\n\nBusiness and campaign context:\n${campaignContext.slice(0, 6000)}\n\nRequested dates:\n${dates.join(", ")}\n\nCalendar search results:\n${researchNotes}`,
+          content: `Business and campaign context:\n${context.slice(0, 6000)}\n\nRequested dates:\n${dates.join(", ")}\n\nCalendar search results:\n${researchNotes}`,
         },
       ],
     });
@@ -216,6 +219,20 @@ export async function prepareCampaignCalendar(
     researchNotes = researchNotes || "Live Indian calendar lookup or event assessment was unavailable.";
   }
   return { dates, days, sources, researchNotes, verified };
+}
+
+export async function prepareCampaignCalendar(
+  prompt: string,
+  campaignContext: string,
+  brand: string | null,
+): Promise<CampaignCalendarPlan | null> {
+  const dates = parseCampaignDateRange(prompt);
+  if (!dates) return null;
+  return researchCalendarEvents(
+    dates,
+    `User's calendar request:\n${prompt}\n\nBusiness and campaign context:\n${campaignContext.slice(0, 6000)}`,
+    brand,
+  );
 }
 
 const MARKER = /<<CAMPAIGN_READY:(\d{1,2})>>/;

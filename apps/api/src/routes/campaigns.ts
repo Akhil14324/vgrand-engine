@@ -54,6 +54,8 @@ export async function campaignRoutes(app: FastifyInstance) {
         days: body.days ?? 7,
         platform: body.platform ?? "Instagram",
         instructions: body.instructions,
+        timezone: body.timezone,
+        brandName: brand.name,
       });
     } catch {
       throw new HttpError(

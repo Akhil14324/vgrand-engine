@@ -13,6 +13,7 @@ import {
   refundImageUsage,
 } from "../lib/usage.js";
 import { getClient } from "./chat.js";
+import { researchCalendarEvents } from "./campaign.js";
 import { enqueueGeneration } from "./queue.js";
 
 interface PlannedPost {
@@ -77,6 +78,31 @@ export function toCampaignPlanDto(plan: {
   };
 }
 
+/** Fall back to IST when the stored/passed zone isn't a valid IANA name. */
+function safeTimezone(tz?: string): string {
+  const zone = tz?.trim() || "Asia/Kolkata";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return zone;
+  } catch {
+    return "Asia/Kolkata";
+  }
+}
+
+/** Local calendar date + weekday for a timestamp in the plan's timezone. */
+function dayInZone(date: Date, tz: string): { date: string; label: string } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "long",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const ymd = `${get("year")}-${get("month")}-${get("day")}`;
+  return { date: ymd, label: `${ymd} (${get("weekday")})` };
+}
+
 /** Ask the chat model for a compact, date-aligned set of draft briefs. */
 export async function planAutopilotPosts(params: {
   brandSummary: string;
@@ -84,10 +110,32 @@ export async function planAutopilotPosts(params: {
   days: number;
   platform: string;
   instructions?: string;
+  timezone?: string;
+  brandName?: string;
 }): Promise<PlannedPost[]> {
-  const dates = Array.from({ length: params.days }, (_, i) =>
-    new Date(params.startAt.getTime() + i * 86_400_000).toISOString().slice(0, 10),
+  const tz = safeTimezone(params.timezone);
+  const days = Array.from({ length: params.days }, (_, i) =>
+    dayInZone(new Date(params.startAt.getTime() + i * 86_400_000), tz),
   );
+  const dates = days.map((d) => d.date);
+
+  // Same verified-event research the /campaign chat uses — the model is only
+  // allowed to theme a post around an event that appears in this list.
+  const calendar = await researchCalendarEvents(
+    dates,
+    `Brand: ${params.brandName ?? "the brand"}\n${params.brandSummary}\nPlatform: ${params.platform}\nExtra instructions: ${params.instructions?.trim() || "none"}`,
+    params.brandName ?? null,
+  ).catch(() => null);
+  const eventByDate = new Map(
+    (calendar?.days ?? []).map((d) => [d.date, d.relevantEvent]),
+  );
+  const dateLines = days
+    .map((day) => {
+      const event = eventByDate.get(day.date);
+      return event ? `${day.label} — verified event: ${event}` : day.label;
+    })
+    .join("\n");
+
   const res = await getClient().chat.completions.create({
     model: env.CHAT_MODEL,
     temperature: 0.6,
@@ -96,11 +144,11 @@ export async function planAutopilotPosts(params: {
       {
         role: "system",
         content:
-          "You plan practical social campaign drafts. Return JSON only with this shape: {\"posts\":[{\"date\":\"YYYY-MM-DD\",\"platform\":\"Instagram\",\"prompt\":\"standalone image brief\",\"caption\":\"ready-to-post caption\"}]}. Produce exactly one item for each requested date. Image prompts must be complete and stand alone. Never invent prices, claims, discounts, awards, testimonials, or event dates. Captions must not include image-generation instructions.",
+          "You plan practical social campaign drafts. Return JSON only with this shape: {\"posts\":[{\"date\":\"YYYY-MM-DD\",\"platform\":\"Instagram\",\"prompt\":\"standalone image brief\",\"caption\":\"ready-to-post caption\"}]}. Produce exactly one item for each requested date, in order. When a date lists a verified event that is relevant to the brand's audience, theme that day's image brief and caption around it — use symbolic, festive imagery and never depict real people or public figures. When no event is listed, create a normal on-brand post; never force a festival onto an ordinary day. If the brand has a mascot, treat it as a supporting cameo only — briefs may include it small or in a corner, never as the main subject. Image prompts must be complete and stand alone. Never invent events, prices, claims, discounts, awards, testimonials, or event dates beyond the list supplied. Captions must not include image-generation instructions.",
       },
       {
         role: "user",
-        content: `Brand context:\n${params.brandSummary}\n\nPlatform: ${params.platform}\nDates: ${dates.join(", ")}\nExtra instructions: ${params.instructions?.trim() || "none"}\n\nReturn the JSON schedule now.`,
+        content: `Brand context:\n${params.brandSummary}\n\nPlatform: ${params.platform}\nDates (${tz}, with weekday and any verified event):\n${dateLines}\nExtra instructions: ${params.instructions?.trim() || "none"}\n\nReturn the JSON schedule now.`,
       },
     ],
   });

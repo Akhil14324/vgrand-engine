@@ -31,6 +31,13 @@
   * {
     @apply border-border;
   }
+  html,
+  body {
+    /* A single wide child (table, image, canvas) must never push the page
+       past the viewport on phones — clip instead of sideways scroll. */
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";

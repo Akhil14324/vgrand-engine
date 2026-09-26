@@ -240,9 +240,13 @@ function InpaintDialog({
             transparent mask area is sent to the image model.
           </DialogDescription>
         </DialogHeader>
-        <div className="relative mx-auto w-fit max-h-[48vh] overflow-hidden rounded-lg border">
+        <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-lg border">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt={generation.prompt} className="max-h-[48vh] w-auto" />
+          <img
+            src={url}
+            alt={generation.prompt}
+            className="max-h-[48vh] w-auto max-w-full"
+          />
           <canvas
             ref={canvasRef}
             className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
