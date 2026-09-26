@@ -75,9 +75,9 @@ const FAILURE_LABEL: Record<SocialFailureCode, string> = {
 };
 
 /** Tomorrow 10:00 in local time, formatted for <input type="datetime-local">. */
-function defaultScheduleValue() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
+export function defaultScheduleValue(day?: Date) {
+  const d = day ? new Date(day) : new Date();
+  if (!day) d.setDate(d.getDate() + 1);
   d.setHours(10, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -277,7 +277,16 @@ function PostRow({
   );
 }
 
-function SocialShareBody({ generation }: { generation: GenerationDto }) {
+function SocialShareBody({
+  generation,
+  initialWhen,
+  onScheduled,
+}: {
+  generation: GenerationDto;
+  /** datetime-local value; opens straight into the schedule step for that time. */
+  initialWhen?: string;
+  onScheduled?: () => void;
+}) {
   const { data: conversation, isLoading: convLoading } = useConversation(
     generation.conversationId,
   );
@@ -341,8 +350,8 @@ function SocialShareBody({ generation }: { generation: GenerationDto }) {
     );
   };
 
-  const [scheduling, setScheduling] = useState(false);
-  const [when, setWhen] = useState(defaultScheduleValue);
+  const [scheduling, setScheduling] = useState(!!initialWhen);
+  const [when, setWhen] = useState(initialWhen ?? defaultScheduleValue());
   const scheduledDate = when ? new Date(when) : null;
   const scheduleValid =
     !!scheduledDate && !Number.isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now() + 60_000;
@@ -360,7 +369,8 @@ function SocialShareBody({ generation }: { generation: GenerationDto }) {
         onSuccess: () => {
           setSelected(new Set());
           setDrafts({});
-          setScheduling(false);
+          setScheduling(!!initialWhen);
+          if (scheduledFor) onScheduled?.();
         },
       },
     );
@@ -677,6 +687,33 @@ function SocialShareBody({ generation }: { generation: GenerationDto }) {
         </section>
       )}
     </div>
+  );
+}
+
+/** Controlled publishing dialog, e.g. opened from the Social Calendar for a chosen day. */
+export function SocialShareDialog({
+  generation,
+  open,
+  onOpenChange,
+  initialWhen,
+  onScheduled,
+}: {
+  generation: GenerationDto;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialWhen?: string;
+  onScheduled?: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88dvh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Social Sharing</DialogTitle>
+          <DialogDescription>Pick accounts, preview the copy, edit it, then post or schedule.</DialogDescription>
+        </DialogHeader>
+        {open && <SocialShareBody generation={generation} initialWhen={initialWhen} onScheduled={onScheduled} />}
+      </DialogContent>
+    </Dialog>
   );
 }
 

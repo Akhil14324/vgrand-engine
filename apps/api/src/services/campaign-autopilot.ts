@@ -79,7 +79,7 @@ export function toCampaignPlanDto(plan: {
 }
 
 /** Fall back to IST when the stored/passed zone isn't a valid IANA name. */
-function safeTimezone(tz?: string): string {
+export function safeTimezone(tz?: string): string {
   const zone = tz?.trim() || "Asia/Kolkata";
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: zone });
@@ -112,22 +112,40 @@ export async function planAutopilotPosts(params: {
   instructions?: string;
   timezone?: string;
   brandName?: string;
+  /** Explicit local dates (YYYY-MM-DD); overrides startAt/days spacing. */
+  dates?: string[];
+  /** Known holidays by date. When given, replaces the live web research. */
+  holidays?: Record<string, string>;
 }): Promise<PlannedPost[]> {
   const tz = safeTimezone(params.timezone);
-  const days = Array.from({ length: params.days }, (_, i) =>
-    dayInZone(new Date(params.startAt.getTime() + i * 86_400_000), tz),
-  );
+  const explicit = params.dates;
+  const days = explicit
+    ? explicit.map((date) => {
+        const weekday = new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", {
+          weekday: "long",
+          timeZone: "UTC",
+        });
+        return { date, label: `${date} (${weekday})` };
+      })
+    : Array.from({ length: params.days }, (_, i) =>
+        dayInZone(new Date(params.startAt.getTime() + i * 86_400_000), tz),
+      );
+  if (explicit) params = { ...params, days: explicit.length };
   const dates = days.map((d) => d.date);
 
   // Same verified-event research the /campaign chat uses — the model is only
   // allowed to theme a post around an event that appears in this list.
-  const calendar = await researchCalendarEvents(
+  const calendar = params.holidays
+    ? null
+    : await researchCalendarEvents(
     dates,
     `Brand: ${params.brandName ?? "the brand"}\n${params.brandSummary}\nPlatform: ${params.platform}\nExtra instructions: ${params.instructions?.trim() || "none"}`,
     params.brandName ?? null,
   ).catch(() => null);
-  const eventByDate = new Map(
-    (calendar?.days ?? []).map((d) => [d.date, d.relevantEvent]),
+  const eventByDate = new Map<string, string | null>(
+    params.holidays
+      ? Object.entries(params.holidays)
+      : (calendar?.days ?? []).map((d) => [d.date, d.relevantEvent]),
   );
   const dateLines = days
     .map((day) => {

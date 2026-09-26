@@ -798,3 +798,65 @@ export interface SocialCalendarItemDto extends SocialPostDto {
   mediaUrl: string;
   captionPreview: string;
 }
+
+/* ------------------------- holidays and AI calendar fill ------------------------- */
+
+export interface HolidayDto {
+  id: string;
+  /** Calendar date, YYYY-MM-DD. */
+  date: string;
+  name: string;
+  country: string;
+  region: string | null;
+  type: "national" | "festival" | "observance";
+}
+
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/** "Papaya": generate one on-brand image for a chosen calendar day. */
+export const calendarDayPostSchema = z.object({
+  brandId: z.string().uuid(),
+  date: ymd,
+  timezone: z.string().min(1).max(80).optional(),
+  instructions: z.string().max(800).optional(),
+});
+export type CalendarDayPostRequest = z.infer<typeof calendarDayPostSchema>;
+
+export interface CalendarDayPostDto {
+  generationId: string;
+  /** Holiday the idea was themed around, if the model judged one relevant. */
+  holiday: string | null;
+  caption: string | null;
+}
+
+/** "AI Fill": propose a content plan across a date range, nothing generated or published yet. */
+export const calendarFillSchema = z.object({
+  brandId: z.string().uuid(),
+  startDate: ymd,
+  endDate: ymd,
+  everyDays: z.number().int().min(1).max(14),
+  /** Local publish time, HH:mm. */
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  timezone: z.string().min(1).max(80).optional(),
+  platform: z.string().min(1).max(60).default("Instagram"),
+  holidays: z.enum(["suggest", "ignore"]).default("suggest"),
+  instructions: z.string().max(1000).optional(),
+});
+export type CalendarFillRequest = z.input<typeof calendarFillSchema>;
+
+/** A planned/generated campaign post placed on its publish date. */
+export interface CalendarPlanItemDto {
+  id: string;
+  planId: string;
+  brandId: string;
+  publishAt: string;
+  status: CampaignPostStatus;
+  /** Plan "paused" = proposed, waiting for the user to press Generate all. */
+  planStatus: CampaignPlanStatus;
+  platform: string | null;
+  prompt: string;
+  caption: string | null;
+  generationId: string | null;
+  imageUrl: string | null;
+  error: string | null;
+}

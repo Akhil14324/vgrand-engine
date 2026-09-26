@@ -94,6 +94,10 @@ export async function campaignRoutes(app: FastifyInstance) {
     const plan = await prisma.campaignPlan.findUnique({ where: { id } });
     if (!plan) throw notFound("Campaign plan not found");
     await findManageableBrand(req.userId, plan.brandId);
+    // A calendar plan starts paused ("proposed"); Generate all activates it.
+    if (plan.status === "paused") {
+      await prisma.campaignPlan.update({ where: { id }, data: { status: "active" } });
+    }
     await prisma.campaignPost.updateMany({
       where: { planId: id, status: "scheduled" },
       data: { scheduledFor: new Date() },

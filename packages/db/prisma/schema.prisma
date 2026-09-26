@@ -467,6 +467,8 @@ model CampaignPost {
   plan         CampaignPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
   generationId String?      @unique
   generation   Generation?  @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  // When the finished post should be PUBLISHED (scheduledFor is when it is generated).
+  publishAt    DateTime?
   scheduledFor DateTime
   platform     String?
   prompt       String       @db.Text
@@ -479,4 +481,19 @@ model CampaignPost {
 
   @@index([planId, scheduledFor])
   @@index([status, scheduledFor])
+}
+
+// Explicit calendar data (never LLM-invented). The Social Calendar shows these,
+// and the AI only decides which of them are relevant to a brand.
+model Holiday {
+  id      String   @id @default(uuid())
+  date    DateTime @db.Date
+  name    String
+  country String   @default("IN")
+  region  String?
+  type    String   @default("observance") // national | festival | observance
+  source  String   @default("curated")
+
+  @@unique([date, name, country])
+  @@index([date])
 }

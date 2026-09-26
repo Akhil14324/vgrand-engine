@@ -13,6 +13,7 @@
     "migrate": "prisma migrate dev",
     "push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
+    "seed:holidays": "tsx prisma/seed-holidays.ts",
     "studio": "prisma studio",
     "typecheck": "tsc --noEmit"
   },

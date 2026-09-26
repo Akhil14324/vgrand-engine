@@ -26,6 +26,7 @@ import { brandVoiceRoutes } from "./routes/brand-voice.js";
 import { voiceRoutes } from "./routes/voice.js";
 import { teamRoutes } from "./routes/team.js";
 import { socialCallbackRoutes, socialRoutes } from "./routes/social.js";
+import { socialCalendarRoutes } from "./routes/social-calendar.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -115,6 +116,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(voiceRoutes);
   await app.register(teamRoutes);
   await app.register(socialRoutes);
+  await app.register(socialCalendarRoutes);
   await app.register(socialCallbackRoutes);
 
   return app;

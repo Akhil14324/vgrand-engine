@@ -27,6 +27,11 @@ import type {
   Paginated,
   RegenerateGenerationRequest,
   ShareLinkDto,
+  CalendarDayPostDto,
+  CalendarDayPostRequest,
+  CalendarFillRequest,
+  CalendarPlanItemDto,
+  HolidayDto,
   SocialAccountDto,
   SocialCalendarItemDto,
   SocialPlatformsDto,
@@ -1077,4 +1082,69 @@ export function useUpdateCampaignPost() {
             : cur,
       ),
   });
+}
+
+/* ------------------------- holidays and AI calendar ------------------------ */
+
+const localYmd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+export function useHolidays(from: Date, to: Date) {
+  const f = localYmd(from);
+  const t = localYmd(to);
+  return useQuery({
+    queryKey: ["social", "holidays", f, t],
+    queryFn: () => apiFetch<{ items: HolidayDto[] }>(`/social/holidays?from=${f}&to=${t}`),
+    select: (d) => d.items,
+    staleTime: 3_600_000,
+  });
+}
+
+/** Proposed/generating/awaiting-approval campaign posts on their publish dates. */
+export function useCalendarPlan(from: Date, to: Date) {
+  return useQuery({
+    queryKey: ["social", "calendar-plan", from.toISOString(), to.toISOString()],
+    queryFn: () =>
+      apiFetch<{ items: CalendarPlanItemDto[] }>(
+        `/social/calendar-plan?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`,
+      ),
+    select: (d) => d.items,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((p) => p.status === "generating" || p.status === "scheduled" && p.planStatus === "active")
+        ? 5000
+        : 30_000,
+  });
+}
+
+export function useCreateDayPost() {
+  return useMutation({
+    mutationFn: (body: CalendarDayPostRequest) =>
+      apiFetch<CalendarDayPostDto>("/social/calendar/day-post", { method: "POST", json: body }),
+  });
+}
+
+export function useFillCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CalendarFillRequest) =>
+      apiFetch<{ planId: string; posts: number }>("/social/calendar/fill", { method: "POST", json: body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["social"] }),
+  });
+}
+
+export function useCalendarPlanActions() {
+  const qc = useQueryClient();
+  const done = () => qc.invalidateQueries({ queryKey: ["social"] });
+  return {
+    generateAll: useMutation({
+      mutationFn: (planId: string) =>
+        apiFetch<CampaignPlanDto>(`/campaigns/${planId}`, { method: "PATCH", json: { action: "generate_all" } }),
+      onSuccess: done,
+    }),
+    postAction: useMutation({
+      mutationFn: (v: { postId: string; action: UpdateCampaignPostRequest["action"] }) =>
+        apiFetch<CampaignPlanDto>(`/campaign-posts/${v.postId}`, { method: "PATCH", json: { action: v.action } }),
+      onSuccess: done,
+    }),
+  };
 }
