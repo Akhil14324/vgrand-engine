@@ -294,6 +294,7 @@ export async function generationRoutes(app: FastifyInstance) {
         prisma.generation.create({
         data: {
           userId: req.userId,
+          brandId: brand?.id ?? null,
           themeId: theme?.id ?? null,
           conversationId: chatId,
           kind,
@@ -430,6 +431,7 @@ export async function generationRoutes(app: FastifyInstance) {
         metadata: true,
         parentId: true,
         conversationId: true,
+        brandId: true,
         createdAt: true,
         theme: { select: { id: true, slug: true, label: true, icon: true } },
       },
@@ -528,6 +530,7 @@ export async function generationRoutes(app: FastifyInstance) {
     const child = await prisma.generation.create({
       data: {
         userId: req.userId,
+        brandId: brand?.id ?? null,
         themeId: parent.themeId,
         conversationId: parent.conversationId,
         prompt,

@@ -1,5 +1,6 @@
 "use client";
 
+import { RequireAuth } from "@/components/require-auth";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -48,6 +49,9 @@ import {
 } from "@/lib/hooks";
 import { useBrandMode } from "@/lib/brand-mode";
 import { VoiceSection } from "@/components/voice-section";
+import { BrandKitSection } from "@/components/brand-kit-section";
+import { BrandGuidelinesSection } from "@/components/brand-guidelines-section";
+import { ComplianceSection } from "@/components/brand-compliance";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -72,20 +76,11 @@ const DOC_ACCEPT =
   "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx";
 
 export function BrandView() {
-  const router = useRouter();
-  const { user, loading } = useAuth();
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
-  if (loading) {
-    return (
-      <div className="flex h-dvh items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-  if (!user) return null;
-  return <BrandContent />;
+  return (
+    <RequireAuth>
+      <BrandContent />
+    </RequireAuth>
+  );
 }
 
 function BrandContent() {
@@ -835,6 +830,9 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
       </Section>
 
       <AssetsSection brand={brand} />
+      <BrandKitSection brand={brand} />
+      <BrandGuidelinesSection brand={brand} />
+      <ComplianceSection brand={brand} />
       <MascotSection brand={brand} />
       <CampaignSection brand={brand} />
       <VoiceSection brand={brand} />
@@ -895,9 +893,9 @@ function AssetsSection({ brand }: { brand: BrandDto }) {
         <FilePick accept="image/*" multiple label="Add product photos" busy={busy} onFiles={(f) => upload(f, "product")} />
       </div>
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-      {brand.assets.length > 0 && (
+      {brand.assets.some((a) => a.kind !== "font") && (
         <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
-          {brand.assets.map((a) => (
+          {brand.assets.filter((a) => a.kind !== "font").map((a) => (
             <div key={a.id} className="group relative aspect-square overflow-hidden rounded-lg border">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={a.url} alt={a.label ?? a.kind} className="h-full w-full object-cover" />

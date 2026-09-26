@@ -38,6 +38,9 @@ import {
   useSocialPreview,
   useWorkspaces,
 } from "@/lib/hooks";
+import { ApiRequestError } from "@/lib/api";
+import { toast } from "@/components/ui/toaster";
+import { useRewriteCaption } from "@/lib/brand-compliance-hooks";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -382,7 +385,39 @@ function SocialShareBody({
   const scheduleValid =
     !!scheduledDate && !Number.isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now() + 60_000;
 
-  const post = (scheduledFor?: string) => {
+  // Brand rules: the server blocks copy with a forbidden word/claim unless overridden.
+  const rewrite = useRewriteCaption();
+  const [lastScheduledFor, setLastScheduledFor] = useState<string | undefined>();
+  const brandId = typeof generation.metadata?.brandId === "string" ? generation.metadata.brandId : null;
+  const blocked =
+    create.error instanceof ApiRequestError && create.error.code === "COMPLIANCE_BLOCKED"
+      ? ((create.error.details as { findings?: { id: string; detail: string }[] } | undefined)?.findings ?? [])
+      : null;
+
+  const fixWording = async () => {
+    if (!brandId) return;
+    const issues = (blocked ?? []).map((f) => f.detail);
+    const next = { ...drafts };
+    try {
+      for (const platform of neededPlatforms) {
+        const d = next[platform];
+        if (!d) continue;
+        const field = platform === "youtube" ? "description" : "caption";
+        const text = (d as unknown as Record<string, string>)[field];
+        if (!text?.trim()) continue;
+        const res = await rewrite.mutateAsync({ brandId, caption: text, issues });
+        (next as Record<string, unknown>)[platform] = { ...d, [field]: res.caption };
+      }
+      setDrafts(next);
+      create.reset();
+    } catch (e) {
+      // Keep the warning visible so the user can edit by hand or post anyway.
+      toast.error(e instanceof Error ? e.message : "Couldn't rewrite the copy");
+    }
+  };
+
+  const post = (scheduledFor?: string, complianceOverride?: boolean) => {
+    setLastScheduledFor(scheduledFor);
     create.mutate(
       {
         posts: selectedAccounts.map((a) => {
@@ -390,6 +425,7 @@ function SocialShareBody({
           return { accountId: a.id, content: d as Record<string, unknown> };
         }),
         scheduledFor,
+        complianceOverride,
       },
       {
         onSuccess: () => {
@@ -726,7 +762,30 @@ function SocialShareBody({
               </>
             )}
           </div>
-          {create.isError && <p className="text-xs text-destructive">{create.error.message}</p>}
+          {blocked ? (
+            <div className="space-y-2 rounded-md border border-destructive/40 p-2.5 text-xs">
+              <p className="font-medium text-destructive">This copy breaks your brand rules</p>
+              <ul className="list-disc space-y-0.5 pl-4">
+                {blocked.map((f) => (
+                  <li key={f.id}>{f.detail}</li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                {brandId && (
+                  <Button size="sm" onClick={fixWording} disabled={rewrite.isPending}>
+                    {rewrite.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                    Fix wording with AI
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => post(lastScheduledFor, true)} disabled={create.isPending}>
+                  Post anyway
+                </Button>
+              </div>
+              <p className="text-muted-foreground">Posting anyway is recorded against the brand.</p>
+            </div>
+          ) : (
+            create.isError && <p className="text-xs text-destructive">{create.error.message}</p>
+          )}
         </div>
       )}
 

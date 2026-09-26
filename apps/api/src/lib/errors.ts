@@ -5,6 +5,8 @@ export class HttpError extends Error {
     public statusCode: number,
     message: string,
     public code?: string,
+    /** Structured, client-safe extra data (e.g. compliance findings). */
+    public details?: unknown,
   ) {
     super(message);
     this.name = "HttpError";

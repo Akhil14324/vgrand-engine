@@ -105,6 +105,7 @@ async function startBrandImage(
   const generation = await prisma.generation.create({
     data: {
       userId,
+      brandId: brand?.id ?? null,
       kind: "image",
       prompt,
       finalPrompt:

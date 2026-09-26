@@ -49,6 +49,9 @@ model Brand {
   voice       BrandVoice?
   documents   Document[]
   campaignPlans CampaignPlan[]
+  generations Generation[]
+  guidelines  BrandGuidelines?
+  complianceChecks ComplianceCheck[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -126,10 +129,34 @@ model Workspace {
   invites        WorkspaceInvite[]
   teamMessages   TeamMessage[]
   socialAccounts SocialAccount[]
+  // Generated images older than this many days are deleted automatically (null = keep).
+  retentionDays  Int?
+  consentRecords ConsentRecord[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
   @@index([userId, updatedAt(sort: Desc)])
+}
+
+// Audit trail of consent (e.g. to repost someone's content). Records are
+// revoked, never edited or deleted, so the history stays trustworthy.
+// kind: ugc_repost | testimonial | dm_contact | other
+model ConsentRecord {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brandId     String?
+  createdBy   String
+  subject     String
+  kind        String
+  scope       String?   @db.Text
+  evidenceUrl String?
+  grantedAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  revokedBy   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, createdAt(sort: Desc)])
 }
 
 // A "chat" — groups generations into a conversation you can revisit and
@@ -191,6 +218,9 @@ model Generation {
   children       Generation[]  @relation("GenerationChain")
   conversationId String? // chat this generation belongs to
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // Brand this was made for (mirrors metadata.brandId so reports can query it).
+  brandId        String?
+  brand          Brand?        @relation(fields: [brandId], references: [id], onDelete: SetNull)
   shareLinks     ShareLink[]
   approvalLinks  ApprovalLink[]
   campaignPost   CampaignPost?
@@ -201,6 +231,7 @@ model Generation {
   @@index([userId, createdAt(sort: Desc)])
   @@index([themeId])
   @@index([conversationId, createdAt(sort: Desc)])
+  @@index([brandId, createdAt(sort: Desc)])
 }
 
 model Memory {
@@ -401,6 +432,41 @@ model SocialPost {
   @@index([generationId])
   @@index([userId, createdAt(sort: Desc)])
   @@index([status, scheduledFor])
+}
+
+// The brand's written guidelines (markdown, edited in-app). Saving re-derives
+// the matching Brand.profile fields, so this document steers every generation.
+model BrandGuidelines {
+  id        String   @id @default(uuid())
+  brandId   String   @unique
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  version   Int      @default(1)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One row per compliance check. Rule findings are objective; AI findings are
+// opinion and kept apart. status: pass | attention | blocked.
+model ComplianceCheck {
+  id           String   @id @default(uuid())
+  brandId      String
+  brand        Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId       String
+  generationId String?
+  imageUrl     String?
+  caption      String?  @db.Text
+  status       String
+  ruleFindings Json
+  aiFindings   Json?
+  aiSkippedReason String?
+  // True when the user posted despite a failed rule (server-recorded).
+  overridden   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([brandId, createdAt(sort: Desc)])
+  @@index([generationId])
 }
 
 // One active mascot identity per brand. The canonical image is a normal brand

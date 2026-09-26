@@ -283,6 +283,7 @@ export async function brandRoutes(app: FastifyInstance) {
     const generation = await prisma.generation.create({
       data: {
         userId: req.userId,
+        brandId: brand.id,
         kind: "image",
         prompt: brief,
         finalPrompt:

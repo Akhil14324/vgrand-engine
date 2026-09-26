@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspacePrivacy } from "@/components/workspace-privacy";
+import { RequireAuth } from "@/components/require-auth";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -39,23 +41,11 @@ const DOC_ACCEPT =
   "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,.doc,.docx";
 
 export function WorkspacesView() {
-  const router = useRouter();
-  const { user, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
-
-  if (loading) {
-    return (
-      <div className="flex h-dvh items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-  if (!user) return null;
-
-  return <WorkspaceContent />;
+  return (
+    <RequireAuth>
+      <WorkspaceContent />
+    </RequireAuth>
+  );
 }
 
 function WorkspaceContent() {
@@ -219,7 +209,7 @@ function WorkspaceDetail({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
-  const [tab, setTab] = useState<"files" | "team">("files");
+  const [tab, setTab] = useState<"files" | "team" | "privacy">("files");
 
   if (!workspace) {
     return <div className="shimmer h-40 w-full rounded-xl" />;
@@ -352,6 +342,7 @@ function WorkspaceDetail({
           [
             ["files", "Files"],
             ["team", "Team chat"],
+            ["privacy", "Privacy & data"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -368,6 +359,10 @@ function WorkspaceDetail({
       </div>
 
       {tab === "team" && <TeamChat workspaceId={workspaceId} />}
+
+      {tab === "privacy" && (
+        <WorkspacePrivacy workspaceId={workspaceId} name={workspace.name} isOwner={workspace.role === "owner"} />
+      )}
 
       {uploadError && tab === "files" && (
         <p className="text-xs text-destructive">{uploadError}</p>

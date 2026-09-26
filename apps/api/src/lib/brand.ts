@@ -233,7 +233,7 @@ export function isOwnStorageUrl(url: string): boolean {
  * userId is given the brand must be usable by them (else null).
  */
 export async function loadBrandContext(brandId: string, userId?: string) {
-  return prisma.brand.findFirst({
+  const brand = await prisma.brand.findFirst({
     where: {
       id: brandId,
       ...(userId
@@ -260,6 +260,12 @@ export async function loadBrandContext(brandId: string, userId?: string) {
       },
     },
   });
+  // When the real logo is stamped on afterwards (brand kit), the model must not
+  // receive it as a reference or it would draw a second, distorted copy.
+  if (brand && (brand.profile as BrandProfile | null)?.overlayDefault) {
+    return { ...brand, assets: brand.assets.filter((a) => a.kind !== "logo") };
+  }
+  return brand;
 }
 
 /** Logo first, then mascot, products, references - capped so references stay light. */
@@ -291,6 +297,11 @@ export function brandImageGuidance(
   mascot?: { name: string; description: string; status: string } | null,
 ): string {
   const parts = [`\nBrand: ${name}. Keep the creative on-brand.`];
+  if (profile.overlayDefault && profile.logoPlacement) {
+    parts.push(
+      `The real logo is added afterwards in the ${profile.logoPlacement.corner} corner: do not draw any logo, watermark or brand lettering, and keep that corner uncluttered.`,
+    );
+  }
   if (profile.colors?.length) {
     parts.push(`Brand colours: ${profile.colors.join(", ")}.`);
   }

@@ -48,6 +48,8 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { CalendarApproveButton, SocialShareButton } from "@/components/social-share";
+import { ApplyBrandKitButton } from "@/components/brand-kit-section";
+import { ComplianceCheckButton } from "@/components/brand-compliance";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1041,6 +1043,8 @@ export function ActionRow({
         </Tooltip>
       )}
       {ready && <RegenerateButton generation={generation} />}
+      {ready && <ApplyBrandKitButton generation={generation} />}
+      {ready && <ComplianceCheckButton generation={generation} />}
       {ready && <CalendarApproveButton generation={generation} />}
       {ready && <SocialShareButton generation={generation} />}
       <Tooltip>

@@ -41,6 +41,8 @@ import {
   useUpdateConversation,
 } from "@/lib/hooks";
 import { ImageUsage } from "@/components/image-usage";
+import { BrandSwitcher } from "@/components/brand-switcher";
+import { NAV_ITEMS } from "@/lib/nav";
 import { InstallButton } from "@/components/pwa";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -169,33 +171,17 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
+      <BrandSwitcher />
+
       {/* Primary nav */}
       <nav className="flex flex-col gap-0.5 px-2 pt-1">
         <NavRow icon={SquarePen} label="New chat" onClick={newChat} />
-        <NavRow
-          icon={LayoutGrid}
-          label="Workspace"
-          href="/workspaces"
-          onNavigate={onNavigate}
-        />
-        <NavRow
-          icon={Store}
-          label="Brand"
-          href="/brand"
-          onNavigate={onNavigate}
-        />
-        <NavRow
-          icon={ImageIcon}
-          label="Library"
-          href="/library"
-          onNavigate={onNavigate}
-        />
-        <NavRow
-          icon={CalendarDays}
-          label="Social Calendar"
-          href="/calendar"
-          onNavigate={onNavigate}
-        />
+        {NAV_ITEMS.map((item, i) => (
+          <div key={item.href} className="contents">
+            {item.group && item.group !== NAV_ITEMS[i - 1]?.group && <SectionLabel label={item.group} />}
+            <NavRow icon={item.icon} label={item.label} href={item.href} onNavigate={onNavigate} />
+          </div>
+        ))}
         <button
           onClick={() => setThemesOpen((v) => !v)}
           className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-accent"

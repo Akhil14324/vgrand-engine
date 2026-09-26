@@ -425,6 +425,9 @@ export interface GenerationEvent {
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "use a hex colour like #C0392B");
 
+export const LOGO_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+export type LogoCorner = (typeof LOGO_CORNERS)[number];
+
 /**
  * Answers to the guided brand questionnaire. Everything is optional so the
  * kit is useful after the first section; the more filled in, the better the
@@ -460,10 +463,29 @@ export const brandProfileSchema = z.object({
   forbiddenClaims: z.array(z.string().max(160)).max(20).optional(),
   defaultCta: z.string().max(160).optional(),
   contentLanguages: z.array(z.string().max(40)).max(4).optional(),
+  /** Brand kit: where the real logo file is placed on images (see brand-compose). */
+  logoPlacement: z
+    .object({
+      corner: z.enum(LOGO_CORNERS),
+      /** Logo width as a percentage of the image width. */
+      sizePct: z.number().min(6).max(40),
+      /** Distance from the edges as a percentage of the image width. */
+      marginPct: z.number().min(1).max(12),
+    })
+    .optional(),
+  /** Uploaded font assets (BrandAsset ids of kind "font") used for headline/CTA text. */
+  fonts: z
+    .object({
+      heading: z.string().uuid().optional(),
+      body: z.string().uuid().optional(),
+    })
+    .optional(),
+  /** Stamp the real logo on every new brand image automatically. */
+  overlayDefault: z.boolean().optional(),
 });
 export type BrandProfile = z.infer<typeof brandProfileSchema>;
 
-export const BRAND_ASSET_KINDS = ["logo", "product", "mascot", "reference"] as const;
+export const BRAND_ASSET_KINDS = ["logo", "product", "mascot", "reference", "font"] as const;
 export type BrandAssetKind = (typeof BRAND_ASSET_KINDS)[number];
 
 export const createBrandSchema = z.object({
@@ -488,6 +510,91 @@ export const createBrandAssetSchema = z.object({
   label: z.string().max(120).optional(),
 });
 export type CreateBrandAssetRequest = z.infer<typeof createBrandAssetSchema>;
+
+export interface BrandGuidelinesDto {
+  brandId: string;
+  /** Markdown; edited in the app. */
+  content: string;
+  version: number;
+  updatedAt: string;
+}
+/** Result of saving: which brand profile fields the edit changed (they steer all future content). */
+export interface BrandGuidelinesSaveDto extends BrandGuidelinesDto {
+  updatedFields: string[];
+}
+export const saveBrandGuidelinesSchema = z.object({ content: z.string().trim().min(1).max(40_000) });
+export type SaveBrandGuidelinesRequest = z.infer<typeof saveBrandGuidelinesSchema>;
+export const exportBrandGuidelinesSchema = z.object({ format: z.enum(["pdf", "docx"]) });
+export type ExportBrandGuidelinesRequest = z.infer<typeof exportBrandGuidelinesSchema>;
+
+/* ------------------------------ brand compliance ------------------------------ */
+
+/** pass = fine, info = FYI only, warn = worth a look, fail = breaks a hard brand rule. */
+export const COMPLIANCE_SEVERITIES = ["pass", "info", "warn", "fail"] as const;
+export type ComplianceSeverity = (typeof COMPLIANCE_SEVERITIES)[number];
+export type ComplianceStatus = "pass" | "attention" | "blocked";
+
+/** Objective, reproducible check (word lists, pixels, dimensions). */
+export interface RuleFindingDto {
+  id: string;
+  label: string;
+  severity: ComplianceSeverity;
+  detail: string;
+}
+/** A model's opinion. Never blocks; shown separately and labelled as opinion. */
+export interface AiFindingDto {
+  aspect: string;
+  verdict: "ok" | "concern";
+  note: string;
+  suggestion?: string;
+}
+export interface ComplianceCheckDto {
+  id: string;
+  brandId: string;
+  generationId: string | null;
+  imageUrl: string | null;
+  caption: string | null;
+  status: ComplianceStatus;
+  ruleFindings: RuleFindingDto[];
+  /** null when the AI review was skipped or unavailable (see aiSkippedReason). */
+  aiFindings: AiFindingDto[] | null;
+  aiSkippedReason: string | null;
+  createdAt: string;
+}
+
+export const complianceCheckSchema = z
+  .object({
+    generationId: z.string().uuid().optional(),
+    /** An image uploaded through /uploads. */
+    imageUrl: z.string().url().optional(),
+    caption: z.string().max(5000).optional(),
+    /** Platforms the creative is meant for (enables format checks). */
+    platforms: z.array(z.enum(["instagram", "facebook", "x", "youtube"])).max(4).optional(),
+    /** Set false for the instant, rules-only check. */
+    ai: z.boolean().optional(),
+  })
+  .refine((v) => v.generationId || v.imageUrl || v.caption?.trim(), "Provide an image or a caption");
+export type ComplianceCheckRequest = z.infer<typeof complianceCheckSchema>;
+
+export const rewriteCaptionSchema = z.object({
+  caption: z.string().trim().min(1).max(5000),
+  issues: z.array(z.string().max(300)).max(12).optional(),
+});
+export type RewriteCaptionRequest = z.infer<typeof rewriteCaptionSchema>;
+export interface RewriteCaptionDto {
+  caption: string;
+  /** Rule findings for the rewritten text - it may still need a look. */
+  ruleFindings: RuleFindingDto[];
+}
+
+/** "Apply brand kit" on an existing image: real logo plus optional headline / CTA text. */
+export const applyBrandKitSchema = z.object({
+  brandId: z.string().uuid(),
+  logo: z.boolean().default(true),
+  headline: z.string().trim().max(120).optional(),
+  cta: z.string().trim().max(40).optional(),
+});
+export type ApplyBrandKitRequest = z.input<typeof applyBrandKitSchema>;
 
 export interface BrandAssetDto {
   id: string;
@@ -759,6 +866,8 @@ export type SocialPostRequest = z.infer<typeof socialPostRequestSchema>;
 
 export const socialPostCreateRequestSchema = z.object({
   posts: z.array(socialPostRequestSchema).min(1).max(12),
+  /** Post even though the copy breaks a brand rule (forbidden word/claim). Recorded. */
+  complianceOverride: z.boolean().optional(),
   /** ISO instant. Omitted = post now; present = publish then (must be in the future). */
   scheduledFor: z.string().datetime().optional(),
 });
@@ -887,3 +996,4 @@ export interface CalendarPlanItemDto {
   imageUrl: string | null;
   error: string | null;
 }
+export * from "./privacy";

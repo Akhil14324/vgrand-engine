@@ -10,6 +10,8 @@ export class ApiRequestError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
+    public details?: unknown,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -55,13 +57,17 @@ export async function apiFetch<T>(
   const res = await fetch(`${API_URL}${path}`, { ...init, headers, body });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
+    let code: string | undefined;
+    let details: unknown;
     try {
-      const data = (await res.json()) as { message?: string };
+      const data = (await res.json()) as { message?: string; code?: string; details?: unknown };
       if (data.message) message = data.message;
+      code = data.code;
+      details = data.details;
     } catch {
       // keep default message
     }
-    throw new ApiRequestError(res.status, message);
+    throw new ApiRequestError(res.status, message, code, details);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

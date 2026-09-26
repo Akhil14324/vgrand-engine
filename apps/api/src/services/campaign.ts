@@ -475,6 +475,7 @@ export async function spawnCreatives(params: {
       data: {
         userId,
         conversationId,
+        brandId: params.brandId ?? null,
         kind: "image",
         prompt: brief.prompt,
         finalPrompt:

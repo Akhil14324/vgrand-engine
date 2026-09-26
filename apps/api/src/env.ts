@@ -90,6 +90,9 @@ const envSchema = z.object({
 
   /** Social publishing. SOCIAL_TOKEN_KEY = 64 hex chars (openssl rand -hex 32); validated on use. */
   SOCIAL_TOKEN_KEY: opt(z.string().min(1)),
+  /** Email via Resend (weekly report, newsletters). EMAIL_FROM must be on a domain verified in Resend. */
+  RESEND_API_KEY: opt(z.string().min(1)),
+  EMAIL_FROM: opt(z.string().min(3)),
   META_APP_ID: opt(z.string().min(1)),
   META_APP_SECRET: opt(z.string().min(1)),
   /** Graph API version, e.g. "v23.0". Meta retires old versions - bump when needed. */
@@ -149,6 +152,16 @@ export const env = {
   /** Meta needs the app credentials plus the token key to store what it returns. */
   get metaConfigured(): boolean {
     return Boolean(this.META_APP_ID && this.META_APP_SECRET && this.SOCIAL_TOKEN_KEY);
+  },
+  get emailConfigured(): boolean {
+    return Boolean(this.RESEND_API_KEY);
+  },
+  /** Resend's shared sender only delivers to the Resend account owner until a domain is verified. */
+  get emailSender(): string {
+    return this.EMAIL_FROM ?? "onboarding@resend.dev";
+  },
+  get emailSandbox(): boolean {
+    return !this.EMAIL_FROM;
   },
   get xConfigured(): boolean {
     return Boolean(this.X_CLIENT_ID && this.X_CLIENT_SECRET && this.SOCIAL_TOKEN_KEY);

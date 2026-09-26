@@ -24,6 +24,8 @@ import {
 import { recoverSocialPosts, runSocialPost } from "./social/publish.js";
 import { publishGenerationEvent } from "./events.js";
 import { storeImage } from "./storage.js";
+import { composeBrandKit, loadAutoStampKit } from "./brand-compose.js";
+import { startRetentionScheduler } from "./workspace-privacy.js";
 import {
   loadChatHistory,
   runWithCodeInterpreter,
@@ -79,6 +81,7 @@ class GenerationCancelled extends Error {}
 export function startGenerationWorker(): Worker | null {
   startCampaignScheduler();
   startSocialScheduler();
+  startRetentionScheduler();
   if (!env.redisConfigured) {
     // No queue — enqueueGeneration() calls runGeneration() directly. Rows
     // left pending/processing by a previous boot would never resume, so
@@ -759,15 +762,44 @@ export async function runGeneration(generationId: string): Promise<void> {
     // so we never pay to persist images nobody will see.
     if (cancelFlag) throw new GenerationCancelled();
 
+    // Brand kit: stamp the REAL logo on fresh brand images (never on edit
+    // chains, whose reference may already carry it, or on mascot candidates).
+    const stampKit =
+      !generation.parentId && !meta.editOperation && !(meta as { mascotCandidate?: unknown }).mascotCandidate
+        ? await loadAutoStampKit(generation.brandId ?? (typeof meta.brandId === "string" ? meta.brandId : null)).catch(
+            () => null,
+          )
+        : null;
+
+    let brandKitStamped = false;
     const imageUrls = await Promise.all(
-      result.images.map((img, i) =>
-        storeImage({
-          buffer: img.b64Json ? Buffer.from(img.b64Json, "base64") : undefined,
-          sourceUrl: img.url,
-          mimeType: img.mimeType,
+      result.images.map(async (img, i) => {
+        let buffer: Buffer | undefined = img.b64Json ? Buffer.from(img.b64Json, "base64") : undefined;
+        let sourceUrl = img.url;
+        let mimeType = img.mimeType;
+        if (stampKit) {
+          try {
+            const raw =
+              buffer ?? Buffer.from(await (await fetch(img.url!, { signal: AbortSignal.timeout(30_000) })).arrayBuffer());
+            const stamped = await composeBrandKit(raw, stampKit, { logo: true });
+            if (stamped) {
+              buffer = stamped;
+              brandKitStamped = true;
+              sourceUrl = undefined;
+              mimeType = "image/png";
+            }
+          } catch (err) {
+            // Fail open: an unstamped image beats a failed generation.
+            console.warn("[worker] brand-kit stamp skipped:", err instanceof Error ? err.message : err);
+          }
+        }
+        return storeImage({
+          buffer,
+          sourceUrl,
+          mimeType,
           keyPrefix: `generations/${generationId}/${i}`,
-        }),
-      ),
+        });
+      }),
     );
 
     let campaignPostCopy: string | null = null;
@@ -804,6 +836,7 @@ export async function runGeneration(generationId: string): Promise<void> {
         metadata: {
           ...meta,
           ...result.metadata,
+          ...(brandKitStamped ? { brandKitStamped: true } : {}),
           latencyMs: Date.now() - startedAt,
         },
       },

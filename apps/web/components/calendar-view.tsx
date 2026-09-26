@@ -1,5 +1,6 @@
 "use client";
 
+import { RequireAuth } from "@/components/require-auth";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -98,20 +99,11 @@ function toLocalInput(d: Date) {
 }
 
 export function CalendarView() {
-  const router = useRouter();
-  const { user, loading } = useAuth();
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
-  if (loading) {
-    return (
-      <div className="flex h-dvh items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-  if (!user) return null;
-  return <CalendarContent />;
+  return (
+    <RequireAuth>
+      <CalendarContent />
+    </RequireAuth>
+  );
 }
 
 /* ------------------------------ entry cards ------------------------------ */

@@ -23,6 +23,10 @@ import { uploadRoutes } from "./routes/uploads.js";
 import { documentRoutes } from "./routes/documents.js";
 import { brandRoutes } from "./routes/brands.js";
 import { brandVoiceRoutes } from "./routes/brand-voice.js";
+import { brandKitRoutes } from "./routes/brand-kit.js";
+import { brandGuidelinesRoutes } from "./routes/brand-guidelines.js";
+import { brandComplianceRoutes } from "./routes/brand-compliance.js";
+import { workspacePrivacyRoutes } from "./routes/workspace-privacy.js";
 import { voiceRoutes } from "./routes/voice.js";
 import { teamRoutes } from "./routes/team.js";
 import { socialCallbackRoutes, socialRoutes } from "./routes/social.js";
@@ -77,7 +81,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (err instanceof HttpError) {
       return reply
         .code(err.statusCode)
-        .send({ statusCode: err.statusCode, error: err.name, message: err.message });
+        .send({
+          statusCode: err.statusCode,
+          error: err.name,
+          message: err.message,
+          ...(err.code ? { code: err.code } : {}),
+          ...(err.details !== undefined ? { details: err.details } : {}),
+        });
     }
     if (err instanceof ZodError) {
       return reply
@@ -113,6 +123,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(documentRoutes);
   await app.register(brandRoutes);
   await app.register(brandVoiceRoutes);
+  await app.register(brandKitRoutes);
+  await app.register(brandGuidelinesRoutes);
+  await app.register(brandComplianceRoutes);
+  await app.register(workspacePrivacyRoutes);
   await app.register(voiceRoutes);
   await app.register(teamRoutes);
   await app.register(socialRoutes);

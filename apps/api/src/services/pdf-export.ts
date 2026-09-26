@@ -156,13 +156,19 @@ export function renderMarkdownPdf(
   title: string,
   markdown: string,
   /** bare: no "Exported from CatGPT" title block — the markdown is the whole document. */
-  opts: { bare?: boolean } = {},
+  opts: {
+    bare?: boolean;
+    /** Value for the PDF "Creator" metadata (defaults to the app name). */
+    creator?: string;
+    /** Draws extra content (e.g. a logo, colour swatches) before the markdown body. */
+    beforeBody?: (doc: InstanceType<typeof PDFDocument>) => void;
+  } = {},
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
       margins: { top: 56, bottom: 56, left: 56, right: 56 },
-      info: { Title: title, Creator: "CatGPT" },
+      info: { Title: title, Creator: opts.creator ?? "CatGPT" },
     });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
@@ -191,6 +197,8 @@ export function renderMarkdownPdf(
         .stroke();
       doc.moveDown(0.9);
     }
+
+    opts.beforeBody?.(doc);
 
     const writeSegments = (segments: Segment[], baseSize: number) => {
       segments.forEach((seg, idx) => {

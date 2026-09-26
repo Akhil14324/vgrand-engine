@@ -856,6 +856,8 @@ export function useCreateSocialPosts(generationId: string) {
       posts: { accountId: string; content: SocialPostContent }[];
       /** ISO instant; omit to post now. */
       scheduledFor?: string;
+      /** Post despite a failed brand rule (recorded on the server). */
+      complianceOverride?: boolean;
     }) =>
       apiFetch<{ items: SocialPostDto[] }>(`/generations/${generationId}/social-posts`, {
         method: "POST",

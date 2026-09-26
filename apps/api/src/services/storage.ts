@@ -70,6 +70,8 @@ export interface StoreImageInput {
   sourceUrl?: string;
   mimeType?: string;
   keyPrefix: string;
+  /** Overrides the extension derived from mimeType (e.g. "ttf" for fonts). */
+  ext?: string;
 }
 
 export async function storeImage(input: StoreImageInput): Promise<string> {
@@ -97,7 +99,7 @@ export async function storeImage(input: StoreImageInput): Promise<string> {
   }
   if (!buffer) throw new Error("storeImage: no buffer or sourceUrl");
 
-  const ext = EXT_BY_MIME[mimeType ?? ""] ?? "png";
+  const ext = input.ext ?? EXT_BY_MIME[mimeType ?? ""] ?? "png";
   const key = `${input.keyPrefix}/${randomBytes(8).toString("hex")}.${ext}`;
 
   const client = getSupabase();

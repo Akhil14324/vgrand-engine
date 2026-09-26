@@ -228,6 +228,7 @@ async function processDueCampaignPosts(): Promise<void> {
       const generation = await prisma.generation.create({
         data: {
           userId: post.plan.userId,
+          brandId: brand.id,
           conversationId: post.plan.conversationId,
           kind: "image",
           prompt: post.prompt,

@@ -14,6 +14,7 @@ import { enqueueSocialPost } from "../queue.js";
 import { findUsableAccount } from "./accounts.js";
 import { isRetryableFailure, SocialPublishError } from "./errors.js";
 import { fitImageForInstagram } from "./media/reframe.js";
+import { enforceBrandRulesOnPosts } from "../brand-compliance.js";
 
 /* --------------------------- content validation --------------------------- */
 
@@ -314,6 +315,14 @@ export async function createSocialPosts(
       throw err;
     }
   }
+
+  // Brand rules: forbidden words/claims block posting unless the user overrides (recorded).
+  await enforceBrandRulesOnPosts(
+    userId,
+    generation,
+    prepared.map((p) => p.content),
+    body.complianceOverride === true,
+  );
 
   const inFlight = await prisma.socialPost.findFirst({
     where: { generationId, accountId: { in: ids }, status: { in: ["pending", "posting"] } },
