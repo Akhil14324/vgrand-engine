@@ -15,6 +15,7 @@ import {
   Store,
   LogOut,
   MoreHorizontal,
+  CalendarDays,
   PanelLeftClose,
   Pencil,
   Pin,
@@ -187,6 +188,12 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           icon={ImageIcon}
           label="Library"
           href="/library"
+          onNavigate={onNavigate}
+        />
+        <NavRow
+          icon={CalendarDays}
+          label="Social Calendar"
+          href="/calendar"
           onNavigate={onNavigate}
         />
         <button

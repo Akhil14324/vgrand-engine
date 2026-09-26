@@ -1,9 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  socialCalendarQuerySchema,
   socialPostCreateRequestSchema,
+  socialPostRescheduleSchema,
   socialPreviewRequestSchema,
   type SocialAccountDto,
+  type SocialCalendarItemDto,
   type SocialConnector,
   type SocialPlatformsDto,
   type SocialPostDto,
@@ -23,9 +26,13 @@ import {
 import { SocialConnectError } from "../services/social/errors.js";
 import { generateSocialPreviews } from "../services/social/preview.js";
 import {
+  cancelScheduledPost,
   createSocialPosts,
+  listCalendarPosts,
   listSocialPosts,
   loadGenerationForSocial,
+  publishScheduledNow,
+  rescheduleSocialPost,
   retrySocialPost,
 } from "../services/social/posts.js";
 import {
@@ -119,6 +126,33 @@ export async function socialRoutes(app: FastifyInstance) {
   app.get("/generations/:id/social-posts", async (req): Promise<{ items: SocialPostDto[] }> => {
     const { id } = parseBody(idParams, req.params);
     return { items: await listSocialPosts(req.userId, id) };
+  });
+
+  app.get("/social/calendar", async (req): Promise<{ items: SocialCalendarItemDto[] }> => {
+    const q = parseBody(socialCalendarQuerySchema, req.query);
+    const from = new Date(q.from);
+    const to = new Date(q.to);
+    if (to <= from || to.getTime() - from.getTime() > 93 * 86_400_000) {
+      throw badRequest("Invalid date range");
+    }
+    return { items: await listCalendarPosts(req.userId, from, to) };
+  });
+
+  app.patch("/social-posts/:id", async (req): Promise<SocialPostDto> => {
+    const { id } = parseBody(idParams, req.params);
+    const body = parseBody(socialPostRescheduleSchema, req.body);
+    return rescheduleSocialPost(req.userId, id, body.scheduledFor);
+  });
+
+  app.delete("/social-posts/:id", async (req, reply) => {
+    const { id } = parseBody(idParams, req.params);
+    await cancelScheduledPost(req.userId, id);
+    return reply.code(204).send();
+  });
+
+  app.post("/social-posts/:id/publish-now", async (req): Promise<SocialPostDto> => {
+    const { id } = parseBody(idParams, req.params);
+    return publishScheduledNow(req.userId, id);
   });
 
   app.post("/social-posts/:id/retry", async (req): Promise<SocialPostDto> => {

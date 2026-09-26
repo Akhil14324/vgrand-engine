@@ -28,6 +28,7 @@ import type {
   RegenerateGenerationRequest,
   ShareLinkDto,
   SocialAccountDto,
+  SocialCalendarItemDto,
   SocialPlatformsDto,
   SocialPostContent,
   SocialPostDto,
@@ -829,14 +830,61 @@ export function useSocialPreview(generationId: string) {
 export function useCreateSocialPosts(generationId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (posts: { accountId: string; content: SocialPostContent }[]) =>
+    mutationFn: (input: {
+      posts: { accountId: string; content: SocialPostContent }[];
+      /** ISO instant; omit to post now. */
+      scheduledFor?: string;
+    }) =>
       apiFetch<{ items: SocialPostDto[] }>(`/generations/${generationId}/social-posts`, {
         method: "POST",
-        json: { posts },
+        json: input,
       }),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["social", "posts", generationId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["social", "calendar"] });
+      return qc.invalidateQueries({ queryKey: ["social", "posts", generationId] });
+    },
   });
+}
+
+export function useSocialCalendar(from: Date, to: Date) {
+  return useQuery({
+    queryKey: ["social", "calendar", from.toISOString(), to.toISOString()],
+    queryFn: () =>
+      apiFetch<{ items: SocialCalendarItemDto[] }>(
+        `/social/calendar?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`,
+      ),
+    select: (d) => d.items,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useSocialPostAction() {
+  const qc = useQueryClient();
+  const done = () => qc.invalidateQueries({ queryKey: ["social"] });
+  return {
+    reschedule: useMutation({
+      mutationFn: (v: { id: string; scheduledFor: string }) =>
+        apiFetch<SocialPostDto>(`/social-posts/${v.id}`, {
+          method: "PATCH",
+          json: { scheduledFor: v.scheduledFor },
+        }),
+      onSuccess: done,
+    }),
+    cancel: useMutation({
+      mutationFn: (id: string) => apiFetch<void>(`/social-posts/${id}`, { method: "DELETE" }),
+      onSuccess: done,
+    }),
+    postNow: useMutation({
+      mutationFn: (id: string) =>
+        apiFetch<SocialPostDto>(`/social-posts/${id}/publish-now`, { method: "POST" }),
+      onSuccess: done,
+    }),
+    retry: useMutation({
+      mutationFn: (id: string) =>
+        apiFetch<SocialPostDto>(`/social-posts/${id}/retry`, { method: "POST" }),
+      onSuccess: done,
+    }),
+  };
 }
 
 /** Polls every 2.5s while any post is pending/posting, then stops. */

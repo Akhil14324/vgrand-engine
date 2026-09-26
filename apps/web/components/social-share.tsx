@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  CalendarClock,
   Check,
   ExternalLink,
   Loader2,
@@ -72,6 +73,18 @@ const FAILURE_LABEL: Record<SocialFailureCode, string> = {
   PROVIDER_ERROR: "Provider error",
   UNKNOWN: "Something went wrong",
 };
+
+/** Tomorrow 10:00 in local time, formatted for <input type="datetime-local">. */
+function defaultScheduleValue() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(10, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const formatWhen = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 const accountName = (a: Pick<SocialAccountDto, "handle" | "displayName" | "platform">) =>
   a.handle ?? a.displayName ?? LABEL[a.platform];
@@ -172,6 +185,12 @@ function PostRow({
       <div className="flex items-center gap-2">
         <span className="font-medium">{LABEL[post.platform]}</span>
         <span className="min-w-0 flex-1 truncate text-muted-foreground">{name}</span>
+        {post.status === "scheduled" && (
+          <span className="inline-flex items-center gap-1 text-xs text-primary">
+            <CalendarClock className="size-3" />
+            Scheduled {post.scheduledFor ? formatWhen(post.scheduledFor) : ""}
+          </span>
+        )}
         {(post.status === "pending" || post.status === "posting") && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" />
@@ -322,16 +341,26 @@ function SocialShareBody({ generation }: { generation: GenerationDto }) {
     );
   };
 
-  const post = () => {
+  const [scheduling, setScheduling] = useState(false);
+  const [when, setWhen] = useState(defaultScheduleValue);
+  const scheduledDate = when ? new Date(when) : null;
+  const scheduleValid =
+    !!scheduledDate && !Number.isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now() + 60_000;
+
+  const post = (scheduledFor?: string) => {
     create.mutate(
-      selectedAccounts.map((a) => {
-        const d = drafts[a.platform]!;
-        return { accountId: a.id, content: d as Record<string, unknown> };
-      }),
+      {
+        posts: selectedAccounts.map((a) => {
+          const d = drafts[a.platform]!;
+          return { accountId: a.id, content: d as Record<string, unknown> };
+        }),
+        scheduledFor,
+      },
       {
         onSuccess: () => {
           setSelected(new Set());
           setDrafts({});
+          setScheduling(false);
         },
       },
     );
@@ -584,10 +613,54 @@ function SocialShareBody({ generation }: { generation: GenerationDto }) {
               {p}
             </p>
           ))}
-          <Button onClick={post} disabled={create.isPending || problems.length > 0}>
-            {create.isPending && <Loader2 className="animate-spin" />}
-            Post to {selectedAccounts.length} account{selectedAccounts.length === 1 ? "" : "s"}
-          </Button>
+          {scheduling && (
+            <div className="space-y-1.5 rounded-md border border-border p-2.5">
+              <label className="text-xs text-muted-foreground" htmlFor="schedule-at">
+                Publish at ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+              </label>
+              <Input
+                id="schedule-at"
+                type="datetime-local"
+                value={when}
+                onChange={(e) => setWhen(e.target.value)}
+              />
+              {!scheduleValid && (
+                <p className="text-xs text-destructive">Pick a time at least a minute from now</p>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {scheduling ? (
+              <>
+                <Button
+                  onClick={() => post(scheduledDate!.toISOString())}
+                  disabled={create.isPending || problems.length > 0 || !scheduleValid}
+                >
+                  {create.isPending && <Loader2 className="animate-spin" />}
+                  <CalendarClock />
+                  Schedule post
+                </Button>
+                <Button variant="ghost" onClick={() => setScheduling(false)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={() => post()} disabled={create.isPending || problems.length > 0}>
+                  {create.isPending && <Loader2 className="animate-spin" />}
+                  Post now to {selectedAccounts.length} account{selectedAccounts.length === 1 ? "" : "s"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setScheduling(true)}
+                  disabled={create.isPending || problems.length > 0}
+                >
+                  <CalendarClock />
+                  Schedule
+                </Button>
+              </>
+            )}
+          </div>
           {create.isError && <p className="text-xs text-destructive">{create.error.message}</p>}
         </div>
       )}

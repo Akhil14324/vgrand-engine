@@ -60,6 +60,7 @@ import {
 } from "./campaign.js";
 import { env } from "../env.js";
 import { startCampaignScheduler } from "./campaign-autopilot.js";
+import { startSocialScheduler } from "./social/posts.js";
 
 interface GenerationMetadata {
   referenceImageUrl?: string;
@@ -77,6 +78,7 @@ class GenerationCancelled extends Error {}
 
 export function startGenerationWorker(): Worker | null {
   startCampaignScheduler();
+  startSocialScheduler();
   if (!env.redisConfigured) {
     // No queue — enqueueGeneration() calls runGeneration() directly. Rows
     // left pending/processing by a previous boot would never resume, so

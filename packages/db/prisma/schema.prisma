@@ -392,11 +392,15 @@ model SocialPost {
   remoteId      String?
   remoteUrl     String?
   error         String?
+  // When a status="scheduled" row should be published. The DB is the source of
+  // truth; the scheduler claims due rows and hands them to the publish queue.
+  scheduledFor  DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
   @@index([generationId])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([status, scheduledFor])
 }
 
 // One active mascot identity per brand. The canonical image is a normal brand

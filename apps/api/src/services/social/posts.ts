@@ -117,9 +117,126 @@ export function toSocialPostDto(p: PostWithAccount): SocialPostDto {
     visibility:
       p.account.platform === "youtube" && (raw === "private" || raw === "public") ? raw : null,
     retryable: p.status === "failed" && isRetryableFailure(p.failureCode),
+    scheduledFor: p.scheduledFor?.toISOString() ?? null,
     postedAt: p.postedAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),
   };
+}
+
+const MIN_SCHEDULE_LEAD_MS = 60_000;
+
+function parseScheduleTime(iso: string): Date {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) throw badRequest("Invalid schedule time");
+  if (when.getTime() < Date.now() + MIN_SCHEDULE_LEAD_MS) {
+    throw badRequest("Pick a time at least a minute in the future");
+  }
+  return when;
+}
+
+/** Calendar entries for the caller between two instants (scheduled, posted, failed, in flight). */
+export async function listCalendarPosts(userId: string, from: Date, to: Date) {
+  const rows = await prisma.socialPost.findMany({
+    where: {
+      userId,
+      OR: [
+        { scheduledFor: { gte: from, lt: to } },
+        { scheduledFor: null, createdAt: { gte: from, lt: to } },
+      ],
+    },
+    include: { account: true },
+    orderBy: { createdAt: "asc" },
+    take: 500,
+  });
+  return rows
+    .map((row) => {
+      const c = (row.content ?? {}) as SocialPostContent;
+      return {
+        ...toSocialPostDto(row),
+        mediaUrl: row.mediaUrl,
+        captionPreview: (c.caption ?? c.title ?? "").slice(0, 140),
+      };
+    })
+    .sort((a, b) => (a.scheduledFor ?? a.createdAt).localeCompare(b.scheduledFor ?? b.createdAt));
+}
+
+/** Change the publish time of a post that hasn't started publishing. */
+export async function rescheduleSocialPost(userId: string, id: string, iso: string) {
+  const when = parseScheduleTime(iso);
+  const res = await prisma.socialPost.updateMany({
+    where: { id, userId, status: "scheduled" },
+    data: { scheduledFor: when },
+  });
+  if (res.count === 0) throw new HttpError(409, "Only scheduled posts can be rescheduled");
+  const fresh = await prisma.socialPost.findUniqueOrThrow({ where: { id }, include: { account: true } });
+  return toSocialPostDto(fresh);
+}
+
+/** Cancelling a scheduled post removes it - nothing was ever published. */
+export async function cancelScheduledPost(userId: string, id: string) {
+  const res = await prisma.socialPost.deleteMany({ where: { id, userId, status: "scheduled" } });
+  if (res.count === 0) throw new HttpError(409, "Only scheduled posts can be cancelled");
+}
+
+/** Publish a scheduled post immediately (same atomic claim the scheduler uses). */
+export async function publishScheduledNow(userId: string, id: string) {
+  const post = await prisma.socialPost.findFirst({ where: { id, userId, status: "scheduled" } });
+  if (!post) throw new HttpError(409, "Only scheduled posts can be posted now");
+  await findUsableAccount(userId, post.accountId);
+  await claimAndEnqueueScheduled(id);
+  const fresh = await prisma.socialPost.findUniqueOrThrow({ where: { id }, include: { account: true } });
+  return toSocialPostDto(fresh);
+}
+
+/** scheduled -> pending atomically, then queue. Returns false if someone else claimed it. */
+export async function claimAndEnqueueScheduled(id: string): Promise<boolean> {
+  const claimed = await prisma.socialPost.updateMany({
+    where: { id, status: "scheduled" },
+    data: { status: "pending", failureCode: null, error: null },
+  });
+  if (claimed.count === 0) return false;
+  await enqueueSocialPost(id, { force: true }).catch(async (err) => {
+    console.error(`[social] enqueue ${id} failed:`, err instanceof Error ? err.message : err);
+    await prisma.socialPost.update({
+      where: { id },
+      data: { status: "failed", failureCode: "PROVIDER_ERROR", error: "Could not queue the post - retry" },
+    });
+  });
+  return true;
+}
+
+/** Polled by the worker process: publish everything whose time has come. */
+export async function processDueSocialPosts(): Promise<void> {
+  const due = await prisma.socialPost.findMany({
+    where: { status: "scheduled", scheduledFor: { lte: new Date() } },
+    select: { id: true, userId: true, accountId: true },
+    orderBy: { scheduledFor: "asc" },
+    take: 20,
+  });
+  for (const post of due) {
+    try {
+      // Membership/connection may have changed since scheduling.
+      await findUsableAccount(post.userId, post.accountId);
+    } catch {
+      await prisma.socialPost.updateMany({
+        where: { id: post.id, status: "scheduled" },
+        data: { status: "failed", failureCode: "AUTH_REVOKED", error: "Account is no longer available" },
+      });
+      continue;
+    }
+    await claimAndEnqueueScheduled(post.id);
+  }
+}
+
+let socialSchedulerStarted = false;
+
+export function startSocialScheduler(): void {
+  if (socialSchedulerStarted) return;
+  socialSchedulerStarted = true;
+  const tick = () =>
+    void processDueSocialPosts().catch((err) => console.error("[social-scheduler]", err));
+  setInterval(tick, 30_000);
+  void tick();
 }
 
 export async function listSocialPosts(userId: string, generationId: string) {
@@ -149,6 +266,7 @@ export async function createSocialPosts(
   generationId: string,
   body: SocialPostCreateRequest,
 ): Promise<SocialPostDto[]> {
+  const scheduledFor = body.scheduledFor ? parseScheduleTime(body.scheduledFor) : null;
   const generation = await loadGenerationForSocial(userId, generationId);
   const scopeWorkspaceId = generation.conversation?.workspaceId ?? null;
 
@@ -198,11 +316,15 @@ export async function createSocialPosts(
           accountId: account.id,
           content: content as Prisma.InputJsonValue,
           mediaUrl,
+          ...(scheduledFor ? { status: "scheduled", scheduledFor } : {}),
         },
         include: { account: true },
       }),
     ),
   );
+
+  // Scheduled rows wait for the DB-backed scheduler; nothing is queued now.
+  if (scheduledFor) return rows.map(toSocialPostDto);
 
   // One independent job per SocialPost. A queue failure marks only that row.
   await Promise.all(

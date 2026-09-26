@@ -675,7 +675,7 @@ export const SOCIAL_ACCOUNT_STATUSES = [
 ] as const;
 export type SocialAccountStatus = (typeof SOCIAL_ACCOUNT_STATUSES)[number];
 
-export const SOCIAL_POST_STATUSES = ["pending", "posting", "posted", "failed"] as const;
+export const SOCIAL_POST_STATUSES = ["scheduled", "pending", "posting", "posted", "failed"] as const;
 export type SocialPostStatus = (typeof SOCIAL_POST_STATUSES)[number];
 
 export const SOCIAL_FAILURE_CODES = [
@@ -759,6 +759,8 @@ export type SocialPostRequest = z.infer<typeof socialPostRequestSchema>;
 
 export const socialPostCreateRequestSchema = z.object({
   posts: z.array(socialPostRequestSchema).min(1).max(12),
+  /** ISO instant. Omitted = post now; present = publish then (must be in the future). */
+  scheduledFor: z.string().datetime().optional(),
 });
 export type SocialPostCreateRequest = z.infer<typeof socialPostCreateRequestSchema>;
 
@@ -778,6 +780,21 @@ export interface SocialPostDto {
   /** YouTube posts stay private while the Google app is unverified. */
   visibility: "private" | "public" | null;
   retryable: boolean;
+  scheduledFor: string | null;
   postedAt: string | null;
   createdAt: string;
+}
+
+export const socialPostRescheduleSchema = z.object({ scheduledFor: z.string().datetime() });
+export type SocialPostRescheduleRequest = z.infer<typeof socialPostRescheduleSchema>;
+
+export const socialCalendarQuerySchema = z.object({
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+});
+
+/** One calendar entry: a SocialPost plus what's needed to render it. */
+export interface SocialCalendarItemDto extends SocialPostDto {
+  mediaUrl: string;
+  captionPreview: string;
 }
