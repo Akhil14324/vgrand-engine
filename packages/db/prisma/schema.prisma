@@ -50,7 +50,10 @@ model Brand {
   documents   Document[]
   campaignPlans CampaignPlan[]
   generations Generation[]
+  guavaProfile   GuavaProfile?
+  guavaDiagnoses GuavaDiagnosis[]
   guidelines  BrandGuidelines?
+  strategies  Strategy[]
   complianceChecks ComplianceCheck[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -563,4 +566,228 @@ model Holiday {
 
   @@unique([date, name, country])
   @@index([date])
+}
+
+// Guava (AI business strategist). One profile per brand: the owner's answers
+// about the business, kept apart from the Brand questionnaire so onboarding and
+// brand creation are untouched. `values` is section -> field -> text.
+model GuavaProfile {
+  id        String   @id @default(uuid())
+  brandId   String   @unique
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  industry  String?
+  values    Json     @default("{}")
+  skipped   String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One diagnosis run. Rows are never overwritten: history and comparison rely on
+// each keeping the profile and platform activity as they were at the time.
+model GuavaDiagnosis {
+  id               String         @id @default(uuid())
+  brandId          String
+  brand            Brand          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId           String
+  status           String         @default("processing") // processing | completed | failed
+  industry         String?
+  completenessPct  Int            @default(0)
+  profileSnapshot  Json           @default("{}")
+  platformSnapshot Json?
+  report           Json?
+  comparison       Json?
+  previousId       String? // the completed diagnosis this one is compared with
+  model            String?
+  error            String?        @db.Text
+  messages         GuavaMessage[]
+  createdAt        DateTime       @default(now())
+  completedAt      DateTime?
+
+  @@index([brandId, createdAt(sort: Desc)])
+}
+
+// Follow-up questions to a diagnosis, and Guava's answers.
+model GuavaMessage {
+  id          String         @id @default(uuid())
+  diagnosisId String
+  diagnosis   GuavaDiagnosis @relation(fields: [diagnosisId], references: [id], onDelete: Cascade)
+  role        String // user | assistant
+  content     String         @db.Text
+  createdAt   DateTime       @default(now())
+
+  @@index([diagnosisId, createdAt])
+}
+
+// B Camp: a structured, editable marketing strategy for one brand. `plan` is the
+// current version; every save also snapshots a StrategyVersion. Approving or
+// converting never publishes or spends anything.
+model Strategy {
+  id           String            @id @default(uuid())
+  brandId      String
+  brand        Brand             @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId       String
+  title        String
+  status       String            @default("draft") // draft | active | completed | archived
+  source       String            @default("goal") // goal | guava | idea | seasonal | custom
+  sourceRef    Json?
+  sourceText   String?           @db.Text
+  plan         Json
+  version      Int               @default(1)
+  startsAt     DateTime?
+  approvedAt   DateTime?
+  approvedById String?
+  convertedAt  DateTime?
+  review       Json?
+  reviewedAt   DateTime?
+  versions     StrategyVersion[]
+  messages     StrategyMessage[]
+  deliverables Deliverable[]
+  tasks        ExecTask[]
+  events       ExecEvent[]
+  results      CampaignResult[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([brandId, status])
+}
+
+model StrategyVersion {
+  id          String   @id @default(uuid())
+  strategyId  String
+  strategy    Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  version     Int
+  plan        Json
+  label       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([strategyId, version])
+}
+
+model StrategyMessage {
+  id         String   @id @default(uuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  role       String // user | assistant
+  content    String   @db.Text
+  // What the assistant changed in the plan with this reply (null = discussion only).
+  changes    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([strategyId, createdAt])
+}
+
+// One piece of work a campaign must produce (post, video, landing page...).
+// Content lives on the linked Generation; approval and publishing state are
+// read from the existing approval and SocialPost records, never duplicated.
+// status: planned | drafting | awaiting_approval | changes_requested | approved | completed | cancelled
+model Deliverable {
+  id             String           @id @default(uuid())
+  strategyId     String
+  strategy       Strategy         @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  brandId        String
+  dedupeKey      String
+  type           String
+  title          String
+  channel        String?
+  format         String?
+  brief          String           @default("") @db.Text
+  source         Json // the plan entry this was created from
+  planVersion    Int              @default(1)
+  status         String           @default("planned")
+  dueAt          DateTime?
+  assigneeId     String?
+  generationId   String?
+  submittedById  String?
+  submittedAt    DateTime?
+  decidedById    String?
+  decidedAt      DateTime?
+  decisionNote   String?          @db.Text
+  completionNote String?          @db.Text
+  externalUrl    String?
+  completedAt    DateTime?
+  completedById  String?
+  blockedReason  String?          @db.Text
+  flaggedAt      DateTime?
+  tasks          ExecTask[]
+  results        CampaignResult[]
+  events         ExecEvent[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([strategyId, dedupeKey])
+  @@index([brandId, status])
+  @@index([generationId])
+}
+
+// status: todo | in_progress | blocked | done | cancelled
+model ExecTask {
+  id            String       @id @default(uuid())
+  strategyId    String
+  strategy      Strategy     @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  brandId       String
+  deliverableId String?
+  deliverable   Deliverable? @relation(fields: [deliverableId], references: [id], onDelete: SetNull)
+  dedupeKey     String
+  title         String
+  description   String       @default("") @db.Text
+  checklist     Json         @default("[]")
+  status        String       @default("todo")
+  priority      String       @default("medium")
+  assigneeId    String?
+  dueAt         DateTime?
+  dependsOnId   String?
+  source        Json
+  planVersion   Int          @default(1)
+  blockedReason String?      @db.Text
+  flaggedAt     DateTime?
+  completedAt   DateTime?
+  events        ExecEvent[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([strategyId, dedupeKey])
+  @@index([brandId, status])
+  @@index([assigneeId])
+}
+
+// Audit trail, comments and approval history for execution work.
+model ExecEvent {
+  id            String       @id @default(uuid())
+  strategyId    String
+  strategy      Strategy     @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  deliverableId String?
+  deliverable   Deliverable? @relation(fields: [deliverableId], references: [id], onDelete: Cascade)
+  taskId        String?
+  task          ExecTask?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId        String?
+  kind          String
+  note          String?      @db.Text
+  data          Json?
+  createdAt     DateTime     @default(now())
+
+  @@index([strategyId, createdAt(sort: Desc)])
+  @@index([deliverableId, createdAt])
+  @@index([taskId, createdAt])
+}
+
+// A measured outcome. source keeps origin honest: observed (recorded by the
+// platform) | user_entered (a person verified it elsewhere) | estimate.
+model CampaignResult {
+  id            String       @id @default(uuid())
+  strategyId    String
+  strategy      Strategy     @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  deliverableId String?
+  deliverable   Deliverable? @relation(fields: [deliverableId], references: [id], onDelete: SetNull)
+  channel       String?
+  metric        String // spend | reach | engagement | clicks | leads | inquiries | orders | revenue | other
+  value         Float
+  source        String
+  sourceNote    String?      @db.Text
+  periodStart   DateTime
+  periodEnd     DateTime
+  enteredById   String
+  createdAt     DateTime     @default(now())
+
+  @@index([strategyId, periodEnd(sort: Desc)])
 }

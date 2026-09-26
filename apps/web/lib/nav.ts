@@ -2,6 +2,9 @@ import {
   CalendarDays,
   ImageIcon,
   LayoutGrid,
+  Compass,
+  ListChecks,
+  Target,
   Store,
   type LucideIcon,
 } from "lucide-react";
@@ -20,4 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: Store, label: "Brand", href: "/brand" },
   { icon: ImageIcon, label: "Library", href: "/library" },
   { icon: CalendarDays, label: "Social Calendar", href: "/calendar" },
+  { icon: Compass, label: "Guava", href: "/guava" },
+  { icon: Target, label: "B Camp", href: "/bcamp" },
+  { icon: ListChecks, label: "Execution", href: "/execution" },
 ];

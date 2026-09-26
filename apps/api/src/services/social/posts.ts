@@ -15,6 +15,7 @@ import { findUsableAccount } from "./accounts.js";
 import { isRetryableFailure, SocialPublishError } from "./errors.js";
 import { fitImageForInstagram } from "./media/reframe.js";
 import { enforceBrandRulesOnPosts } from "../brand-compliance.js";
+import { assertGenerationPublishable } from "../execution.js";
 
 /* --------------------------- content validation --------------------------- */
 
@@ -285,6 +286,8 @@ export async function createSocialPosts(
 ): Promise<SocialPostDto[]> {
   const scheduledFor = body.scheduledFor ? parseScheduleTime(body.scheduledFor) : null;
   const generation = await loadGenerationForSocial(userId, generationId);
+  // Campaign work must be approved in the Execution Center before it can go out.
+  await assertGenerationPublishable(generationId);
   const scopeWorkspaceId = generation.conversation?.workspaceId ?? null;
 
   const ids = body.posts.map((p) => p.accountId);

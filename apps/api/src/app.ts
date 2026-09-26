@@ -24,6 +24,8 @@ import { documentRoutes } from "./routes/documents.js";
 import { brandRoutes } from "./routes/brands.js";
 import { brandVoiceRoutes } from "./routes/brand-voice.js";
 import { brandKitRoutes } from "./routes/brand-kit.js";
+import { guavaRoutes } from "./routes/guava.js";
+import { bcampRoutes } from "./routes/bcamp.js";
 import { brandGuidelinesRoutes } from "./routes/brand-guidelines.js";
 import { brandComplianceRoutes } from "./routes/brand-compliance.js";
 import { workspacePrivacyRoutes } from "./routes/workspace-privacy.js";
@@ -124,6 +126,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(brandRoutes);
   await app.register(brandVoiceRoutes);
   await app.register(brandKitRoutes);
+  await app.register(guavaRoutes);
+  await app.register(bcampRoutes);
   await app.register(brandGuidelinesRoutes);
   await app.register(brandComplianceRoutes);
   await app.register(workspacePrivacyRoutes);

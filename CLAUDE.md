@@ -36,6 +36,8 @@ Everything — image jobs, streamed chat replies, PDF Q&A, campaigns — is a `G
 
 The worker decides per prompt whether it's an image job or a chat turn, and routes chat to plain streaming, web search, code interpreter, or campaign mode (`services/chat.ts`, `services/campaign.ts`) based on prefix/intent helpers. Progress and streamed tokens are published through `services/events.ts` (Redis pub/sub, or an in-process EventEmitter without Redis) and consumed by the SSE endpoint `GET /generations/:id/events` (auth token via `?token=` since EventSource can't send headers). Keep new job types compatible with both Redis and no-Redis modes.
 
+Guava (`routes/guava.ts`, `services/guava-profile.ts`, `services/guava-diagnosis.ts`, page `/guava`) is the business-strategist module: a per-brand profile (sections/fields/industry packs live in `packages/types/src/guava.ts`; add an industry by adding one entry to `GUAVA_INDUSTRIES`) and stored diagnoses with follow-up Q&A. It is advisory only and runs its own in-process job (result persisted on `GuavaDiagnosis`, page polls), not the Generation pipeline.
+
 Other cross-file concepts: image daily quota with refunds on failure (`lib/usage.ts`), RAG over PDFs with pgvector chunks (`services/documents.ts`), per-user learned memories (`services/learned-memory.ts`), brand context injected into prompts (`lib/brand.ts`), workspaces with members/invites/team chat where `@ai` triggers an answer (`routes/team.ts`, `services/team.ts`). Images go to Supabase Storage or, if unconfigured, local `UPLOAD_DIR` served at `/uploads/`.
 
 ## Conventions
