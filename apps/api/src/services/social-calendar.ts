@@ -85,7 +85,7 @@ async function holidayMap(dates: string[]): Promise<Record<string, string>> {
 /** Create + enqueue an on-brand image generation, charging (and on failure refunding) the daily quota. */
 async function startBrandImage(
   userId: string,
-  brandId: string,
+  brandId: string | null,
   prompt: string,
   meta: Record<string, unknown>,
   opts: {
@@ -97,10 +97,11 @@ async function startBrandImage(
 ) {
   const usage = await getImageUsage(userId);
   if (usage.remaining <= 0) throw new HttpError(429, `Daily image limit reached (${usage.limit}/day)`);
-  const brand = await loadBrandContext(brandId, userId);
-  if (!brand) throw new HttpError(404, "Brand not found");
-  const profile = (brand.profile ?? {}) as BrandProfile;
-  const refs = brandReferenceUrls(brand.assets, brand.mascot?.asset.url);
+  // Brandless drafts (e.g. a chat image) are edited without brand guidance.
+  const brand = brandId ? await loadBrandContext(brandId, userId) : null;
+  if (brandId && !brand) throw new HttpError(404, "Brand not found");
+  const profile = (brand?.profile ?? {}) as BrandProfile;
+  const refs = brand ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url) : [];
   const generation = await prisma.generation.create({
     data: {
       userId,
@@ -108,12 +109,14 @@ async function startBrandImage(
       prompt,
       finalPrompt:
         buildFinalPrompt(null, prompt) +
-        brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot) +
-        CAMPAIGN_CREATIVE_STYLE,
+        (brand
+          ? brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot) +
+            CAMPAIGN_CREATIVE_STYLE
+          : ""),
       provider: resolveProvider(null, opts.parent?.provider),
       parentId: opts.parent?.id ?? null,
       metadata: {
-        brandId: brand.id,
+        ...(brand ? { brandId: brand.id } : {}),
         quality: env.CAMPAIGN_IMAGE_QUALITY,
         size: "1088x1360",
         ...(refs.length ? { referenceImageUrl: refs[0], referenceImageUrls: refs } : {}),
@@ -146,6 +149,23 @@ async function startBrandImage(
   return generation.id;
 }
 
+/** One hidden plan per user that holds calendar drafts (Papaya results, approved chat images). */
+async function draftPlanId(userId: string): Promise<string> {
+  const existing = await prisma.campaignPlan.findFirst({
+    where: { userId, brandId: null, title: DRAFT_PLAN_TITLE },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  // "completed" so the autopilot scheduler never picks its posts up.
+  const created = await prisma.campaignPlan.create({
+    data: { userId, brandId: null, title: DRAFT_PLAN_TITLE, status: "completed" },
+    select: { id: true },
+  });
+  return created.id;
+}
+
+const DRAFT_PLAN_TITLE = "Calendar drafts";
+
 /** "Papaya": pick an idea for one day (themed on a relevant holiday) and start the image. */
 export async function createDayPost(userId: string, body: CalendarDayPostRequest): Promise<CalendarDayPostDto> {
   const brand = await findAccessibleBrand(userId, body.brandId);
@@ -170,11 +190,35 @@ export async function createDayPost(userId: string, body: CalendarDayPostRequest
     throw new HttpError(502, "Could not come up with an idea right now - please try again");
   }
   const holiday = holidays[body.date] ?? null;
-  const generationId = await startBrandImage(userId, brand.id, planned!.prompt, {
-    calendarDate: body.date,
-    ...(holiday ? { holiday } : {}),
-  });
-  return { generationId, holiday, caption: planned!.caption };
+  const planId = await draftPlanId(userId);
+  const publishAt = zonedToUtc(body.date, "10:00", tz);
+  let postId = "";
+  const generationId = await startBrandImage(
+    userId,
+    brand.id,
+    planned!.prompt,
+    { calendarDate: body.date, ...(holiday ? { holiday } : {}) },
+    {
+      // Linked before queueing, so the image is saved on its day even if the dialog is closed.
+      onCreated: async (id) => {
+        const post = await prisma.campaignPost.create({
+          data: {
+            planId,
+            generationId: id,
+            publishAt,
+            scheduledFor: publishAt,
+            platform: "Instagram",
+            prompt: planned!.prompt,
+            caption: planned!.caption,
+            status: "generating",
+          },
+          select: { id: true },
+        });
+        postId = post.id;
+      },
+    },
+  );
+  return { generationId, postId, holiday, caption: planned!.caption };
 }
 
 /** "AI Fill": propose a plan. Creates a PAUSED plan - nothing is generated or posted until approved. */
@@ -272,7 +316,7 @@ export async function listPlanItems(userId: string, from: Date, to: Date): Promi
  * is the edit base (so the good parts stay), and the post is relinked to the new
  * generation, which the worker then marks ready_for_review again.
  */
-export async function regenerateCampaignPost(userId: string, postId: string, comment: string) {
+export async function regenerateCampaignPost(userId: string, postId: string, comment: string): Promise<{ generationId: string }> {
   const post = await prisma.campaignPost.findFirst({
     where: { id: postId, plan: { userId } },
     include: { plan: { select: { brandId: true } }, generation: true },
@@ -292,9 +336,10 @@ Revise the attached image using this feedback, keeping everything else the same:
 Additional direction: ${comment}`;
   const meta = (current?.metadata ?? {}) as Record<string, unknown>;
 
-  await startBrandImage(
+  const brandId = post.plan.brandId ?? (typeof meta.brandId === "string" ? meta.brandId : null);
+  const generationId = await startBrandImage(
     userId,
-    post.plan.brandId,
+    brandId,
     prompt,
     {
       campaignPostId: post.id,
@@ -322,4 +367,40 @@ Additional direction: ${comment}`;
       },
     },
   );
+  return { generationId };
+}
+
+/**
+ * "Approve for socials" on an existing image (e.g. from chat): puts it on the
+ * calendar, on the day it was created, as an approved draft waiting to be scheduled.
+ * Idempotent - a generation only ever has one draft.
+ */
+export async function approveGenerationForCalendar(userId: string, generationId: string) {
+  const generation = await prisma.generation.findUnique({ where: { id: generationId } });
+  if (!generation) throw new HttpError(404, "Image not found");
+  if (generation.userId !== userId) throw new HttpError(403, "Forbidden");
+  if (generation.status !== "completed" || generation.imageUrls.length === 0) {
+    throw badRequest("Only finished images can be approved for social");
+  }
+  const existing = await prisma.campaignPost.findUnique({ where: { generationId } });
+  if (existing) {
+    if (existing.status === "ready_for_review") {
+      await prisma.campaignPost.update({ where: { id: existing.id }, data: { status: "approved", approvedAt: new Date() } });
+    }
+    return { postId: existing.id, publishAt: (existing.publishAt ?? existing.scheduledFor).toISOString() };
+  }
+  const planId = await draftPlanId(userId);
+  const post = await prisma.campaignPost.create({
+    data: {
+      planId,
+      generationId,
+      publishAt: generation.createdAt,
+      scheduledFor: generation.createdAt,
+      prompt: generation.prompt,
+      status: "approved",
+      approvedAt: new Date(),
+    },
+    select: { id: true, publishAt: true },
+  });
+  return { postId: post.id, publishAt: post.publishAt!.toISOString() };
 }

@@ -27,6 +27,7 @@ import type {
   Paginated,
   RegenerateGenerationRequest,
   ShareLinkDto,
+  BestTimeSlotDto,
   CalendarDayPostDto,
   CalendarDayPostRequest,
   CalendarFillRequest,
@@ -766,6 +767,22 @@ export function useSocialPlatforms() {
   });
 }
 
+/** Ranked publish-time suggestions for the chosen accounts (in the browser's time zone). */
+export function useBestTimes(accountIds: string[], date: string | undefined, enabled: boolean) {
+  const ids = [...accountIds].sort().join(",");
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return useQuery({
+    queryKey: ["social-best-times", ids, timezone, date ?? null],
+    enabled: enabled && ids.length > 0,
+    staleTime: 5 * 60_000,
+    queryFn: () =>
+      apiFetch<{ items: BestTimeSlotDto[] }>(
+        `/social/best-times?accountIds=${ids}&timezone=${encodeURIComponent(timezone)}${date ? `&date=${date}` : ""}`,
+      ),
+    select: (d) => d.items,
+  });
+}
+
 /** Accounts usable in this scope: the workspace's shared ones plus the user's own. */
 export function useSocialAccounts(workspaceId: string | null, enabled = true) {
   return useQuery({
@@ -1154,7 +1171,7 @@ export function useRegenerateCampaignPost() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { postId: string; comment: string }) =>
-      apiFetch<{ ok: true }>(`/social/calendar/posts/${v.postId}/regenerate`, {
+      apiFetch<{ generationId: string }>(`/social/calendar/posts/${v.postId}/regenerate`, {
         method: "POST",
         json: { comment: v.comment },
       }),
@@ -1162,5 +1179,17 @@ export function useRegenerateCampaignPost() {
       void qc.invalidateQueries({ queryKey: ["usage"] });
       return qc.invalidateQueries({ queryKey: ["social"] });
     },
+  });
+}
+
+/** "Approve for socials": parks a finished image on the calendar (on its creation day) until scheduled. */
+export function useApproveForCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (generationId: string) =>
+      apiFetch<{ postId: string; publishAt: string }>(`/generations/${generationId}/calendar-approve`, {
+        method: "POST",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["social"] }),
   });
 }

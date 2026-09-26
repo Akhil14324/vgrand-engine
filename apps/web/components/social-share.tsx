@@ -1,14 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   CalendarClock,
+  CalendarPlus,
   Check,
   ExternalLink,
   Loader2,
   Plus,
   RotateCw,
   Share2,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -23,6 +26,8 @@ import {
 } from "@catgpt/types";
 import {
   useConnectSocial,
+  useApproveForCalendar,
+  useBestTimes,
   useConversation,
   useCreateSocialPosts,
   useDeleteSocialAccount,
@@ -73,6 +78,15 @@ const FAILURE_LABEL: Record<SocialFailureCode, string> = {
   PROVIDER_ERROR: "Provider error",
   UNKNOWN: "Something went wrong",
 };
+
+/** Format an instant for <input type="datetime-local"> in local time. */
+function toLocalInputValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const formatSlot = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** Tomorrow 10:00 in local time, formatted for <input type="datetime-local">. */
 export function defaultScheduleValue(day?: Date) {
@@ -359,6 +373,11 @@ function SocialShareBody({
 
   const [scheduling, setScheduling] = useState(!!initialWhen);
   const [when, setWhen] = useState(initialWhen ?? defaultScheduleValue());
+  const bestTimes = useBestTimes(
+    selectedAccounts.map((a) => a.id),
+    initialWhen?.slice(0, 10),
+    scheduling,
+  );
   const scheduledDate = when ? new Date(when) : null;
   const scheduleValid =
     !!scheduledDate && !Number.isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now() + 60_000;
@@ -642,6 +661,34 @@ function SocialShareBody({
                 value={when}
                 onChange={(e) => setWhen(e.target.value)}
               />
+              {bestTimes.data && bestTimes.data.length > 0 && (
+                <div className="space-y-1 pt-0.5">
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Sparkles className="size-3" />
+                    Suggested times
+                    <span className="opacity-70">(general platform patterns, not your own stats)</span>
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bestTimes.data.map((slot, i) => {
+                      const value = toLocalInputValue(new Date(slot.at));
+                      return (
+                        <Button
+                          key={slot.at}
+                          type="button"
+                          size="sm"
+                          variant={value === when ? "default" : "outline"}
+                          className="h-7 px-2 text-xs"
+                          title={slot.platforms.length ? `Strong for ${slot.platforms.map((p) => LABEL[p]).join(", ")}` : undefined}
+                          onClick={() => setWhen(value)}
+                        >
+                          {formatSlot(slot.at)}
+                          {i === 0 && <span className="ml-1 opacity-70">· best</span>}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {!scheduleValid && (
                 <p className="text-xs text-destructive">Pick a time in the future - past times can't be scheduled</p>
               )}
@@ -750,5 +797,45 @@ export function SocialShareButton({ generation }: { generation: GenerationDto })
         {open && <SocialShareBody generation={generation} />}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * "Approve for socials": puts the image on the Social Calendar (on the day it was
+ * created) as an approved draft. It's scheduled for a future date from there.
+ */
+export function CalendarApproveButton({ generation }: { generation: GenerationDto }) {
+  const approve = useApproveForCalendar();
+  if (approve.isSuccess) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button asChild variant="ghost" size="icon" aria-label="Approved - open Social Calendar">
+            <Link href="/calendar">
+              <Check className="text-primary" />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Approved for socials - open the calendar to schedule it</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Approve for socials"
+          disabled={approve.isPending}
+          onClick={() => approve.mutate(generation.id)}
+        >
+          {approve.isPending ? <Loader2 className="animate-spin" /> : <CalendarPlus />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {approve.isError ? approve.error.message : "Approve for socials - adds it to your calendar"}
+      </TooltipContent>
+    </Tooltip>
   );
 }

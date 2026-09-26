@@ -10,7 +10,7 @@ const HEIGHT = 1920;
 const FFMPEG_TIMEOUT_MS = 120_000;
 
 /** The project's ffmpeg: the `ffmpeg-static` package's bundled binary. */
-async function ffmpegPath(): Promise<string> {
+export async function ffmpegPath(): Promise<string> {
   try {
     const mod = (await import("ffmpeg-static")) as { default?: string | null };
     if (mod.default) return mod.default;

@@ -93,7 +93,8 @@ export async function campaignRoutes(app: FastifyInstance) {
     parseBody(updateCampaignPlanSchema, req.body);
     const plan = await prisma.campaignPlan.findUnique({ where: { id } });
     if (!plan) throw notFound("Campaign plan not found");
-    await findManageableBrand(req.userId, plan.brandId);
+    if (plan.brandId) await findManageableBrand(req.userId, plan.brandId);
+    else if (plan.userId !== req.userId) throw notFound("Campaign plan not found");
     // A calendar plan starts paused ("proposed"); Generate all activates it.
     if (plan.status === "paused") {
       await prisma.campaignPlan.update({ where: { id }, data: { status: "active" } });
@@ -114,13 +115,18 @@ export async function campaignRoutes(app: FastifyInstance) {
     const body = parseBody(updateCampaignPostSchema, req.body);
     const post = await prisma.campaignPost.findUnique({
       where: { id },
-      include: { plan: true },
+      include: { plan: true, generation: { select: { status: true } } },
     });
     if (!post) throw notFound("Campaign post not found");
-    await findManageableBrand(req.userId, post.plan.brandId);
+    if (post.plan.brandId) await findManageableBrand(req.userId, post.plan.brandId);
+    else if (post.plan.userId !== req.userId) throw notFound("Campaign post not found");
 
     if (body.action === "approve") {
-      if (post.status !== "ready_for_review") {
+      // The worker flips generating -> ready_for_review just after the image completes; accept that gap.
+      const ready =
+        post.status === "ready_for_review" ||
+        (post.status === "generating" && post.generation?.status === "completed");
+      if (!ready) {
         throw badRequest("only a generated draft can be approved");
       }
       await prisma.campaignPost.update({

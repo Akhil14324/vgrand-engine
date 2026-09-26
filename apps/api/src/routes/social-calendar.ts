@@ -13,6 +13,7 @@ import {
   fillCalendar,
   listHolidays,
   listPlanItems,
+  approveGenerationForCalendar,
   regenerateCampaignPost,
 } from "../services/social-calendar.js";
 
@@ -49,8 +50,13 @@ export async function socialCalendarRoutes(app: FastifyInstance) {
   app.post("/social/calendar/posts/:id/regenerate", limit, async (req, reply) => {
     const { id } = parseBody(z.object({ id: z.string().uuid() }), req.params);
     const { comment } = parseBody(z.object({ comment: z.string().trim().min(1).max(1000) }), req.body);
-    await regenerateCampaignPost(req.userId, id, comment);
-    return reply.code(202).send({ ok: true });
+    return reply.code(202).send(await regenerateCampaignPost(req.userId, id, comment));
+  });
+
+  /** "Approve for socials": park a finished image on the calendar until it is scheduled. */
+  app.post("/generations/:id/calendar-approve", async (req, reply) => {
+    const { id } = parseBody(z.object({ id: z.string().uuid() }), req.params);
+    return reply.code(201).send(await approveGenerationForCalendar(req.userId, id));
   });
 
   app.post("/social/calendar/fill", limit, async (req, reply) => {

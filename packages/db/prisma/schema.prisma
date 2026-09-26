@@ -446,8 +446,9 @@ model CampaignPlan {
   id             String        @id @default(uuid())
   userId         String
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  brandId        String
-  brand          Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  // Null for the per-user "Calendar drafts" plan (Papaya / chat images awaiting scheduling).
+  brandId        String?
+  brand          Brand?        @relation(fields: [brandId], references: [id], onDelete: Cascade)
   conversationId String?
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   title          String

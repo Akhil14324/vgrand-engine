@@ -799,6 +799,30 @@ export interface SocialCalendarItemDto extends SocialPostDto {
   captionPreview: string;
 }
 
+/* ------------------------------ best time to post ------------------------------ */
+
+export const socialBestTimesQuerySchema = z.object({
+  /** Comma-separated account ids the post will go to. */
+  accountIds: z.string().min(1).max(600),
+  /** IANA zone the slots are computed and shown in. */
+  timezone: z.string().min(1).max(80),
+  /** Restrict to one local calendar day (YYYY-MM-DD); omitted = the next 7 days. */
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+export type SocialBestTimesQuery = z.infer<typeof socialBestTimesQuerySchema>;
+
+export interface BestTimeSlotDto {
+  /** ISO instant, on the hour in the requested time zone. */
+  at: string;
+  /** 0-100, relative strength of the slot for the selected platforms. */
+  score: number;
+  /** Platforms this slot is especially good for. */
+  platforms: SocialPlatform[];
+}
+
 /* ------------------------- holidays and AI calendar fill ------------------------- */
 
 export interface HolidayDto {
@@ -824,6 +848,8 @@ export type CalendarDayPostRequest = z.infer<typeof calendarDayPostSchema>;
 
 export interface CalendarDayPostDto {
   generationId: string;
+  /** The calendar draft holding this image on its day. */
+  postId: string;
   /** Holiday the idea was themed around, if the model judged one relevant. */
   holiday: string | null;
   caption: string | null;
@@ -848,7 +874,8 @@ export type CalendarFillRequest = z.input<typeof calendarFillSchema>;
 export interface CalendarPlanItemDto {
   id: string;
   planId: string;
-  brandId: string;
+  /** Null for calendar drafts (chat images, Papaya results). */
+  brandId: string | null;
   publishAt: string;
   status: CampaignPostStatus;
   /** Plan "paused" = proposed, waiting for the user to press Generate all. */

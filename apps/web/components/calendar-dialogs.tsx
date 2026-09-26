@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, ImageIcon, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
+import { CalendarDays, Check, ImageIcon, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
 import type { BrandDto } from "@catgpt/types";
 import {
   useBrands,
   useCreateDayPost,
   useFillCalendar,
   useGeneration,
+  useCalendarPlanActions,
   useGenerations,
-  useRegenerate,
+  useRegenerateCampaignPost,
 } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,8 @@ export function scheduleValueFor(day: Date, hour = 10, minute = 0) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+const shortDay = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 const longDay = (d: Date) =>
   d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -241,12 +244,13 @@ export function PapayaDialog({
   date: Date;
   open: boolean;
   onClose: () => void;
-  onSchedule: (generationId: string) => void;
+  onSchedule: (generationId: string, postId?: string) => void;
 }) {
   const { brands, isLoading, brandId, setBrandId } = useDefaultBrand();
   const [notes, setNotes] = useState("");
   const create = useCreateDayPost();
-  const regen = useRegenerate();
+  const regen = useRegenerateCampaignPost();
+  const { postAction } = useCalendarPlanActions();
   const [regenId, setRegenId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState("");
   const generationId = regenId ?? create.data?.generationId ?? null;
@@ -324,6 +328,9 @@ export function PapayaDialog({
           <div className="flex flex-col items-center gap-3 py-8 text-sm text-muted-foreground">
             <Loader2 className="size-6 animate-spin text-primary" />
             Papaya is designing your post…
+            <span className="text-xs">
+              You can close this - it will be waiting on {longDay(date)} in your calendar.
+            </span>
           </div>
         )}
         {failed && (
@@ -359,10 +366,7 @@ export function PapayaDialog({
                 disabled={!feedback.trim() || regen.isPending}
                 onClick={() =>
                   regen.mutate(
-                    {
-                      id: generation.id,
-                      prompt: `Revise this image using this feedback, keeping everything else the same: ${feedback.trim()}`,
-                    },
+                    { postId: create.data!.postId, comment: feedback.trim() },
                     {
                       onSuccess: (res) => {
                         setRegenId(res.generationId);
@@ -377,15 +381,35 @@ export function PapayaDialog({
               </Button>
             </div>
             {regen.isError && <p className="text-xs text-destructive">{regen.error.message}</p>}
-            <Button
-              className="w-full"
-              onClick={() => {
-                onSchedule(generation.id);
-                onClose();
-              }}
-            >
-              <CalendarDays /> Choose accounts &amp; schedule
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="flex-1"
+                disabled={postAction.isPending}
+                onClick={() =>
+                  postAction.mutate(
+                    { postId: create.data!.postId, action: "approve" },
+                    { onSuccess: onClose },
+                  )
+                }
+              >
+                {postAction.isPending ? <Loader2 className="animate-spin" /> : <Check />}
+                Approve for {shortDay(date)}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  onSchedule(generation.id, create.data!.postId);
+                  onClose();
+                }}
+              >
+                <CalendarDays /> Approve &amp; schedule
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Approving keeps the image on {shortDay(date)} in your calendar until you pick accounts and a time.
+            </p>
+            {postAction.isError && <p className="text-xs text-destructive">{postAction.error.message}</p>}
           </div>
         )}
       </DialogContent>

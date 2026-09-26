@@ -13,6 +13,7 @@ import { badRequest, forbidden, HttpError, notFound } from "../../lib/errors.js"
 import { enqueueSocialPost } from "../queue.js";
 import { findUsableAccount } from "./accounts.js";
 import { isRetryableFailure, SocialPublishError } from "./errors.js";
+import { fitImageForInstagram } from "./media/reframe.js";
 
 /* --------------------------- content validation --------------------------- */
 
@@ -321,6 +322,11 @@ export async function createSocialPosts(
   if (inFlight) throw new HttpError(409, "A post to one of these accounts is already in progress");
 
   const mediaUrl = generation.imageUrls[0]!; // snapshot - later edits never change what was approved
+  // Repurposing: Instagram needs a 4:5 - 1.91:1 frame, so it gets its own fitted
+  // copy (one per request, shared by every Instagram account); others keep the original.
+  const instagramMedia = prepared.some((p) => p.account.platform === "instagram")
+    ? ((await fitImageForInstagram(mediaUrl, userId)) ?? mediaUrl)
+    : mediaUrl;
   const rows = await prisma.$transaction(
     prepared.map(({ account, content }) =>
       prisma.socialPost.create({
@@ -330,7 +336,7 @@ export async function createSocialPosts(
           generationId,
           accountId: account.id,
           content: content as Prisma.InputJsonValue,
-          mediaUrl,
+          mediaUrl: account.platform === "instagram" ? instagramMedia : mediaUrl,
           ...(scheduledFor ? { status: "scheduled", scheduledFor } : {}),
         },
         include: { account: true },

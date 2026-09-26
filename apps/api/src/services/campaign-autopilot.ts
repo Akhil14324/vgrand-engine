@@ -56,7 +56,7 @@ export function toCampaignPostDto(post: {
 
 export function toCampaignPlanDto(plan: {
   id: string;
-  brandId: string;
+  brandId: string | null;
   conversationId: string | null;
   title: string;
   status: string;
@@ -67,7 +67,8 @@ export function toCampaignPlanDto(plan: {
 }): CampaignPlanDto {
   return {
     id: plan.id,
-    brandId: plan.brandId,
+    // Only brandless calendar-draft plans have none, and they never reach brand endpoints.
+    brandId: plan.brandId ?? "",
     conversationId: plan.conversationId,
     title: plan.title,
     status: plan.status as CampaignPlanDto["status"],
@@ -219,6 +220,7 @@ async function processDueCampaignPosts(): Promise<void> {
         });
         continue;
       }
+      if (!post.plan.brandId) throw new Error("plan has no brand");
       const brand = await loadBrandContext(post.plan.brandId, post.plan.userId);
       if (!brand) throw new Error("brand is no longer accessible");
       const profile = (brand.profile ?? {}) as BrandProfile;

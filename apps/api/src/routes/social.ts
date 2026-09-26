@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  socialBestTimesQuerySchema,
   socialCalendarQuerySchema,
   socialPostCreateRequestSchema,
   socialPostRescheduleSchema,
   socialPreviewRequestSchema,
+  type BestTimeSlotDto,
   type SocialAccountDto,
   type SocialCalendarItemDto,
   type SocialConnector,
@@ -24,6 +26,7 @@ import {
   type ConnectedAccountInput,
 } from "../services/social/accounts.js";
 import { SocialConnectError } from "../services/social/errors.js";
+import { suggestBestTimes } from "../services/social/best-times.js";
 import { generateSocialPreviews } from "../services/social/preview.js";
 import {
   cancelScheduledPost,
@@ -136,6 +139,15 @@ export async function socialRoutes(app: FastifyInstance) {
       throw badRequest("Invalid date range");
     }
     return { items: await listCalendarPosts(req.userId, from, to) };
+  });
+
+  app.get("/social/best-times", async (req): Promise<{ items: BestTimeSlotDto[] }> => {
+    const q = parseBody(socialBestTimesQuerySchema, req.query);
+    const ids = q.accountIds.split(",").filter(Boolean);
+    if (ids.length === 0 || !ids.every((id) => z.string().uuid().safeParse(id).success)) {
+      throw badRequest("Invalid accounts");
+    }
+    return { items: await suggestBestTimes(req.userId, ids, q.timezone, q.date) };
   });
 
   app.patch("/social-posts/:id", async (req): Promise<SocialPostDto> => {

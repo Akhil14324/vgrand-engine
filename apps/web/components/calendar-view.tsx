@@ -246,6 +246,16 @@ function PlanCard({ item, onSchedule }: { item: CalendarPlanItemDto; onSchedule:
             View &amp; edit
           </Button>
         )}
+        {item.status === "ready_for_review" && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => postAction.mutate({ postId: item.id, action: "approve" })}
+          >
+            Approve
+          </Button>
+        )}
         {(item.status === "ready_for_review" || item.status === "approved") && item.generationId && (
           <Button size="sm" onClick={() => onSchedule(item)}>
             <CalendarClock /> {item.status === "approved" ? "Schedule" : "Approve & schedule"}
@@ -598,7 +608,9 @@ function CalendarContent() {
         date={selectedDay}
         open={papaya}
         onClose={() => setPapaya(false)}
-        onSchedule={(generationId) => setShare({ generationId, when: scheduleValueFor(selectedDay) })}
+        onSchedule={(generationId, approvePostId) =>
+          setShare({ generationId, when: scheduleValueFor(selectedDay), approvePostId })
+        }
       />
       <LibraryPickerDialog
         date={selectedDay}
