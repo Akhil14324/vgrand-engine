@@ -83,6 +83,13 @@ export function defaultScheduleValue(day?: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Earliest pickable local time (matches the API's one-minute lead), for datetime-local min. */
+export function minScheduleValue() {
+  const d = new Date(Date.now() + 2 * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const formatWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -626,16 +633,17 @@ function SocialShareBody({
           {scheduling && (
             <div className="space-y-1.5 rounded-md border border-border p-2.5">
               <label className="text-xs text-muted-foreground" htmlFor="schedule-at">
-                Publish at ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+                Date &amp; time to publish ({Intl.DateTimeFormat().resolvedOptions().timeZone})
               </label>
               <Input
                 id="schedule-at"
                 type="datetime-local"
+                min={minScheduleValue()}
                 value={when}
                 onChange={(e) => setWhen(e.target.value)}
               />
               {!scheduleValid && (
-                <p className="text-xs text-destructive">Pick a time at least a minute from now</p>
+                <p className="text-xs text-destructive">Pick a time in the future - past times can't be scheduled</p>
               )}
             </div>
           )}

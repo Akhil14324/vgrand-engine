@@ -124,6 +124,10 @@ export function toSocialPostDto(p: PostWithAccount): SocialPostDto {
 }
 
 const MIN_SCHEDULE_LEAD_MS = 60_000;
+/** Poll fast so posts go out within seconds of their time. */
+const SCHEDULER_TICK_MS = 10_000;
+/** A post more than this overdue (server was down) is not silently published late. */
+const MAX_LATE_MS = 2 * 60 * 60_000;
 
 function parseScheduleTime(iso: string): Date {
   const when = new Date(iso);
@@ -209,11 +213,22 @@ export async function claimAndEnqueueScheduled(id: string): Promise<boolean> {
 export async function processDueSocialPosts(): Promise<void> {
   const due = await prisma.socialPost.findMany({
     where: { status: "scheduled", scheduledFor: { lte: new Date() } },
-    select: { id: true, userId: true, accountId: true },
+    select: { id: true, userId: true, accountId: true, scheduledFor: true },
     orderBy: { scheduledFor: "asc" },
     take: 20,
   });
   for (const post of due) {
+    if (post.scheduledFor && Date.now() - post.scheduledFor.getTime() > MAX_LATE_MS) {
+      await prisma.socialPost.updateMany({
+        where: { id: post.id, status: "scheduled" },
+        data: {
+          status: "failed",
+          failureCode: "UNKNOWN",
+          error: "Missed its scheduled time - press Retry to post it now, or reschedule",
+        },
+      });
+      continue;
+    }
     try {
       // Membership/connection may have changed since scheduling.
       await findUsableAccount(post.userId, post.accountId);
@@ -235,7 +250,7 @@ export function startSocialScheduler(): void {
   socialSchedulerStarted = true;
   const tick = () =>
     void processDueSocialPosts().catch((err) => console.error("[social-scheduler]", err));
-  setInterval(tick, 30_000);
+  setInterval(tick, SCHEDULER_TICK_MS);
   void tick();
 }
 

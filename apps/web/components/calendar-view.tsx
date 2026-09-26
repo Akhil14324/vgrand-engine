@@ -34,6 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { minScheduleValue } from "@/components/social-share";
 import {
   DayOptions,
   FillDialog,
@@ -145,7 +146,7 @@ function PostCard({ item }: { item: SocialCalendarItemDto }) {
         <div className="mt-2.5 space-y-2">
           {editing && (
             <div className="flex gap-1.5">
-              <Input type="datetime-local" value={value} onChange={(e) => setValue(e.target.value)} />
+              <Input type="datetime-local" min={minScheduleValue()} value={value} onChange={(e) => setValue(e.target.value)} />
               <Button
                 size="sm"
                 disabled={!valid || busy}
