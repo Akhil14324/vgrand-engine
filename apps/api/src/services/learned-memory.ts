@@ -30,8 +30,18 @@ function getClient(): OpenAI {
   return client;
 }
 
+/** Whether the user has memory switched on (the default). */
+export async function isMemoryEnabled(userId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { memoryEnabled: true },
+  });
+  return user?.memoryEnabled ?? true;
+}
+
 /** Recent learned facts, newest last — injected as system context per turn. */
 export async function loadLearnedMemories(userId: string): Promise<string[]> {
+  if (!(await isMemoryEnabled(userId))) return [];
   const rows = await prisma.memory.findMany({
     where: { userId, type: LEARNED_TYPE },
     orderBy: { createdAt: "desc" },
@@ -50,6 +60,7 @@ export async function rememberTurn(
   turns: Pick<HistoryTurn, "prompt" | "textResponse">[],
 ): Promise<void> {
   try {
+    if (!(await isMemoryEnabled(userId))) return;
     const transcript = turns
       .map(
         (t) =>

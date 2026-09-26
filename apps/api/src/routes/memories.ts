@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@catgpt/db";
-import { createMemorySchema } from "@catgpt/types";
+import { createMemorySchema, updateMemorySettingsSchema } from "@catgpt/types";
 import { forbidden, notFound, parseBody } from "../lib/errors.js";
 import { toMemoryDto } from "../lib/serialize.js";
 
@@ -8,13 +8,39 @@ export async function memoryRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
 
   app.get("/memories", async (req) => {
-    const items = await prisma.memory.findMany({
-      where: { userId: req.userId },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      include: { sourceGen: { select: { imageUrls: true } } },
+    // Only what the AI learned about the user: the per-image "fact" snapshots
+    // are bookkeeping (the Library shows those images) and would just pile up.
+    const [items, user] = await Promise.all([
+      prisma.memory.findMany({
+        where: { userId: req.userId, type: "learned" },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { memoryEnabled: true },
+      }),
+    ]);
+    return {
+      items: items.map((m) => toMemoryDto(m)),
+      enabled: user?.memoryEnabled ?? true,
+    };
+  });
+
+  app.patch("/memories/settings", async (req) => {
+    const { enabled } = parseBody(updateMemorySettingsSchema, req.body);
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: { memoryEnabled: enabled },
     });
-    return { items: items.map(toMemoryDto) };
+    return { enabled };
+  });
+
+  app.delete("/memories", async (req, reply) => {
+    await prisma.memory.deleteMany({
+      where: { userId: req.userId, type: "learned" },
+    });
+    return reply.code(204).send();
   });
 
   app.post("/memories", async (req, reply) => {

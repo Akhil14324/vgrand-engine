@@ -479,8 +479,28 @@ export function useDeleteDocument() {
 export function useMemories() {
   return useQuery({
     queryKey: ["memories"],
-    queryFn: () => apiFetch<{ items: MemoryDto[] }>("/memories"),
-    select: (d) => d.items,
+    queryFn: () =>
+      apiFetch<{ items: MemoryDto[]; enabled: boolean }>("/memories"),
+  });
+}
+
+export function useSetMemoryEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<{ enabled: boolean }>("/memories/settings", {
+        method: "PATCH",
+        json: { enabled },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["memories"] }),
+  });
+}
+
+export function useClearMemories() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/memories", { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["memories"] }),
   });
 }
 

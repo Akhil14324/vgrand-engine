@@ -25,14 +25,22 @@ import { useStudio } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent } from "./sidebar";
 import { Composer } from "./composer";
+import { MemoryDialog } from "./memory-dialog";
+import { MemoryToast } from "./memory-toast";
 import { GenerationFeed, PendingTurnBubble } from "./generation-feed";
 
 export function StudioShell() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { activeConversationId, sidebarCollapsed, toggleSidebar, startNewChat } =
-    useStudio();
+  const {
+    activeConversationId,
+    sidebarCollapsed,
+    toggleSidebar,
+    startNewChat,
+    memoryDialogOpen,
+    setMemoryDialogOpen,
+  } = useStudio();
   const { data: conversation } = useConversation(activeConversationId);
   const socialNotice = useSocialConnectReturn();
 
@@ -69,6 +77,8 @@ export function StudioShell() {
   return (
     <div className="app-safe-screen flex overflow-hidden">
       <Sidebar />
+      <MemoryDialog open={memoryDialogOpen} onOpenChange={setMemoryDialogOpen} />
+      <MemoryToast />
       {socialNotice && (
         <div
           role="status"

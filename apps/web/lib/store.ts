@@ -41,6 +41,10 @@ interface StudioState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 
+  /** Manage-memory dialog, opened from Settings or the "Memory updated" toast. */
+  memoryDialogOpen: boolean;
+  setMemoryDialogOpen: (open: boolean) => void;
+
   /** History filter — mirrors ?themeSlug= on GET /generations. */
   historyTheme: string | null;
   setHistoryTheme: (slug: string | null) => void;
@@ -92,6 +96,9 @@ export const useStudio = create<StudioState>((set) => ({
   sidebarCollapsed: false,
   toggleSidebar: () =>
     set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+
+  memoryDialogOpen: false,
+  setMemoryDialogOpen: (open) => set({ memoryDialogOpen: open }),
 
   historyTheme: null,
   setHistoryTheme: (slug) => set({ historyTheme: slug }),

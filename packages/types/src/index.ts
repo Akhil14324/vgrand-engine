@@ -380,6 +380,11 @@ export const createMemorySchema = z.object({
 });
 export type CreateMemoryRequest = z.infer<typeof createMemorySchema>;
 
+export const updateMemorySettingsSchema = z.object({ enabled: z.boolean() });
+export type UpdateMemorySettingsRequest = z.infer<
+  typeof updateMemorySettingsSchema
+>;
+
 /* ------------------------------ API envelopes ------------------------------ */
 
 export interface Paginated<T> {

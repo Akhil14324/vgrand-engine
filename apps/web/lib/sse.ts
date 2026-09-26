@@ -117,6 +117,17 @@ function applyPartialImage(qc: QueryClient, generationId: string, dataUrl: strin
 }
 
 /**
+ * Memory extraction runs in the background after a text reply, past the point
+ * where the stream closes. Re-check the memory list a few times afterwards so
+ * the "Memory updated" toast can notice a newly saved fact.
+ */
+function scheduleMemoryRecheck(qc: QueryClient) {
+  for (const ms of [4000, 10000, 20000]) {
+    setTimeout(() => qc.invalidateQueries({ queryKey: ["memories"] }), ms);
+  }
+}
+
+/**
  * Streams /generations/:id/events while a generation is pending/processing so
  * cards flip from shimmer to image without polling — and chat replies render
  * token-by-token via delta events. EventSource can't set headers, so the
@@ -167,6 +178,9 @@ export function useGenerationStream(
             // Terminal state — land every buffered token before the refetch.
             flushDeltas(qc);
             streamBuffers.delete(evt.generationId);
+            if (evt.status === "completed" && evt.kind === "text") {
+              scheduleMemoryRecheck(qc);
+            }
             es?.close();
           }
         } catch {

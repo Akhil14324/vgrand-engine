@@ -9,8 +9,8 @@ import {
   Brain,
   Check,
   ChevronDown,
-  History,
   Layers,
+  ImageIcon,
   LayoutGrid,
   Store,
   LogOut,
@@ -28,17 +28,13 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { ConversationDto, GenerationDto } from "@catgpt/types";
+import type { ConversationDto } from "@catgpt/types";
 import { useAuth } from "@/lib/auth";
 import { useStudio } from "@/lib/store";
 import { THEME_ICONS } from "@/lib/theme-icons";
 import {
   useConversations,
   useDeleteConversation,
-  useDeleteGeneration,
-  useDeleteMemory,
-  useGenerations,
-  useMemories,
   useShareGeneration,
   useThemes,
   useUpdateConversation,
@@ -46,7 +42,6 @@ import {
 import { ImageUsage } from "@/components/image-usage";
 import { InstallButton } from "@/components/pwa";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -61,16 +56,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 function ThemeIcon({ name }: { name: string | null }) {
   const Icon = (name && THEME_ICONS[name]) || Sparkles;
   return <Icon className="h-3.5 w-3.5" />;
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 /** Desktop column wrapper. The same content renders inside the mobile drawer. */
@@ -93,10 +78,6 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const {
     armTheme,
     armedTheme,
-    select,
-    selectedId,
-    historyTheme,
-    setHistoryTheme,
     activeConversationId,
     openConversation,
     startNewChat,
@@ -105,21 +86,16 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { data: themes } = useThemes();
   const [search, setSearch] = useState("");
   const [themesOpen, setThemesOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
-  const { data: generations } = useGenerations({ themeSlug: historyTheme });
   // Server-side search — matches title AND generation contents inside chats.
   const deferredSearch = useDeferredValue(search.trim());
   const { data: conversations } = useConversations({
     search: deferredSearch || undefined,
   });
-  const { data: memories } = useMemories();
-  const deleteMemory = useDeleteMemory();
 
   const q = search.trim().toLowerCase();
 
-  // Already filtered server-side — history rows below stay client-filtered.
+  // Already filtered server-side.
   const filteredChats = useMemo(
     () => conversations?.items ?? [],
     [conversations],
@@ -136,27 +112,8 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     [filteredChats],
   );
 
-  const filtered = useMemo(() => {
-    const items = generations?.items ?? [];
-    if (!q) return items;
-    return items.filter(
-      (g) =>
-        g.prompt.toLowerCase().includes(q) ||
-        g.theme?.slug.includes(q) ||
-        g.theme?.label.toLowerCase().includes(q),
-    );
-  }, [generations, q]);
-
   const newChat = () => {
     startNewChat();
-    onNavigate?.();
-  };
-
-  const openGeneration = (g: GenerationDto) => {
-    // Jump into the chat containing this generation (ChatGPT-style),
-    // then highlight the card inside it.
-    if (g.conversationId) openConversation(g.conversationId);
-    select(g.id);
     onNavigate?.();
   };
 
@@ -224,6 +181,12 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           icon={Store}
           label="Brand"
           href="/brand"
+          onNavigate={onNavigate}
+        />
+        <NavRow
+          icon={ImageIcon}
+          label="Library"
+          href="/library"
           onNavigate={onNavigate}
         />
         <button
@@ -316,105 +279,6 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           />
         )}
 
-        <SectionToggle
-          icon={History}
-          label="Image history"
-          open={historyOpen}
-          onToggle={() => setHistoryOpen((v) => !v)}
-        />
-        {historyOpen && themes && themes.length > 0 && (
-          <div className="flex flex-wrap gap-1 px-3 pb-2">
-            <FilterChip
-              label="All"
-              active={historyTheme === null}
-              onClick={() => setHistoryTheme(null)}
-            />
-            {themes.map((t) => (
-              <FilterChip
-                key={t.id}
-                label={`/${t.slug}`}
-                active={historyTheme === t.slug}
-                onClick={() =>
-                  setHistoryTheme(historyTheme === t.slug ? null : t.slug)
-                }
-              />
-            ))}
-          </div>
-        )}
-        {historyOpen && (
-        <div className="flex flex-col gap-0.5 px-2">
-          {filtered.map((g) => (
-            <HistoryRow
-              key={g.id}
-              generation={g}
-              active={selectedId === g.id}
-              onClick={() => openGeneration(g)}
-            />
-          ))}
-          {filtered.length === 0 && (
-            <p className="px-2.5 py-4 text-xs text-muted-foreground">
-              {q ? "Nothing matches." : "No generations yet."}
-            </p>
-          )}
-        </div>
-        )}
-
-        <SectionToggle
-          icon={Brain}
-          label="Memory"
-          open={memoryOpen}
-          onToggle={() => setMemoryOpen((v) => !v)}
-        />
-        {memoryOpen && (
-        <div className="flex flex-col gap-1.5 px-3 pb-4">
-          {(memories ?? []).map((m) => (
-            <div
-              key={m.id}
-              className="group flex gap-2.5 rounded-md border bg-card/60 p-2.5"
-            >
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted">
-                {m.previewImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={m.previewImage}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center">
-                    <Brain className="h-3.5 w-3.5 text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <Badge variant="muted" className="text-[10px]">
-                    {m.type}
-                  </Badge>
-                  <button
-                    onClick={() => deleteMemory.mutate(m.id)}
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
-                    aria-label="Delete memory"
-                  >
-                    <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                  </button>
-                </div>
-                <p className="mt-1 break-words text-xs leading-snug text-muted-foreground">
-                  {m.content}
-                </p>
-                <p className="mt-1 text-[10px] text-muted-foreground/60">
-                  {timeAgo(m.createdAt)}
-                </p>
-              </div>
-            </div>
-          ))}
-          {memories?.length === 0 && (
-            <p className="py-4 text-xs text-muted-foreground">
-              Memories are recorded automatically as you generate.
-            </p>
-          )}
-        </div>
-        )}
         <div className="h-4" />
       </ScrollArea>
 
@@ -446,6 +310,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 /** Account settings: legal pages plus a confirmed route to the data-deletion request page. */
 function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
+  const setMemoryDialogOpen = useStudio((s) => s.setMemoryDialogOpen);
   const go = (href: string) => {
     onNavigate?.();
     router.push(href);
@@ -463,6 +328,14 @@ function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => {
+            onNavigate?.();
+            setMemoryDialogOpen(true);
+          }}>
+          <Brain className="mr-2 h-3.5 w-3.5" />
+          Manage memory
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => go("/privacy")}>Privacy Policy</DropdownMenuItem>
         <DropdownMenuItem onClick={() => go("/terms")}>Terms of Service</DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -534,33 +407,6 @@ function SectionLabel({
   );
 }
 
-/** Secondary sections (history, memory) stay folded so chats own the column. */
-function SectionToggle({
-  icon: Icon,
-  label,
-  open,
-  onToggle,
-}: {
-  icon: LucideIcon;
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      aria-expanded={open}
-      className="mx-2 mt-3 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-    >
-      <Icon className="h-3.5 w-3.5" />
-      <span className="flex-1 text-left">{label}</span>
-      <ChevronDown
-        className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
-      />
-    </button>
-  );
-}
-
 /** Buckets chats into Today / Yesterday / Previous 7 days / Older. */
 function groupChatsByRecency(items: ConversationDto[]) {
   const DAY = 86_400_000;
@@ -609,125 +455,6 @@ function ChatList({
           }}
         />
       ))}
-    </div>
-  );
-}
-
-function FilterChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-2 py-0.5 text-[10px] transition-colors",
-        active
-          ? "border-primary/60 bg-primary/15 text-primary"
-          : "border-border text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-function HistoryRow({
-  generation,
-  active,
-  onClick,
-}: {
-  generation: GenerationDto;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const thumb = generation.imageUrls[0];
-  const del = useDeleteGeneration();
-  const share = useShareGeneration();
-  const { select, selectedId } = useStudio();
-  return (
-    <div
-      className={cn(
-        "group flex w-full items-center gap-1 rounded-md px-2 py-2 transition-colors",
-        active ? "bg-accent" : "hover:bg-accent/60",
-      )}
-    >
-      <button
-        onClick={onClick}
-        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-      >
-        <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border bg-muted">
-          {thumb ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={thumb} alt="" className="h-full w-full object-cover" />
-          ) : generation.status === "failed" ? (
-            <div className="flex h-full items-center justify-center text-[9px] text-destructive">
-              failed
-            </div>
-          ) : (
-            <div className="shimmer h-full w-full" />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs">{generation.prompt}</p>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            {generation.theme && (
-              <span className="text-[10px] text-primary">
-                /{generation.theme.slug}
-              </span>
-            )}
-            <span className="text-[10px] text-muted-foreground">
-              {timeAgo(generation.createdAt)}
-            </span>
-            {generation.parentId && (
-              <span className="text-[10px] text-muted-foreground">· edit</span>
-            )}
-          </div>
-        </div>
-      </button>
-      <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label="Generation options"
-              className="rounded p-1 hover:bg-accent"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="right" className="w-40">
-            <DropdownMenuItem
-              disabled={!thumb}
-              onClick={() =>
-                share.mutate(generation.id, {
-                  onSuccess: (link) =>
-                    void navigator.clipboard.writeText(link.url),
-                })
-              }
-            >
-              <Share2 className="mr-2 h-3.5 w-3.5" />
-              Share
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => {
-                del.mutate(generation.id);
-                if (selectedId === generation.id) select(null);
-              }}
-            >
-              <Trash2 className="mr-2 h-3.5 w-3.5" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
     </div>
   );
 }
