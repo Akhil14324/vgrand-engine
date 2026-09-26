@@ -38,7 +38,32 @@
     overflow-x: hidden;
     overflow-x: clip;
   }
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+  }
+  /* Slim scrollbars that match the dark surfaces. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground) / 0.3);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
   body {
+    background-image: radial-gradient(60rem 30rem at 50% -10%, hsl(var(--primary) / 0.07), transparent 70%);
+    background-attachment: fixed;
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";
   }
