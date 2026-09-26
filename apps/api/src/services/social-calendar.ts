@@ -83,7 +83,18 @@ async function holidayMap(dates: string[]): Promise<Record<string, string>> {
 }
 
 /** Create + enqueue an on-brand image generation, charging (and on failure refunding) the daily quota. */
-async function startBrandImage(userId: string, brandId: string, prompt: string, meta: Record<string, unknown>) {
+async function startBrandImage(
+  userId: string,
+  brandId: string,
+  prompt: string,
+  meta: Record<string, unknown>,
+  opts: {
+    /** Set for edits: the new image revises this generation (edit mode + edit model). */
+    parent?: { id: string; provider: string };
+    /** Runs after the row exists but BEFORE it is queued, so a fast worker can't finish unlinked. */
+    onCreated?: (generationId: string) => Promise<void>;
+  } = {},
+) {
   const usage = await getImageUsage(userId);
   if (usage.remaining <= 0) throw new HttpError(429, `Daily image limit reached (${usage.limit}/day)`);
   const brand = await loadBrandContext(brandId, userId);
@@ -99,17 +110,19 @@ async function startBrandImage(userId: string, brandId: string, prompt: string, 
         buildFinalPrompt(null, prompt) +
         brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot) +
         CAMPAIGN_CREATIVE_STYLE,
-      provider: resolveProvider(null),
+      provider: resolveProvider(null, opts.parent?.provider),
+      parentId: opts.parent?.id ?? null,
       metadata: {
         brandId: brand.id,
         quality: env.CAMPAIGN_IMAGE_QUALITY,
         size: "1088x1360",
-        ...meta,
         ...(refs.length ? { referenceImageUrl: refs[0], referenceImageUrls: refs } : {}),
+        ...meta,
       },
     },
   });
   try {
+    await opts.onCreated?.(generation.id);
     if (!(await recordImageUsage(userId, generation.id))) {
       throw new HttpError(429, `Daily image limit reached (${usage.limit}/day)`);
     }
@@ -119,6 +132,12 @@ async function startBrandImage(userId: string, brandId: string, prompt: string, 
       .updateMany({
         where: { id: generation.id, status: { in: ["pending", "processing"] } },
         data: { status: "failed", error: "Could not start" },
+      })
+      .catch(() => {});
+    await prisma.campaignPost
+      .updateMany({
+        where: { generationId: generation.id },
+        data: { status: "failed", error: err instanceof Error ? err.message : "Could not start" },
       })
       .catch(() => {});
     await refundImageUsage(generation.id).catch(() => {});
@@ -246,4 +265,61 @@ export async function listPlanItems(userId: string, from: Date, to: Date): Promi
     imageUrl: r.generation?.imageUrls[0] ?? null,
     error: r.error,
   }));
+}
+
+/**
+ * Regenerate a planned post's image using the user's feedback. The current image
+ * is the edit base (so the good parts stay), and the post is relinked to the new
+ * generation, which the worker then marks ready_for_review again.
+ */
+export async function regenerateCampaignPost(userId: string, postId: string, comment: string) {
+  const post = await prisma.campaignPost.findFirst({
+    where: { id: postId, plan: { userId } },
+    include: { plan: { select: { brandId: true } }, generation: true },
+  });
+  if (!post) throw new HttpError(404, "Post not found");
+  if (!["ready_for_review", "approved", "failed"].includes(post.status)) {
+    throw badRequest("This post can't be regenerated right now");
+  }
+  const current = post.generation;
+  const currentImage = current?.imageUrls[0];
+  const prompt = currentImage
+    ? `${post.prompt}
+
+Revise the attached image using this feedback, keeping everything else the same: ${comment}`
+    : `${post.prompt}
+
+Additional direction: ${comment}`;
+  const meta = (current?.metadata ?? {}) as Record<string, unknown>;
+
+  await startBrandImage(
+    userId,
+    post.plan.brandId,
+    prompt,
+    {
+      campaignPostId: post.id,
+      campaignDraft: true,
+      ...(currentImage
+        ? {
+            editOperation: "edit",
+            referenceImageUrl: currentImage,
+            referenceImageUrls: [
+              currentImage,
+              ...(Array.isArray(meta.referenceImageUrls)
+                ? (meta.referenceImageUrls as unknown[]).filter((u): u is string => typeof u === "string" && u !== currentImage)
+                : []),
+            ].slice(0, 10),
+          }
+        : {}),
+    },
+    {
+      parent: current ? { id: current.id, provider: current.provider } : undefined,
+      onCreated: async (generationId) => {
+        await prisma.campaignPost.update({
+          where: { id: post.id },
+          data: { generationId, status: "generating", error: null, approvedAt: null },
+        });
+      },
+    },
+  );
 }

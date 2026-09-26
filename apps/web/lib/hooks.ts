@@ -1148,3 +1148,19 @@ export function useCalendarPlanActions() {
     }),
   };
 }
+
+/** Regenerate a planned post's image from feedback; the post relinks to the new image. */
+export function useRegenerateCampaignPost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { postId: string; comment: string }) =>
+      apiFetch<{ ok: true }>(`/social/calendar/posts/${v.postId}/regenerate`, {
+        method: "POST",
+        json: { comment: v.comment },
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["usage"] });
+      return qc.invalidateQueries({ queryKey: ["social"] });
+    },
+  });
+}

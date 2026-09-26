@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -28,6 +28,7 @@ import {
   useCalendarPlan,
   useCalendarPlanActions,
   useHolidays,
+  useRegenerateCampaignPost,
   useSocialCalendar,
   useSocialPostAction,
 } from "@/lib/hooks";
@@ -38,6 +39,8 @@ import { minScheduleValue } from "@/components/social-share";
 import {
   DayOptions,
   FillDialog,
+  ImageThumb,
+  ImageViewer,
   LibraryPickerDialog,
   PapayaDialog,
   ShareById,
@@ -116,6 +119,7 @@ export function CalendarView() {
 function PostCard({ item }: { item: SocialCalendarItemDto }) {
   const { reschedule, cancel, postNow, retry } = useSocialPostAction();
   const [editing, setEditing] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const [value, setValue] = useState(() => toLocalInput(socialWhen(item)));
   const busy = reschedule.isPending || cancel.isPending || postNow.isPending || retry.isPending;
   const error = [reschedule, cancel, postNow, retry].find((m) => m.isError)?.error?.message;
@@ -125,8 +129,7 @@ function PostCard({ item }: { item: SocialCalendarItemDto }) {
   return (
     <div className="rounded-xl border border-border bg-card p-3 text-sm shadow-sm">
       <div className="flex gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={item.mediaUrl} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
+        <ImageThumb src={item.mediaUrl} className="size-16" onOpen={() => setViewing(true)} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="font-medium">{PLATFORM_LABEL[item.platform]}</span>
@@ -198,19 +201,30 @@ function PostCard({ item }: { item: SocialCalendarItemDto }) {
         </a>
       )}
       {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      <ImageViewer
+        open={viewing}
+        onClose={() => setViewing(false)}
+        imageUrl={item.mediaUrl}
+        title={`${PLATFORM_LABEL[item.platform]} · ${socialWhen(item).toLocaleString()}`}
+      />
     </div>
   );
 }
 
 function PlanCard({ item, onSchedule }: { item: CalendarPlanItemDto; onSchedule: (item: CalendarPlanItemDto) => void }) {
   const { postAction } = useCalendarPlanActions();
+  const regenerate = useRegenerateCampaignPost();
+  const [viewing, setViewing] = useState(false);
+  // Keep showing the previous image while a regeneration is in flight.
+  const lastImage = useRef<string | null>(item.imageUrl);
+  if (item.imageUrl) lastImage.current = item.imageUrl;
   const busy = postAction.isPending;
+  const canRegenerate = ["ready_for_review", "approved", "failed"].includes(item.status);
   return (
     <div className="rounded-xl border border-dashed border-violet-400/60 bg-violet-500/5 p-3 text-sm">
       <div className="flex gap-3">
         {item.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.imageUrl} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
+          <ImageThumb src={item.imageUrl} className="size-16" onOpen={() => setViewing(true)} />
         ) : (
           <div className="flex size-16 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500">
             {item.status === "generating" ? <Loader2 className="animate-spin" /> : <Sparkles />}
@@ -227,6 +241,11 @@ function PlanCard({ item, onSchedule }: { item: CalendarPlanItemDto; onSchedule:
         </div>
       </div>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {item.imageUrl && (
+          <Button size="sm" variant="outline" onClick={() => setViewing(true)}>
+            View &amp; edit
+          </Button>
+        )}
         {(item.status === "ready_for_review" || item.status === "approved") && item.generationId && (
           <Button size="sm" onClick={() => onSchedule(item)}>
             <CalendarClock /> {item.status === "approved" ? "Schedule" : "Approve & schedule"}
@@ -250,6 +269,20 @@ function PlanCard({ item, onSchedule }: { item: CalendarPlanItemDto; onSchedule:
         )}
       </div>
       {postAction.isError && <p className="mt-1 text-xs text-destructive">{postAction.error.message}</p>}
+      <ImageViewer
+        open={viewing}
+        onClose={() => setViewing(false)}
+        imageUrl={item.imageUrl ?? lastImage.current}
+        title={`${item.platform ?? "Post"} · ${new Date(item.publishAt).toLocaleString()}`}
+        caption={item.caption}
+        busy={regenerate.isPending || item.status === "generating"}
+        error={regenerate.isError ? regenerate.error.message : item.status === "failed" ? item.error : null}
+        onRegenerate={
+          canRegenerate || item.status === "generating"
+            ? (comment) => regenerate.mutateAsync({ postId: item.id, comment })
+            : undefined
+        }
+      />
     </div>
   );
 }

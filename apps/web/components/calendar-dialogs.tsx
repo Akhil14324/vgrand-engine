@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, ImageIcon, Loader2, Sparkles, Wand2 } from "lucide-react";
+import { CalendarDays, ImageIcon, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
 import type { BrandDto } from "@catgpt/types";
 import {
   useBrands,
@@ -9,10 +9,12 @@ import {
   useFillCalendar,
   useGeneration,
   useGenerations,
+  useRegenerate,
 } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SocialShareDialog } from "@/components/social-share";
 
@@ -96,6 +98,137 @@ export function ShareById({
   );
 }
 
+/* ------------------------------ image viewer ------------------------------ */
+
+/** Thumbnail that opens the full-size viewer. */
+export function ImageThumb({
+  src,
+  className,
+  onOpen,
+}: {
+  src: string;
+  className?: string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      aria-label="View full image"
+      className={cn("group relative shrink-0 overflow-hidden rounded-lg", className)}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="" className="size-full object-cover transition group-hover:scale-105" />
+      <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] font-medium text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
+        View
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Full-size image viewer. With onRegenerate it also shows a feedback box: the
+ * comment is sent and the image is redone from it. busy covers both our own
+ * pending request and the post being regenerated server-side.
+ */
+export function ImageViewer({
+  open,
+  onClose,
+  imageUrl,
+  title,
+  caption,
+  busy,
+  error,
+  onRegenerate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  imageUrl: string | null;
+  title?: string;
+  caption?: string | null;
+  busy?: boolean;
+  error?: string | null;
+  onRegenerate?: (comment: string) => Promise<unknown> | void;
+}) {
+  const [comment, setComment] = useState("");
+  useEffect(() => {
+    if (!open) setComment("");
+  }, [open]);
+  const submit = async () => {
+    const text = comment.trim();
+    if (!text || busy || !onRegenerate) return;
+    try {
+      await onRegenerate(text);
+      setComment("");
+    } catch {
+      // the caller surfaces the error; keep the comment so it can be retried
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[94dvh] max-w-5xl overflow-y-auto p-4 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>{title ?? "Preview"}</DialogTitle>
+          <DialogDescription className="sr-only">Full-size preview of the generated image.</DialogDescription>
+        </DialogHeader>
+        <div className={cn("grid gap-5", onRegenerate && "lg:grid-cols-[minmax(0,1fr)_320px]")}>
+          <div className="relative flex items-center justify-center rounded-xl bg-muted/40">
+            {imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageUrl}
+                alt=""
+                className={cn("max-h-[72dvh] w-full rounded-xl object-contain transition", busy && "opacity-40")}
+              />
+            ) : (
+              <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">No image yet</div>
+            )}
+            {busy && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm font-medium">
+                <Loader2 className="size-7 animate-spin text-primary" />
+                Regenerating with your comment…
+              </div>
+            )}
+          </div>
+          {onRegenerate && (
+            <div className="space-y-3">
+              {caption && (
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Caption</div>
+                  <p className="text-sm">{caption}</p>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label htmlFor="regen-comment" className="text-sm font-medium">
+                  Not quite right? Tell Papaya what to change
+                </label>
+                <Textarea
+                  id="regen-comment"
+                  value={comment}
+                  maxLength={1000}
+                  disabled={busy}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="e.g. make the background warmer, add the offer text, remove the second bottle"
+                  className="min-h-[110px]"
+                />
+                <Button className="w-full" disabled={!comment.trim() || busy} onClick={() => void submit()}>
+                  {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  Regenerate with comment
+                </Button>
+                <p className="text-[11px] text-muted-foreground">Uses one image from your daily limit.</p>
+                {error && <p className="text-xs text-destructive">{error}</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* --------------------------------- Papaya ---------------------------------- */
 
 /** "Papaya": the AI picks an idea for the day (using brand + any relevant holiday) and makes the image. */
@@ -113,7 +246,10 @@ export function PapayaDialog({
   const { brands, isLoading, brandId, setBrandId } = useDefaultBrand();
   const [notes, setNotes] = useState("");
   const create = useCreateDayPost();
-  const generationId = create.data?.generationId ?? null;
+  const regen = useRegenerate();
+  const [regenId, setRegenId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const generationId = regenId ?? create.data?.generationId ?? null;
   const { data: generation } = useGeneration(generationId);
   const done = generation?.status === "completed" && generation.imageUrls.length > 0;
   const failed = generation?.status === "failed" || generation?.status === "cancelled";
@@ -121,6 +257,9 @@ export function PapayaDialog({
   useEffect(() => {
     if (!open) {
       create.reset();
+      regen.reset();
+      setRegenId(null);
+      setFeedback("");
       setNotes("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,7 +329,13 @@ export function PapayaDialog({
         {failed && (
           <div className="space-y-2">
             <p className="text-sm text-destructive">{generation?.error ?? "Image generation failed."}</p>
-            <Button variant="outline" onClick={() => create.reset()}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                create.reset();
+                setRegenId(null);
+              }}
+            >
               Try again
             </Button>
           </div>
@@ -202,6 +347,36 @@ export function PapayaDialog({
             {create.data?.holiday && (
               <p className="text-xs text-muted-foreground">Themed around {create.data.holiday}.</p>
             )}
+            <div className="flex gap-1.5">
+              <Input
+                value={feedback}
+                maxLength={1000}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Want changes? e.g. warmer colours, bigger logo"
+              />
+              <Button
+                variant="outline"
+                disabled={!feedback.trim() || regen.isPending}
+                onClick={() =>
+                  regen.mutate(
+                    {
+                      id: generation.id,
+                      prompt: `Revise this image using this feedback, keeping everything else the same: ${feedback.trim()}`,
+                    },
+                    {
+                      onSuccess: (res) => {
+                        setRegenId(res.generationId);
+                        setFeedback("");
+                      },
+                    },
+                  )
+                }
+              >
+                {regen.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                Regenerate
+              </Button>
+            </div>
+            {regen.isError && <p className="text-xs text-destructive">{regen.error.message}</p>}
             <Button
               className="w-full"
               onClick={() => {
