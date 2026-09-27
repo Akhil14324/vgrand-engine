@@ -121,7 +121,45 @@ export function useCreateGeneration() {
         method: "POST",
         json: body,
       }),
-    onSuccess: () => {
+    onSuccess: (res, body) => {
+      // Seed the open chat's own list directly instead of only invalidating -
+      // invalidating alone means the optimistic pendingTurn bubble sits there
+      // for a whole extra round-trip (refetch) after the POST already told us
+      // everything needed to show a placeholder. This is that exact chat's
+      // query key (GenerationFeed never passes a themeSlug), so it can't leak
+      // into an unrelated theme gallery or another conversation's list.
+      const placeholder: GenerationDto = {
+        id: res.generationId,
+        userId: "",
+        themeId: null,
+        conversationId: res.conversationId,
+        kind: res.kind,
+        prompt: body.prompt,
+        textResponse: null,
+        provider: "openai",
+        model: null,
+        imageUrls: [],
+        status: "pending",
+        error: null,
+        metadata: null,
+        parentId: body.parentId ?? null,
+        createdAt: new Date().toISOString(),
+      };
+      qc.setQueryData<Paginated<GenerationDto>>(
+        ["generations", null, res.conversationId],
+        (old) =>
+          old
+            ? old.items.some((g) => g.id === placeholder.id)
+              ? old
+              : { ...old, items: [placeholder, ...old.items] }
+            // Brand-new chat: no cached list yet - create one so the pending
+            // bubble can hand off immediately instead of waiting on the
+            // first-ever fetch for this conversation.
+            : { items: [placeholder], nextCursor: null },
+      );
+      qc.setQueryData(["generation", res.generationId], placeholder);
+      // Other filtered views (theme galleries, "all generations") and the
+      // sidebar/quota still need a real refetch - just not on this critical path.
       qc.invalidateQueries({ queryKey: ["generations"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["usage"] });
@@ -863,9 +901,17 @@ export function useCreateSocialPosts(generationId: string) {
         method: "POST",
         json: input,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // Write the created rows straight into the cache instead of
+      // invalidating - the response already has them, so the "Queued…"
+      // status shows the instant the POST resolves instead of after a
+      // second round-trip to re-fetch the list. The 2.5s refetchInterval
+      // above still picks up later status changes (posting -> posted).
+      qc.setQueryData<{ items: SocialPostDto[] }>(
+        ["social", "posts", generationId],
+        (old) => ({ items: [...(old?.items ?? []), ...res.items] }),
+      );
       void qc.invalidateQueries({ queryKey: ["social", "calendar"] });
-      return qc.invalidateQueries({ queryKey: ["social", "posts", generationId] });
     },
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
@@ -43,8 +43,13 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 /**
  * Renders assistant text as Markdown — headings, lists, tables, and fenced
  * code blocks. Uses prose (tailwind typography) for sane defaults.
+ *
+ * Memoized: parsing to an AST and building the React tree is real work, and
+ * every caller renders one of these per message in a list - without memo,
+ * any re-render of that list (a sibling message streaming, an unrelated
+ * store change) re-parses every already-rendered message's Markdown too.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   children,
   className,
 }: {
@@ -100,4 +105,4 @@ export function Markdown({
       </ReactMarkdown>
     </div>
   );
-}
+});

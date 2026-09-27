@@ -12,7 +12,12 @@ import { ChatTurn } from "./chat-turn";
 
 /** Chat thread: oldest at top, newest at bottom, auto-scrolls like ChatGPT. */
 export function GenerationFeed() {
-  const { activeConversationId, pendingTurn, clearPendingTurn } = useStudio();
+  // Selectors: this wraps every visible turn, so subscribing to the whole
+  // store would re-render the entire feed on any unrelated change (sidebar,
+  // quality, theme, ...).
+  const activeConversationId = useStudio((s) => s.activeConversationId);
+  const pendingTurn = useStudio((s) => s.pendingTurn);
+  const clearPendingTurn = useStudio((s) => s.clearPendingTurn);
   const { data, isLoading } = useGenerations({
     conversationId: activeConversationId,
   });
@@ -140,7 +145,7 @@ export function GenerationFeed() {
 
 /** Lightweight stand-in for a turn whose POST is still in flight. */
 export function PendingTurnBubble() {
-  const { pendingTurn } = useStudio();
+  const pendingTurn = useStudio((s) => s.pendingTurn);
   if (!pendingTurn) return null;
   return (
     <div className="flex flex-col gap-3 animate-fade-in">

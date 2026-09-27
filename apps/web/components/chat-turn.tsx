@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   Download,
@@ -75,8 +75,22 @@ function useSmoothReveal(text: string, active: boolean): string {
   return active && shown !== null ? text.slice(0, shown) : text;
 }
 
-export function ChatTurn({ generation }: { generation: GenerationDto }) {
-  const { select, selectedId } = useStudio();
+/**
+ * Memoized: the store carries a dozen unrelated fields (sidebar, quality,
+ * theme, ...) and each turn only cares about select/selectedId, so plain
+ * `useStudio()` here used to re-render every visible turn - and re-run its
+ * Markdown parse - on any of those unrelated changes. Selectors narrow the
+ * subscription; memo skips the re-render entirely when this turn's own
+ * generation object hasn't changed (the SSE cache patch keeps every other
+ * turn's object reference stable - see lib/sse.ts).
+ */
+export const ChatTurn = memo(function ChatTurn({
+  generation,
+}: {
+  generation: GenerationDto;
+}) {
+  const select = useStudio((s) => s.select);
+  const selectedId = useStudio((s) => s.selectedId);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const inFlight =
     generation.status === "pending" || generation.status === "processing";
@@ -301,4 +315,4 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
       )}
     </div>
   );
-}
+});

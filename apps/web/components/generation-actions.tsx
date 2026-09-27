@@ -104,7 +104,10 @@ function InpaintDialog({
 }) {
   const url = generation.imageUrls[0]!;
   const regenerate = useRegenerate();
-  const { select } = useStudio();
+  // Selector, not the whole store: this renders per-turn, so subscribing to
+  // every unrelated field (sidebar, quality, theme, ...) would re-render it
+  // on every composer interaction.
+  const select = useStudio((s) => s.select);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
@@ -320,7 +323,10 @@ function OutpaintDialog({
 }) {
   const url = generation.imageUrls[0]!;
   const regenerate = useRegenerate();
-  const { select } = useStudio();
+  // Selector, not the whole store: this renders per-turn, so subscribing to
+  // every unrelated field (sidebar, quality, theme, ...) would re-render it
+  // on every composer interaction.
+  const select = useStudio((s) => s.select);
   const [size, setSize] = useState<ImageSize>("1536x1024");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -412,7 +418,10 @@ function OutpaintDialog({
  */
 function ImageTools({ generation }: { generation: GenerationDto }) {
   const regenerate = useRegenerate();
-  const { select } = useStudio();
+  // Selector, not the whole store: this renders per-turn, so subscribing to
+  // every unrelated field (sidebar, quality, theme, ...) would re-render it
+  // on every composer interaction.
+  const select = useStudio((s) => s.select);
   const [busy, setBusy] = useState(false);
   const [tool, setTool] = useState<"inpaint" | "outpaint" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -543,7 +552,10 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
 
 export function RegenerateButton({ generation }: { generation: GenerationDto }) {
   const regenerate = useRegenerate();
-  const { select } = useStudio();
+  // Selector, not the whole store: this renders per-turn, so subscribing to
+  // every unrelated field (sidebar, quality, theme, ...) would re-render it
+  // on every composer interaction.
+  const select = useStudio((s) => s.select);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState(generation.prompt);
   const [quality, setQuality] = useState<Quality>("medium");
@@ -741,7 +753,11 @@ export function ActionRow({
   const share = useShareGeneration();
   const del = useDeleteGeneration();
   const exportPdf = useExportPdf();
-  const { select, selectedId } = useStudio();
+  // Selector, not the whole store: mounted once per visible turn, so plain
+  // useStudio() would re-render every turn's action row on any unrelated
+  // store change (sidebar, quality, theme, pendingTurn, ...).
+  const select = useStudio((s) => s.select);
+  const selectedId = useStudio((s) => s.selectedId);
   const [copied, setCopied] = useState(false);
   const [textCopied, setTextCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
