@@ -81,14 +81,20 @@ export async function generateGuidelinesDraft(userId: string, brandId: string): 
       model: env.CAMPAIGN_MODEL,
       response_format: { type: "json_object" },
       temperature: 0.5,
-      max_tokens: 1800,
+      max_tokens: 3000,
       messages: [
         { role: "system", content: system },
         { role: "user", content: `Brand facts:\n${facts}\n\nBrand summary:\n${brand.summary}` },
       ],
     });
-    raw = res.choices[0]?.message?.content ?? "";
+    const choice = res.choices[0];
+    raw = choice?.message?.content ?? "";
+    if (choice?.finish_reason === "length") {
+      console.error("[guidelines] model output was truncated (hit max_tokens)");
+      throw new HttpError(502, "The guidelines were too long to finish - try again");
+    }
   } catch (err) {
+    if (err instanceof HttpError) throw err;
     console.error("[guidelines] model call failed:", err instanceof Error ? err.message : err);
     throw new HttpError(502, "Could not generate the guidelines - try again");
   }
@@ -97,7 +103,17 @@ export async function generateGuidelinesDraft(userId: string, brandId: string): 
   try {
     json = JSON.parse(raw) as Record<string, any>;
   } catch {
-    throw new HttpError(502, "The guidelines came back malformed - try again");
+    // The model occasionally wraps the object in stray text/fences despite
+    // json_object mode; recover by grabbing the outermost {...} span.
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    try {
+      if (start === -1 || end <= start) throw new Error("no braces");
+      json = JSON.parse(raw.slice(start, end + 1)) as Record<string, any>;
+    } catch {
+      console.error("[guidelines] model returned non-JSON:", raw.slice(0, 500));
+      throw new HttpError(502, "The guidelines came back malformed - try again");
+    }
   }
   const sug = (json.suggestions ?? {}) as Record<string, unknown>;
   const narrative: GuidelinesNarrative = {
