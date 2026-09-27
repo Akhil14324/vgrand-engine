@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import {
@@ -176,9 +177,21 @@ export const ChatTurn = memo(function ChatTurn({
       opacity: 0,
       duration: 0.15,
       ease: "power1.in",
+      // If the tween is ever killed (context revert, unmount) onComplete is
+      // skipped — onInterrupt still releases the lightbox.
       onComplete: () => setLightboxUrl(null),
+      onInterrupt: () => setLightboxUrl(null),
     });
   });
+  // Escape closes, same as clicking the backdrop.
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeLightbox();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxUrl]);
   const shownText = useSmoothReveal(
     generation.textResponse ?? "",
     inFlight && generation.kind === "text",
@@ -400,29 +413,39 @@ export const ChatTurn = memo(function ChatTurn({
         </div>
       </div>
 
-      {/* Full-size preview — generated image or an attached reference */}
-      {lightboxUrl && (
-        <div
-          ref={lightboxRef}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
-          onClick={closeLightbox}
-        >
-          <button
-            className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 hover:text-white"
-            aria-label="Close preview"
+      {/* Full-size preview — generated image or an attached reference.
+          Portaled to body: this turn keeps a GSAP transform after its entrance
+          tween, which would trap a plain `fixed` overlay inside it (clipped by
+          the feed's ScrollArea) and swallow the close click. */}
+      {lightboxUrl &&
+        createPortal(
+          <div
+            ref={lightboxRef}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
+            onClick={closeLightbox}
           >
-            <X className="h-5 w-5" />
-          </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={lightboxImgRef}
-            src={lightboxUrl}
-            alt={generation.prompt}
-            className="max-h-[90dvh] max-w-[92vw] rounded-lg object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeLightbox();
+              }}
+              className="absolute right-4 top-4 z-10 rounded-md p-1.5 text-white/80 hover:text-white"
+              aria-label="Close preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              ref={lightboxImgRef}
+              src={lightboxUrl}
+              alt={generation.prompt}
+              className="max-h-[90dvh] max-w-[92vw] rounded-lg object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 });

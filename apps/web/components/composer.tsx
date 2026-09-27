@@ -1094,7 +1094,12 @@ export function Composer() {
           onClick={() => setPreviewImage(null)}
         >
           <button
-            className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 hover:text-white"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPreviewImage(null);
+            }}
+            className="absolute right-4 top-4 z-10 rounded-md p-1.5 text-white/80 hover:text-white"
             aria-label="Close preview"
           >
             <X className="h-5 w-5" />
