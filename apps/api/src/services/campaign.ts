@@ -39,7 +39,7 @@ import { enqueueGeneration } from "./queue.js";
  */
 
 const CAMPAIGN_PREFIX = /^\/campaign\b/i;
-const MAX_CREATIVES = 2;
+const MAX_CREATIVES = 4;
 const DEFAULT_OPENER = "I want to plan a sales campaign.";
 
 export const isCampaignPrompt = (prompt: string) => CAMPAIGN_PREFIX.test(prompt.trim());
@@ -93,7 +93,7 @@ Honesty rules: never invent statistics, market sizes, competitor facts, testimon
 The system generates the image creatives for you - you never draw, render or synthesize an image yourself. NEVER write or output code (Python, PIL, HTML canvas, or anything else) that claims to create, draw or save an image; that code cannot actually run and produces nothing, so it only misleads the user. The only way any image gets made is the marker below.
 After you deliver a full campaign, OR when the user asks for (more) campaign images/creatives/posters, end your message with a final line that is exactly:
 <<CAMPAIGN_READY:N>>
-where N is the number of image creatives to generate: 2 after a full campaign, or the number the user asked for in their latest image request, capped at ${MAX_CREATIVES} (for "2 more" N is 2, not the running total). Never request or generate more than two images for one campaign response, even if the user asks for more at once (e.g. "all 5 remaining days," "days 10 to 14") - in that case generate only the first ${MAX_CREATIVES} now, say in your reply exactly which ones you are creating and that the rest need a follow-up ask (at most ${MAX_CREATIVES} at a time), then the marker line for those ${MAX_CREATIVES}. When asked only for more images, reply in one or two sentences saying what you are creating, then the marker line. NEVER output the marker while you are still interviewing, and never mention the marker itself or explain it.`;
+where N is the number of image creatives to generate: ${MAX_CREATIVES} after a full campaign, or the number the user asked for in their latest image request, capped at ${MAX_CREATIVES} (for "2 more" N is 2, not the running total). Never request or generate more than ${MAX_CREATIVES} images for one campaign response, even if the user asks for more at once (e.g. "all 5 remaining days," "days 10 to 14") - in that case generate only the first ${MAX_CREATIVES} now, say in your reply exactly which ones you are creating and that the rest need a follow-up ask (at most ${MAX_CREATIVES} at a time), then the marker line for those ${MAX_CREATIVES}. When asked only for more images, reply in one or two sentences saying what you are creating, then the marker line. NEVER output the marker while you are still interviewing, and never mention the marker itself or explain it.`;
 
 const CREATIVE_SYSTEM = `You write image-generation prompts for sales advertising creatives. Return JSON only: {"creatives":[{"title":"...","prompt":"..."}]}.
 
