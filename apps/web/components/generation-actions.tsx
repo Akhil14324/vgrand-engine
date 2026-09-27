@@ -776,6 +776,10 @@ export function ActionRow({
   );
   const ready =
     generation.status === "completed" && generation.imageUrls.length > 0;
+  // Hides the delete action while a response is still coming in — the
+  // composer's stop button is the one control for an in-flight generation.
+  const responding =
+    generation.status === "pending" || generation.status === "processing";
   const textReady =
     generation.status === "completed" &&
     generation.kind === "text" &&
@@ -1047,23 +1051,25 @@ export function ActionRow({
       {ready && <ComplianceCheckButton generation={generation} />}
       {ready && <CalendarApproveButton generation={generation} />}
       {ready && <SocialShareButton generation={generation} />}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Delete"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={() => {
-              del.mutate(generation.id);
-              if (selectedId === generation.id) select(null);
-            }}
-          >
-            <Trash2 />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
-      </Tooltip>
+      {!responding && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Delete"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                del.mutate(generation.id);
+                if (selectedId === generation.id) select(null);
+              }}
+            >
+              <Trash2 />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Delete</TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }
