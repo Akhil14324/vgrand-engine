@@ -45,7 +45,8 @@ export function StudioShell() {
   const socialNotice = useSocialConnectReturn();
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
+    // Signed out (or signed out mid-session) — "/" shows the landing page.
+    if (!loading && !user) router.replace("/");
     // An invite link opened while signed out: resume it now that they are in.
     if (!loading && user) {
       try {
@@ -65,7 +66,7 @@ export function StudioShell() {
       <div className="flex h-dvh items-center justify-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/catgpt-logo.png"
+          src="/catgpt-paw.png"
           alt="CatGPT"
           className="h-14 w-auto rounded-xl bg-white object-contain px-2 py-1"
         />
@@ -197,7 +198,7 @@ function Hero() {
         </div>
       ) : (
         <h1 className="text-gradient-brand animate-fade-in text-center font-display text-3xl font-semibold tracking-tight md:text-4xl">
-          Cat is waiting for you.
+          Let the Cat Cook.
         </h1>
       )}
       <div className="mt-7 w-full">

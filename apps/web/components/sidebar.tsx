@@ -43,7 +43,7 @@ import {
 } from "@/lib/hooks";
 import { ImageUsage } from "@/components/image-usage";
 import { BrandSwitcher } from "@/components/brand-switcher";
-import { NAV_ITEMS } from "@/lib/nav";
+import { NAV_GROUPS, NAV_ITEMS, type NavGroup } from "@/lib/nav";
 import { InstallButton } from "@/components/pwa";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -91,8 +91,6 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [search, setSearch] = useState("");
   const [themesOpen, setThemesOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
-  const [moreNavOpen, setMoreNavOpen] = useState(false);
-  const moreCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Server-side search — matches title AND generation contents inside chats.
   const deferredSearch = useDeferredValue(search.trim());
   const {
@@ -120,22 +118,6 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const newChat = () => {
     startNewChat();
     onNavigate?.();
-  };
-
-  // Desktop keeps the primary nav short (through Library) with the rest
-  // tucked behind "More"; the mobile drawer has room to just list everything.
-  const libraryIdx = NAV_ITEMS.findIndex((item) => item.label === "Library");
-  const primaryNavItems = onNavigate
-    ? NAV_ITEMS
-    : NAV_ITEMS.slice(0, libraryIdx + 1);
-  const moreNavItems = onNavigate ? [] : NAV_ITEMS.slice(libraryIdx + 1);
-
-  const openMoreNav = () => {
-    if (moreCloseTimer.current) clearTimeout(moreCloseTimer.current);
-    setMoreNavOpen(true);
-  };
-  const scheduleCloseMoreNav = () => {
-    moreCloseTimer.current = setTimeout(() => setMoreNavOpen(false), 150);
   };
 
   // Load the next page of chats only once the sentinel below the list
@@ -168,7 +150,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/catgpt-logo.png"
+            src="/catgpt-paw.png"
             alt="CatGPT"
             className="h-9 w-auto rounded-lg bg-white object-contain px-1.5 py-0.5"
           />
@@ -212,52 +194,15 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Primary nav */}
       <nav className="flex flex-col gap-0.5 px-2 pt-1">
         <NavRow icon={SquarePen} label="New chat" onClick={newChat} />
-        {primaryNavItems.map((item, i) => (
+        {NAV_ITEMS.map((item, i) => (
           <div key={item.href} className="contents">
-            {item.group && item.group !== primaryNavItems[i - 1]?.group && <SectionLabel label={item.group} />}
+            {item.group && item.group !== NAV_ITEMS[i - 1]?.group && <SectionLabel label={item.group} />}
             <NavRow icon={item.icon} label={item.label} href={item.href} onNavigate={onNavigate} />
           </div>
         ))}
-        {moreNavItems.length > 0 && (
-          <div
-            className="relative"
-            onMouseEnter={openMoreNav}
-            onMouseLeave={scheduleCloseMoreNav}
-          >
-            <button
-              onClick={() => setMoreNavOpen((v) => !v)}
-              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm transition-colors hover:bg-accent"
-              aria-expanded={moreNavOpen}
-            >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">More</span>
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 text-muted-foreground transition-transform",
-                  moreNavOpen && "rotate-180",
-                )}
-              />
-            </button>
-            {moreNavOpen && (
-              <div className="flex flex-col gap-0.5">
-                {moreNavItems.map((item, i) => (
-                  <div key={item.href} className="contents">
-                    {item.group &&
-                      item.group !== moreNavItems[i - 1]?.group && (
-                        <SectionLabel label={item.group} />
-                      )}
-                    <NavRow
-                      icon={item.icon}
-                      label={item.label}
-                      href={item.href}
-                      onNavigate={onNavigate}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {NAV_GROUPS.map((group) => (
+          <NavGroupRow key={group.label} group={group} onNavigate={onNavigate} />
+        ))}
         <button
           onClick={() => setThemesOpen((v) => !v)}
           className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-accent"
@@ -467,6 +412,57 @@ function NavRow({
       <Icon className="h-4 w-4 text-muted-foreground" />
       {label}
     </button>
+  );
+}
+
+/** Collapsible nav section (e.g. Brand Engine). Opens itself when the
+ *  current route is one of its children. */
+function NavGroupRow({
+  group,
+  onNavigate,
+}: {
+  group: NavGroup;
+  onNavigate?: () => void;
+}) {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(() =>
+    group.items.some((item) => pathname.startsWith(item.href)),
+  );
+  const active = group.items.some((item) => pathname.startsWith(item.href));
+  const GroupIcon = group.icon;
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cn(
+          "flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm transition-colors hover:bg-accent",
+          active && "font-medium",
+        )}
+      >
+        <GroupIcon className="h-4 w-4 text-muted-foreground" />
+        <span className="flex-1 text-left">{group.label}</span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2">
+          {group.items.map((item) => (
+            <NavRow
+              key={item.href}
+              icon={item.icon}
+              label={item.label}
+              href={item.href}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

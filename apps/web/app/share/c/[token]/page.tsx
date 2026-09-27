@@ -22,7 +22,7 @@ export default async function SharedChatPage({
       <header className="mb-8 text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/catgpt-logo.png"
+          src="/catgpt-paw.png"
           alt="CatGPT"
           className="mx-auto h-14 w-auto rounded-xl bg-white object-contain px-2 py-1"
         />

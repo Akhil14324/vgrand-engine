@@ -63,7 +63,7 @@ export default function LoginPage() {
         <div className="mb-8 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/catgpt-logo.png"
+            src="/catgpt-paw.png"
             alt="CatGPT"
             className="mx-auto h-24 w-auto rounded-2xl bg-white object-contain p-2"
           />

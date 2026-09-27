@@ -105,4 +105,94 @@
       height: 100dvh;
     }
   }
+
+  /* Landing hero — living mascot: breathing lean-in, firelight, embers. */
+  .landing-mascot {
+    transform-origin: 45% 55%;
+    animation: mascot-breathe 8s ease-in-out infinite alternate;
+  }
+  @keyframes mascot-breathe {
+    from {
+      transform: scale(1.02) translate(0, 0);
+    }
+    to {
+      transform: scale(1.09) translate(-2%, -1%);
+    }
+  }
+  .landing-haze {
+    animation: haze-drift 16s ease-in-out infinite alternate;
+  }
+  @keyframes haze-drift {
+    from {
+      transform: translateX(-5%);
+      opacity: 0.6;
+    }
+    to {
+      transform: translateX(6%);
+      opacity: 1;
+    }
+  }
+  .landing-fireglow {
+    animation: fire-flicker 3.4s ease-in-out infinite;
+  }
+  @keyframes fire-flicker {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(1);
+    }
+    22% {
+      opacity: 0.8;
+      transform: scale(1.05);
+    }
+    38% {
+      opacity: 0.5;
+      transform: scale(0.96);
+    }
+    55% {
+      opacity: 0.95;
+      transform: scale(1.08);
+    }
+    74% {
+      opacity: 0.55;
+      transform: scale(0.98);
+    }
+    88% {
+      opacity: 0.75;
+      transform: scale(1.03);
+    }
+  }
+  .landing-ember {
+    position: absolute;
+    bottom: -2%;
+    border-radius: 9999px;
+    opacity: 0;
+    animation: ember-rise linear infinite;
+  }
+  @keyframes ember-rise {
+    0% {
+      transform: translate(0, 0) scale(0.5);
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    60% {
+      opacity: 0.8;
+    }
+    100% {
+      transform: translate(var(--drift, 30px), -105vh) scale(1);
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .landing-mascot,
+    .landing-haze,
+    .landing-fireglow {
+      animation: none;
+    }
+    .landing-ember {
+      display: none;
+    }
+  }
 }

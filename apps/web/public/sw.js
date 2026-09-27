@@ -3,7 +3,7 @@
  * - Page navigations go network-first and fall back to a friendly offline page.
  * - The API and anything cross-origin (Supabase, Railway) is NEVER touched or
  *   cached, so chats, tokens and user data never end up in a cache. */
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC_CACHE = `catgpt-static-${VERSION}`;
 const PAGE_CACHE = `catgpt-pages-${VERSION}`;
 const OFFLINE_URL = "/offline.html";
@@ -12,7 +12,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
-      .then((cache) => cache.addAll([OFFLINE_URL, "/catgpt-logo.png"]))
+      .then((cache) => cache.addAll([OFFLINE_URL, "/catgpt-paw.png"]))
       .then(() => self.skipWaiting()),
   );
 });

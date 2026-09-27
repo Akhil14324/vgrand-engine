@@ -1,5 +1,5 @@
-import { StudioShell } from "@/components/studio-shell";
+import { HomeGate } from "@/components/home-gate";
 
 export default function StudioPage() {
-  return <StudioShell />;
+  return <HomeGate />;
 }
