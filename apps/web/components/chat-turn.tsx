@@ -124,7 +124,7 @@ export const ChatTurn = memo(function ChatTurn({
   const imgRef = useRef<HTMLImageElement>(null);
   const { contextSafe } = useGSAP(
     () => {
-      gsap.from(rootRef.current, { opacity: 0, y: 8, duration: 0.28, ease: "power2.out" });
+      gsap.from(rootRef.current, { opacity: 0, y: 10, duration: 0.4, ease: "power3.out" });
     },
     { scope: rootRef },
   );
@@ -135,23 +135,24 @@ export const ChatTurn = memo(function ChatTurn({
     gsap.fromTo(
       imgRef.current,
       { opacity: 0, scale: 1.02 },
-      { opacity: 1, scale: 1, duration: 0.4, ease: "power2.out" },
+      { opacity: 1, scale: 1, duration: 0.55, ease: "power2.out" },
     );
   });
 
-  // Lightbox open/close: fades the backdrop and scales the image in on open;
-  // closing plays the same tween in reverse before unmounting, instead of
-  // the previous hard cut straight to nothing.
+  // Lightbox open/close: fades the backdrop and scales the image in on open,
+  // with a touch of overshoot so it settles rather than just stopping;
+  // closing eases back out before unmounting, instead of the previous hard
+  // cut straight to nothing.
   const lightboxRef = useRef<HTMLDivElement>(null);
   const lightboxImgRef = useRef<HTMLImageElement>(null);
   useEffect(() => {
     if (!lightboxUrl || !lightboxRef.current) return;
-    gsap.fromTo(lightboxRef.current, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: "power1.out" });
+    gsap.fromTo(lightboxRef.current, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power1.out" });
     if (lightboxImgRef.current) {
       gsap.fromTo(
         lightboxImgRef.current,
-        { scale: 0.96, opacity: 0 },
-        { scale: 1, opacity: 1, duration: 0.22, ease: "power2.out" },
+        { scale: 0.92, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.45, ease: "back.out(1.5)" },
       );
     }
   }, [lightboxUrl]);

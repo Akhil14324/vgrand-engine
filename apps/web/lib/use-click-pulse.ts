@@ -26,8 +26,8 @@ export function useClickPulse<T extends HTMLElement = HTMLButtonElement>() {
     gsap.killTweensOf(el);
     gsap
       .timeline()
-      .to(el, { scale: 0.94, duration: 0.08, ease: "power1.out" })
-      .to(el, { scale: 1, duration: 0.18, ease: "back.out(3)" });
+      .to(el, { scale: 0.92, duration: 0.1, ease: "power1.out" })
+      .to(el, { scale: 1, duration: 0.5, ease: "elastic.out(1, 0.45)" });
   });
 
   return { ref, pulse };

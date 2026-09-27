@@ -1,5 +1,6 @@
 "use client";
 
+import gsap from "gsap";
 import {
   useCallback,
   useEffect,
@@ -43,6 +44,7 @@ import { THEME_ICONS } from "@/lib/theme-icons";
 import { KillBill } from "@/components/kill-bill";
 import { useStudio } from "@/lib/store";
 import { useClickPulse } from "@/lib/use-click-pulse";
+import { DrawBorder } from "@/components/draw-border";
 import { cn } from "@/lib/utils";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -229,11 +231,17 @@ export function Composer() {
 
   // Auto-grow the textarea: one line at rest, expands with content up to
   // ~7 lines (168px), then scrolls — same behavior as ChatGPT/Claude.
+  // Animated (not an instant style snap) so both growing while typing and
+  // collapsing back to one line the moment Enter is hit (value clears
+  // synchronously in submit()) are visibly smooth instead of an abrupt cut.
   const autosize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
+    const before = el.style.height;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
+    const target = Math.min(el.scrollHeight, 168);
+    el.style.height = before || `${target}px`; // restore pre-measure height, no flash
+    gsap.to(el, { height: target, duration: 0.18, ease: "power2.out", overwrite: "auto" });
   }, []);
   useEffect(autosize, [value, autosize]);
 
@@ -394,6 +402,10 @@ export function Composer() {
   const { ref: sendBtnRef, pulse: sendPulse } = useClickPulse();
   const { ref: stopBtnRef, pulse: stopPulse } = useClickPulse();
 
+  // Drives the composer's draw-on focus border (see DrawBorder).
+  const composerBoxRef = useRef<HTMLDivElement>(null);
+  const [composerFocused, setComposerFocused] = useState(false);
+
   const submit = useCallback(() => {
     // A PDF on its own is a valid send — default to a summary request.
     const prompt =
@@ -536,11 +548,15 @@ export function Composer() {
       <Popover open={menuOpen && filtered.length > 0}>
         <PopoverAnchor asChild>
           <div
+            ref={composerBoxRef}
             className={cn(
-              "mx-auto w-full max-w-4xl rounded-[28px] border bg-card px-2.5 py-2 shadow-lg transition-shadow focus-within:ring-1 focus-within:ring-ring",
+              "relative mx-auto w-full max-w-4xl rounded-[28px] border bg-card px-2.5 py-2 shadow-lg transition-shadow",
               dragging && "ring-1 ring-primary",
             )}
           >
+            {/* Draws a border around the box from the center outward on
+                focus, instead of a ring/box-shadow just appearing at once. */}
+            <DrawBorder targetRef={composerBoxRef} active={composerFocused} radius={28} />
             {(armedTheme || refImages.length > 0 || docs.length > 0 || uploading > 0) && (
               <div className="flex flex-wrap items-center gap-2 px-2 pb-1.5 pt-0.5">
                 {armedTheme && (
@@ -652,6 +668,8 @@ export function Composer() {
                 setMenuOpen(e.target.value.startsWith("/"));
                 setHighlight(0);
               }}
+              onFocus={() => setComposerFocused(true)}
+              onBlur={() => setComposerFocused(false)}
               onKeyDown={onKeyDown}
               onPaste={(e) => {
                 if (e.clipboardData.files.length) {

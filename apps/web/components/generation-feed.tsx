@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
+import gsap from "gsap";
+import { ScrollToPlugin } from "gsap/ScrollToPlugin";
 import type { GenerationDto, Paginated } from "@catgpt/types";
 import { apiFetch } from "@/lib/api";
 import { useConversation, useGenerations } from "@/lib/hooks";
@@ -9,6 +11,8 @@ import { useStudio } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { ChatTurn } from "./chat-turn";
+
+gsap.registerPlugin(ScrollToPlugin);
 
 /** Chat thread: oldest at top, newest at bottom, auto-scrolls like ChatGPT. */
 export function GenerationFeed() {
@@ -79,14 +83,24 @@ export function GenerationFeed() {
     const el = endRef.current;
     if (!el) return;
     const viewport = el.closest("[data-radix-scroll-area-viewport]");
-    const gap = viewport
-      ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
-      : 0;
+    if (!(viewport instanceof HTMLElement)) return;
+    const gap = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     const structural = scrollKey !== lastScrollKey.current;
     lastScrollKey.current = scrollKey;
     // New turns/chats always scroll; streamed tokens only follow along while
     // the reader is still near the bottom, so scrolling up to read isn't fought.
-    if (structural || gap < 240) el.scrollIntoView({ block: "end" });
+    // Animated (not an instant jump) so a send visibly glides the composer's
+    // new bubble down to rest, rather than snapping there.
+    if (structural || gap < 240) {
+      gsap.killTweensOf(viewport);
+      gsap.to(viewport, {
+        scrollTo: { y: "max" },
+        // Sending a new turn gets a slightly more deliberate glide; keeping
+        // up with in-progress streaming stays quick so it doesn't lag behind.
+        duration: structural ? 0.45 : 0.25,
+        ease: "power2.out",
+      });
+    }
   }, [scrollKey, streamedLength]);
 
   return (
