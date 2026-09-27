@@ -59,6 +59,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useClickPulse } from "@/lib/use-click-pulse";
 
 const CHANNELS = [
   "Instagram",
@@ -511,7 +512,12 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
   const snapshot = useMemo(() => computeBrandSnapshot(toProfile(form)), [form]);
 
+  // Instant scale-pulse on click, so Save visibly reacts before the mutation
+  // resolves and the button label flips from "Save" to "Saved".
+  const { ref: saveBtnRef, pulse: savePulse } = useClickPulse<HTMLButtonElement>();
+
   const save = () => {
+    savePulse();
     setError(null);
     update.mutate(
       {
@@ -572,7 +578,7 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
           >
             <Trash2 />
           </Button>
-          <Button onClick={save} disabled={!dirty || update.isPending}>
+          <Button ref={saveBtnRef} onClick={save} disabled={!dirty || update.isPending}>
             {update.isPending && <Loader2 className="animate-spin" />}
             {dirty ? "Save" : "Saved"}
           </Button>

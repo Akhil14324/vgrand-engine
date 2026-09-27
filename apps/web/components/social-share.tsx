@@ -42,6 +42,7 @@ import { ApiRequestError } from "@/lib/api";
 import { toast } from "@/components/ui/toaster";
 import { useRewriteCaption } from "@/lib/brand-compliance-hooks";
 import { cn } from "@/lib/utils";
+import { useClickPulse } from "@/lib/use-click-pulse";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -416,7 +417,12 @@ function SocialShareBody({
     }
   };
 
+  // Instant scale-pulse on click, so the button visibly reacts before the
+  // "Posting…" mutation state ever renders.
+  const { ref: postBtnRef, pulse: postPulse } = useClickPulse<HTMLButtonElement>();
+
   const post = (scheduledFor?: string, complianceOverride?: boolean) => {
+    postPulse();
     setLastScheduledFor(scheduledFor);
     create.mutate(
       {
@@ -747,7 +753,7 @@ function SocialShareBody({
               </>
             ) : (
               <>
-                <Button onClick={() => post()} disabled={create.isPending || problems.length > 0}>
+                <Button ref={postBtnRef} onClick={() => post()} disabled={create.isPending || problems.length > 0}>
                   {create.isPending && <Loader2 className="animate-spin" />}
                   Post now to {selectedAccounts.length} account{selectedAccounts.length === 1 ? "" : "s"}
                 </Button>

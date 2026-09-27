@@ -42,6 +42,7 @@ import { CHANNEL_PRESETS, channelLabel } from "@/lib/channels";
 import { THEME_ICONS } from "@/lib/theme-icons";
 import { KillBill } from "@/components/kill-bill";
 import { useStudio } from "@/lib/store";
+import { useClickPulse } from "@/lib/use-click-pulse";
 import { cn } from "@/lib/utils";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -387,6 +388,11 @@ export function Composer() {
     }, 2000);
     return () => clearInterval(t);
   }, [docs]);
+
+  // Instant scale-pulse on click, independent of how long the mutation
+  // takes — the button visibly reacts on the same frame it's pressed.
+  const { ref: sendBtnRef, pulse: sendPulse } = useClickPulse();
+  const { ref: stopBtnRef, pulse: stopPulse } = useClickPulse();
 
   const submit = useCallback(() => {
     // A PDF on its own is a valid send — default to a summary request.
@@ -811,8 +817,12 @@ export function Composer() {
                 </button>
                 {runningId ? (
                   <Button
+                    ref={stopBtnRef}
                     size="icon"
-                    onClick={() => cancel.mutate(runningId)}
+                    onClick={() => {
+                      stopPulse();
+                      cancel.mutate(runningId);
+                    }}
                     disabled={cancel.isPending}
                     className="h-9 w-9 rounded-full"
                     aria-label="Stop generating"
@@ -826,8 +836,12 @@ export function Composer() {
                   </Button>
                 ) : (
                   <Button
+                    ref={sendBtnRef}
                     size="icon"
-                    onClick={submit}
+                    onClick={() => {
+                      sendPulse();
+                      submit();
+                    }}
                     disabled={!canSend}
                     className="h-9 w-9 rounded-full"
                     aria-label="Send"

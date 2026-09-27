@@ -1,6 +1,8 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 import {
   AlertCircle,
   Download,
@@ -20,6 +22,8 @@ import { Badge } from "@/components/ui/badge";
 import { Markdown } from "./markdown";
 import { ActionRow } from "./generation-actions";
 import { SourceChips } from "./source-chips";
+
+gsap.registerPlugin(useGSAP);
 
 /** A file the assistant produced for this turn (e.g. an edited document). */
 interface ReplyFile {
@@ -45,32 +49,48 @@ function downloadUrl(f: ReplyFile): string {
  */
 /**
  * Smooth reveal for streamed replies. Deltas arrive in ~60ms bursts which
- * reads as chunky jumps — this eases the rendered text toward the full
- * target a few characters per frame, catching up faster the further behind
- * it is. Once the turn finishes it snaps to the complete text.
+ * reads as chunky jumps — this tweens the rendered character count toward
+ * the full target with an eased curve (instead of stepping linearly), and
+ * re-targets the running tween whenever new deltas extend the text so it
+ * never has to snap backward or restart. Once the turn finishes it snaps to
+ * the complete text.
  */
 function useSmoothReveal(text: string, active: boolean): string {
   const targetRef = useRef(text);
   targetRef.current = text;
   const [shown, setShown] = useState<number | null>(null); // null = fully shown
+  const shownRef = useRef(0);
+  const counter = useRef({ n: 0 }).current;
+  const tweenRef = useRef<gsap.core.Tween | null>(null);
 
   useEffect(() => {
     if (!active) {
+      tweenRef.current?.kill();
+      tweenRef.current = null;
       setShown(null);
       return;
     }
-    setShown((s) => s ?? 0);
-    const id = setInterval(() => {
-      setShown((s) => {
-        const cur = s ?? 0;
-        const target = targetRef.current.length;
-        if (cur >= target) return cur; // React bails on identical state
-        const step = Math.max(3, Math.ceil((target - cur) / 14));
-        return Math.min(target, cur + step);
-      });
-    }, 16);
-    return () => clearInterval(id);
-  }, [active]);
+    counter.n = shownRef.current;
+    const target = targetRef.current.length;
+    tweenRef.current?.kill();
+    tweenRef.current = gsap.to(counter, {
+      n: target,
+      duration: Math.min(0.9, Math.max(0.12, (target - counter.n) / 50)),
+      ease: "power2.out",
+      onUpdate: () => {
+        const n = Math.round(counter.n);
+        shownRef.current = n;
+        setShown(n);
+      },
+    });
+    return () => {
+      tweenRef.current?.kill();
+    };
+    // Re-targets on every new delta (text growing); `active` alone would miss them.
+    // `counter` is a stable ref object (same identity for the component's
+    // lifetime), so it's intentionally left out of the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, active]);
 
   return active && shown !== null ? text.slice(0, shown) : text;
 }
@@ -95,6 +115,58 @@ export const ChatTurn = memo(function ChatTurn({
   const inFlight =
     generation.status === "pending" || generation.status === "processing";
   useGenerationStream(generation.id, inFlight);
+
+  // Entrance: plays once, the moment this turn mounts (memo means it won't
+  // re-run on later re-renders of the same turn). Replaces the old
+  // animate-fade-in CSS class with an eased tween so it can be extended
+  // (e.g. staggering user → assistant) without fighting a CSS animation.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const { contextSafe } = useGSAP(
+    () => {
+      gsap.from(rootRef.current, { opacity: 0, y: 8, duration: 0.28, ease: "power2.out" });
+    },
+    { scope: rootRef },
+  );
+  // Image reveal on load: a soft fade + scale-down-to-rest instead of an
+  // instant pop once the generated image finishes downloading.
+  const onImageLoad = contextSafe(() => {
+    if (!imgRef.current) return;
+    gsap.fromTo(
+      imgRef.current,
+      { opacity: 0, scale: 1.02 },
+      { opacity: 1, scale: 1, duration: 0.4, ease: "power2.out" },
+    );
+  });
+
+  // Lightbox open/close: fades the backdrop and scales the image in on open;
+  // closing plays the same tween in reverse before unmounting, instead of
+  // the previous hard cut straight to nothing.
+  const lightboxRef = useRef<HTMLDivElement>(null);
+  const lightboxImgRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    if (!lightboxUrl || !lightboxRef.current) return;
+    gsap.fromTo(lightboxRef.current, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: "power1.out" });
+    if (lightboxImgRef.current) {
+      gsap.fromTo(
+        lightboxImgRef.current,
+        { scale: 0.96, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.22, ease: "power2.out" },
+      );
+    }
+  }, [lightboxUrl]);
+  const closeLightbox = contextSafe(() => {
+    if (!lightboxRef.current) {
+      setLightboxUrl(null);
+      return;
+    }
+    gsap.to(lightboxRef.current, {
+      opacity: 0,
+      duration: 0.15,
+      ease: "power1.in",
+      onComplete: () => setLightboxUrl(null),
+    });
+  });
   const shownText = useSmoothReveal(
     generation.textResponse ?? "",
     inFlight && generation.kind === "text",
@@ -115,7 +187,7 @@ export const ChatTurn = memo(function ChatTurn({
     | undefined;
 
   return (
-    <div className="flex flex-col gap-3 animate-fade-in">
+    <div ref={rootRef} className="flex flex-col gap-3">
       {/* User turn */}
       <div className="flex justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 sm:max-w-[70%]">
@@ -262,10 +334,12 @@ export const ChatTurn = memo(function ChatTurn({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
+              ref={imgRef}
               src={image}
               alt={generation.prompt}
               className="w-full object-cover"
               loading="lazy"
+              onLoad={onImageLoad}
             />
           </button>
         ) : (
@@ -295,8 +369,9 @@ export const ChatTurn = memo(function ChatTurn({
       {/* Full-size preview — generated image or an attached reference */}
       {lightboxUrl && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-fade-in"
-          onClick={() => setLightboxUrl(null)}
+          ref={lightboxRef}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+          onClick={closeLightbox}
         >
           <button
             className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 hover:text-white"
@@ -306,6 +381,7 @@ export const ChatTurn = memo(function ChatTurn({
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
+            ref={lightboxImgRef}
             src={lightboxUrl}
             alt={generation.prompt}
             className="max-h-[90dvh] max-w-[92vw] rounded-lg object-contain"
