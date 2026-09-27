@@ -30,6 +30,7 @@ import {
   refundImageUsage,
 } from "../lib/usage.js";
 import { isCampaignConversation, isCampaignPrompt } from "../services/campaign.js";
+import { spawnImageBatch, splitImageBatch } from "../services/image-batch.js";
 import {
   brandImageGuidance,
   brandReferenceUrls,
@@ -267,6 +268,19 @@ export async function generationRoutes(app: FastifyInstance) {
       inferredImage = intent === "image";
     }
 
+    // One message can describe several distinct images ("Days 10 to 14,
+    // each with its own Telugu text") — without this split the chat model
+    // cannot actually call the image tool more than once, so it used to
+    // narrate the request back with sample code instead of ever producing
+    // one. Only worth checking once we already know this is an image ask.
+    const batchBriefs = inferredImage
+      ? await splitImageBatch(
+          body.prompt,
+          conversationId ? await loadChatHistory(conversationId) : [],
+        )
+      : [];
+    const isBatch = batchBriefs.length > 1;
+
     // Strict gate: an image only on explicit request — "create an image" in
     // the prompt, attached references, or a regenerate/edit chain (explicit
     // or inferred just above). Everything else is a text reply.
@@ -330,7 +344,7 @@ export async function generationRoutes(app: FastifyInstance) {
           prompt: body.prompt,
           finalPrompt:
             kind === "image"
-              ? buildFinalPrompt(theme, body.prompt) +
+              ? buildFinalPrompt(theme, isBatch ? batchBriefs[0]!.prompt : body.prompt) +
                 (brand
                   ? brandImageGuidance(
                       brand.name,
@@ -412,6 +426,24 @@ export async function generationRoutes(app: FastifyInstance) {
         }),
       ]);
       throw err;
+    }
+    // The rest of the batch (briefs beyond the first) - fire-and-forget so it
+    // never delays this response; each spawned image is its own generation
+    // that shows up in the feed as the worker finishes it.
+    if (kind === "image" && isBatch) {
+      void spawnImageBatch({
+        userId: req.userId,
+        conversationId: conversationId!,
+        briefs: batchBriefs.slice(1),
+        theme,
+        brandId: brand?.id ?? null,
+        provider: generation.provider,
+        referenceImageUrls,
+        quality: body.quality ?? "low",
+        size: body.size ?? "auto",
+      }).catch((err) =>
+        console.error("[generations] image batch spawn failed:", err),
+      );
     }
     return reply.code(202).send({
       generationId: generation.id,
