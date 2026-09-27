@@ -1,5 +1,6 @@
 import { Prisma, prisma, type SocialAccount, type SocialPost } from "@catgpt/db";
 import {
+  SOCIAL_MAX_CAROUSEL_IMAGES,
   X_MAX_CHARS,
   type SocialAccountStatus,
   type SocialFailureCode,
@@ -107,6 +108,7 @@ export function toSocialPostDto(p: PostWithAccount): SocialPostDto {
   return {
     id: p.id,
     generationId: p.generationId,
+    mediaUrls: p.mediaUrls,
     accountId: p.accountId,
     platform: p.account.platform as SocialPlatform,
     accountHandle: p.account.handle,
@@ -160,7 +162,7 @@ export async function listCalendarPosts(userId: string, from: Date, to: Date) {
       const c = (row.content ?? {}) as SocialPostContent;
       return {
         ...toSocialPostDto(row),
-        mediaUrl: row.mediaUrl,
+        mediaUrl: row.mediaUrls[0] ?? "",
         captionPreview: (c.caption ?? c.title ?? "").slice(0, 140),
       };
     })
@@ -290,6 +292,31 @@ export async function createSocialPosts(
   await assertGenerationPublishable(generationId);
   const scopeWorkspaceId = generation.conversation?.workspaceId ?? null;
 
+  // Extra images (beyond the route's own generation's first image) turn this
+  // into an Instagram carousel / Facebook multi-photo post - either more
+  // frames of a generation that already produced a set, or another
+  // generation entirely. Each referenced generation must be the caller's own
+  // and completed; unknown generations are fetched once and cached.
+  const additionalImages = body.additionalImages ?? [];
+  if (1 + additionalImages.length > SOCIAL_MAX_CAROUSEL_IMAGES) {
+    throw badRequest(`A post can include at most ${SOCIAL_MAX_CAROUSEL_IMAGES} images`);
+  }
+  const generationCache = new Map<string, Awaited<ReturnType<typeof loadGenerationForSocial>>>([
+    [generationId, generation],
+  ]);
+  const extraImageUrls = await Promise.all(
+    additionalImages.map(async (img) => {
+      let gen = generationCache.get(img.generationId);
+      if (!gen) {
+        gen = await loadGenerationForSocial(userId, img.generationId);
+        generationCache.set(img.generationId, gen);
+      }
+      const url = gen.imageUrls[img.index ?? 0] ?? gen.imageUrls[0];
+      if (!url) throw badRequest("One of the selected images no longer exists");
+      return url;
+    }),
+  );
+
   const ids = body.posts.map((p) => p.accountId);
   if (new Set(ids).size !== ids.length) {
     throw badRequest("Each account can only be selected once");
@@ -333,12 +360,14 @@ export async function createSocialPosts(
   });
   if (inFlight) throw new HttpError(409, "A post to one of these accounts is already in progress");
 
-  const mediaUrl = generation.imageUrls[0]!; // snapshot - later edits never change what was approved
-  // Repurposing: Instagram needs a 4:5 - 1.91:1 frame, so it gets its own fitted
-  // copy (one per request, shared by every Instagram account); others keep the original.
-  const instagramMedia = prepared.some((p) => p.account.platform === "instagram")
-    ? ((await fitImageForInstagram(mediaUrl, userId)) ?? mediaUrl)
-    : mediaUrl;
+  // Snapshot - later edits to any source generation never change what was approved.
+  const mediaUrls = [generation.imageUrls[0]!, ...extraImageUrls];
+  // Repurposing: Instagram needs each frame at 4:5 - 1.91:1, so it gets its own
+  // fitted copies (one set per request, shared by every Instagram account);
+  // other platforms keep the originals.
+  const instagramMediaUrls = prepared.some((p) => p.account.platform === "instagram")
+    ? await Promise.all(mediaUrls.map(async (url) => (await fitImageForInstagram(url, userId)) ?? url))
+    : mediaUrls;
   const rows = await prisma.$transaction(
     prepared.map(({ account, content }) =>
       prisma.socialPost.create({
@@ -348,7 +377,7 @@ export async function createSocialPosts(
           generationId,
           accountId: account.id,
           content: content as Prisma.InputJsonValue,
-          mediaUrl: account.platform === "instagram" ? instagramMedia : mediaUrl,
+          mediaUrls: account.platform === "instagram" ? instagramMediaUrls : mediaUrls,
           ...(scheduledFor ? { status: "scheduled", scheduledFor } : {}),
         },
         include: { account: true },

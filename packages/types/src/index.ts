@@ -257,11 +257,23 @@ export interface CampaignPlanDto {
 
 /* ------------------------------ request bodies ----------------------------- */
 
+/**
+ * Instagram carousels and Facebook multi-photo posts allow up to 10 images -
+ * also the cap on how many images one generation request can produce.
+ */
+export const SOCIAL_MAX_CAROUSEL_IMAGES = 10;
+
 export const createGenerationSchema = z.object({
   themeSlug: z.string().min(1).optional(),
   prompt: z.string().min(1).max(4000),
   /** Existing chat to append to. Omit to start a new conversation. */
   conversationId: z.string().uuid().optional(),
+  /**
+   * How many images to generate for this one prompt (1 = normal, 2-10 = a
+   * ready-made carousel set). Only honored for a fresh, non-edit image
+   * request - ignored on edits/regenerates and on a multi-brief batch.
+   */
+  imageCount: z.coerce.number().int().min(1).max(SOCIAL_MAX_CAROUSEL_IMAGES).optional(),
   /** Workspace a brand-new conversation should live inside. */
   workspaceId: z.string().uuid().optional(),
   provider: z.enum(PROVIDERS).optional(),
@@ -864,8 +876,24 @@ export const socialPostRequestSchema = z.object({
 });
 export type SocialPostRequest = z.infer<typeof socialPostRequestSchema>;
 
+/** One more image for the carousel: a specific frame of a specific generation. */
+export const socialCarouselImageSchema = z.object({
+  generationId: z.string().uuid(),
+  /** Index into that generation's imageUrls. Omitted = its first/only image. */
+  index: z.number().int().min(0).max(SOCIAL_MAX_CAROUSEL_IMAGES - 1).optional(),
+});
+export type SocialCarouselImage = z.infer<typeof socialCarouselImageSchema>;
+
 export const socialPostCreateRequestSchema = z.object({
   posts: z.array(socialPostRequestSchema).min(1).max(12),
+  /**
+   * Extra images, beyond the route's own generation's first image, to bundle
+   * into one Instagram/Facebook carousel post, in the order they should
+   * appear - either more frames of a generation that already produced a set,
+   * or another generation's image entirely. The route's generation's first
+   * image is always image 1.
+   */
+  additionalImages: z.array(socialCarouselImageSchema).max(SOCIAL_MAX_CAROUSEL_IMAGES - 1).optional(),
   /** Post even though the copy breaks a brand rule (forbidden word/claim). Recorded. */
   complianceOverride: z.boolean().optional(),
   /** ISO instant. Omitted = post now; present = publish then (must be in the future). */
@@ -876,6 +904,8 @@ export type SocialPostCreateRequest = z.infer<typeof socialPostCreateRequestSche
 export interface SocialPostDto {
   id: string;
   generationId: string;
+  /** All images in this post, in order (1 for a normal post, 2-10 for a carousel). */
+  mediaUrls: string[];
   accountId: string;
   platform: SocialPlatform;
   accountHandle: string | null;

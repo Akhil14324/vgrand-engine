@@ -2,7 +2,7 @@ import { Prisma, prisma } from "@catgpt/db";
 import type { SocialFailureCode } from "@catgpt/types";
 import { SOCIAL_BACKOFF_MS, SOCIAL_MAX_ATTEMPTS, enqueueSocialPost } from "../queue.js";
 import { findUsableAccount } from "./accounts.js";
-import { getAdapter, type PreparedMedia, type ProviderState } from "./adapters/index.js";
+import { getAdapter, type PreparedMedia, type PreparedMediaItem, type ProviderState } from "./adapters/index.js";
 import { isRetryableFailure, SocialPublishError } from "./errors.js";
 import { fetchImage } from "./media/fetch-image.js";
 import { ensurePublicMediaUrl } from "./media/public-url.js";
@@ -10,15 +10,23 @@ import { imageToYoutubeVideo } from "./media/youtube-video.js";
 import { normalizeContent } from "./posts.js";
 import { ensureFreshToken } from "./tokens.js";
 
-function buildMedia(imageUrl: string): PreparedMedia {
+function buildMediaItem(imageUrl: string): PreparedMediaItem {
   let image: ReturnType<typeof fetchImage> | null = null;
-  let video: Promise<Buffer> | null = null;
-  const loadImage = () => (image ??= fetchImage(imageUrl));
   return {
     imageUrl,
     publicUrl: () => ensurePublicMediaUrl(imageUrl),
-    image: loadImage,
-    video: () => (video ??= loadImage().then((i) => imageToYoutubeVideo(i.buffer))),
+    image: () => (image ??= fetchImage(imageUrl)),
+  };
+}
+
+function buildMedia(imageUrls: string[]): PreparedMedia {
+  const items = imageUrls.map(buildMediaItem);
+  const primary = items[0]!;
+  let video: Promise<Buffer> | null = null;
+  return {
+    ...primary,
+    items,
+    video: () => (video ??= primary.image().then((i) => imageToYoutubeVideo(i.buffer))),
   };
 }
 
@@ -82,7 +90,7 @@ export async function runSocialPost(
       account,
       decryptedTokens: tokens,
       content,
-      media: buildMedia(post.mediaUrl),
+      media: buildMedia(post.mediaUrls),
       providerState: asState(post.providerState),
       saveState,
     });

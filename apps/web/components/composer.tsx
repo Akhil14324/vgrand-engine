@@ -26,7 +26,13 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import type { DocumentDto, GenerationDto, Quality, ThemeDto } from "@catgpt/types";
+import {
+  SOCIAL_MAX_CAROUSEL_IMAGES,
+  type DocumentDto,
+  type GenerationDto,
+  type Quality,
+  type ThemeDto,
+} from "@catgpt/types";
 import { apiFetch, ApiRequestError } from "@/lib/api";
 import { MAX_UPLOAD_MB } from "@/lib/config";
 import {
@@ -78,6 +84,9 @@ const QUALITY_LABEL: Record<Quality, string> = {
   high: "High · costly",
 };
 
+/** Preset counts for "generate a carousel" — capped at Instagram/Facebook's carousel limit. */
+const IMAGE_COUNT_OPTIONS = [1, 2, 3, 4, 6, SOCIAL_MAX_CAROUSEL_IMAGES];
+
 /** Rotating idle placeholders — quietly demo what the composer can do. */
 const PLACEHOLDERS = [
   "Ask anything, or 'create an image of…'",
@@ -95,6 +104,8 @@ export function Composer() {
     setQuality,
     size,
     setSize,
+    imageCount,
+    setImageCount,
     select,
     activeConversationId,
     openConversation,
@@ -425,6 +436,7 @@ export function Composer() {
     setRefImages([]);
     setDocs([]);
     setWebSearch(false);
+    setImageCount(1);
 
     create.mutate(
       {
@@ -432,6 +444,7 @@ export function Composer() {
         themeSlug: armedTheme?.slug,
         quality,
         size,
+        imageCount: imageCount > 1 ? imageCount : undefined,
         referenceImageUrls: refImages.length ? refImages : undefined,
         documentIds: docs.length ? docs.map((d) => d.id) : undefined,
         webSearch: webSearch || undefined,
@@ -457,10 +470,11 @@ export function Composer() {
           setRefImages(refImages);
           setDocs(docs);
           setWebSearch(webSearch);
+          setImageCount(imageCount);
         },
       },
     );
-  }, [value, create, armedTheme, quality, size, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
+  }, [value, create, armedTheme, quality, size, imageCount, setImageCount, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -744,6 +758,7 @@ export function Composer() {
                   >
                     {QUALITY_LABEL[quality]}
                     {size !== "auto" ? ` · ${channelLabel(size)}` : ""}
+                    {imageCount > 1 ? ` · ${imageCount}x` : ""}
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
@@ -766,6 +781,15 @@ export function Composer() {
                         </span>
                       </span>
                       {p.id === size && (
+                        <span className="ml-auto text-primary">●</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuLabel>Images (carousel)</DropdownMenuLabel>
+                  {IMAGE_COUNT_OPTIONS.map((n) => (
+                    <DropdownMenuItem key={n} onClick={() => setImageCount(n)}>
+                      {n === 1 ? "1 · single image" : `${n} · carousel set`}
+                      {n === imageCount && (
                         <span className="ml-auto text-primary">●</span>
                       )}
                     </DropdownMenuItem>

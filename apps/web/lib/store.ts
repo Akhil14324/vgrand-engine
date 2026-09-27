@@ -37,6 +37,10 @@ interface StudioState {
   size: ImageSize;
   setSize: (s: ImageSize) => void;
 
+  /** How many images the next fresh image request should produce (1 = normal, 2-10 = a carousel set). */
+  imageCount: number;
+  setImageCount: (n: number) => void;
+
   /** Desktop sidebar collapsed via the PanelLeft button. */
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -92,6 +96,9 @@ export const useStudio = create<StudioState>((set) => ({
 
   size: "auto",
   setSize: (size) => set({ size }),
+
+  imageCount: 1,
+  setImageCount: (imageCount) => set({ imageCount }),
 
   sidebarCollapsed: false,
   toggleSidebar: () =>

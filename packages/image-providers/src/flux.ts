@@ -26,7 +26,23 @@ export class FluxProvider implements ImageProvider {
     return key;
   }
 
+  /**
+   * BFL has no batch parameter, so a carousel (n > 1) fans out into that many
+   * independent submit-and-poll jobs run in parallel instead of one request.
+   */
   async generate(params: GenerateParams): Promise<GenerateResult> {
+    const n = Math.max(1, params.n ?? 1);
+    if (n === 1) return this.generateOne(params);
+    const results = await Promise.all(
+      Array.from({ length: n }, () => this.generateOne(params)),
+    );
+    return {
+      images: results.flatMap((r) => r.images),
+      metadata: results[0]!.metadata,
+    };
+  }
+
+  private async generateOne(params: GenerateParams): Promise<GenerateResult> {
     const endpoint = process.env.FLUX_MODEL_ENDPOINT ?? "flux-2-pro";
     const { width, height } = toDimensions(params.size);
 

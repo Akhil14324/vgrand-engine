@@ -892,6 +892,8 @@ export function useCreateSocialPosts(generationId: string) {
   return useMutation({
     mutationFn: (input: {
       posts: { accountId: string; content: SocialPostContent }[];
+      /** Extra images, in order, to bundle into an Instagram/Facebook carousel. */
+      additionalImages?: { generationId: string; index?: number }[];
       /** ISO instant; omit to post now. */
       scheduledFor?: string;
       /** Post despite a failed brand rule (recorded on the server). */

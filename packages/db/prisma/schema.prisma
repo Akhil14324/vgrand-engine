@@ -418,7 +418,9 @@ model SocialPost {
   account       SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   accountId     String
   content       Json
-  mediaUrl      String
+  // Snapshot of every image in this post, in display order (1 for a normal
+  // post, up to 10 for an Instagram carousel / Facebook multi-photo post).
+  mediaUrls     String[]
   status        String        @default("pending")
   attemptCount  Int           @default(0)
   lastAttemptAt DateTime?

@@ -7,6 +7,7 @@ import {
 } from "@catgpt/image-providers";
 import {
   PROVIDERS,
+  SOCIAL_MAX_CAROUSEL_IMAGES,
   type ProviderName,
   type Quality,
   type ImageSize,
@@ -72,6 +73,8 @@ interface GenerationMetadata {
   quality?: Quality;
   size?: ImageSize;
   workerAttempts?: number;
+  /** A ready-made carousel set: how many images to generate for this one prompt. */
+  imageCount?: number;
   [key: string]: unknown;
 }
 
@@ -320,6 +323,10 @@ export async function runGeneration(generationId: string): Promise<void> {
   )
     ? (generation.provider as ProviderName)
     : "openai";
+  const imageCount = Math.min(
+    Math.max(Number(meta.imageCount) || 1, 1),
+    SOCIAL_MAX_CAROUSEL_IMAGES,
+  );
 
   try {
     // Text turns skip the image pipeline entirely — chat completion in,
@@ -741,9 +748,12 @@ export async function runGeneration(generationId: string): Promise<void> {
       maskImageUrl: meta.maskImageUrl,
       quality: meta.quality ?? "low",
       size: meta.size ?? "auto",
+      n: imageCount,
       // Progressive previews stream through SSE as they arrive from the
       // model — each one is also a checkpoint for Stop, so a cancelled image
       // job aborts at the next partial instead of running to completion.
+      // A multi-image (carousel) request skips previews (see the OpenAI
+      // adapter) - only a single-image job ever calls this.
       onPartialImage: (b64) => {
         pollCancelled();
         // Provider-specific abort error — it survives the provider's

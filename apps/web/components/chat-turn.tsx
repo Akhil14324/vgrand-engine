@@ -112,6 +112,8 @@ export const ChatTurn = memo(function ChatTurn({
   const select = useStudio((s) => s.select);
   const selectedId = useStudio((s) => s.selectedId);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Which image of a multi-image (carousel) generation is shown big.
+  const [activeImage, setActiveImage] = useState(0);
   const inFlight =
     generation.status === "pending" || generation.status === "processing";
   useGenerationStream(generation.id, inFlight);
@@ -173,7 +175,8 @@ export const ChatTurn = memo(function ChatTurn({
     inFlight && generation.kind === "text",
   );
 
-  const image = generation.imageUrls[0];
+  const images = generation.imageUrls;
+  const image = images[activeImage] ?? images[0];
   const meta = (generation.metadata ?? {}) as Record<string, unknown>;
   const refImages = [
     ...((meta.referenceImageUrls as string[] | undefined) ?? []),
@@ -349,6 +352,26 @@ export const ChatTurn = memo(function ChatTurn({
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {generation.status === "processing" ? "Generating…" : "Queued…"}
             </div>
+          </div>
+        )}
+        {images.length > 1 && (
+          <div className="flex max-w-md flex-wrap gap-1.5">
+            {images.map((url, i) => (
+              <button
+                key={url}
+                onClick={() => setActiveImage(i)}
+                aria-label={`Show image ${i + 1} of ${images.length}`}
+                className={cn(
+                  "size-12 shrink-0 overflow-hidden rounded-md border transition-shadow",
+                  i === activeImage
+                    ? "ring-1 ring-primary"
+                    : "opacity-70 hover:opacity-100",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="" className="h-full w-full object-cover" />
+              </button>
+            ))}
           </div>
         )}
         {image && creative && generation.textResponse && (

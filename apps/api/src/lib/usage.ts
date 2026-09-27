@@ -25,10 +25,10 @@ export async function getImageUsage(userId: string) {
   };
 }
 
-/** Throws 429 when the user has spent today's image quota. Chat is never gated. */
-export async function assertImageQuota(userId: string) {
+/** Throws 429 when the user doesn't have `count` images left in today's quota. Chat is never gated. */
+export async function assertImageQuota(userId: string, count = 1) {
   const usage = await getImageUsage(userId);
-  if (usage.remaining <= 0) {
+  if (usage.remaining < count) {
     throw quotaError(usage.limit);
   }
 }
@@ -42,24 +42,28 @@ export function quotaError(limit: number) {
 }
 
 /**
- * Record one image against today's quota — atomically. The count and the
- * insert happen in a single statement, so two requests racing at the limit
- * cannot both pass (the old count-then-insert let each see room for itself).
- * Returns false when the quota was already spent.
+ * Record `count` images against today's quota — atomically, all-or-nothing.
+ * The capacity check and the inserts happen in a single statement, so two
+ * requests racing at the limit cannot both pass (the old count-then-insert
+ * let each see room for itself), and a carousel request either reserves
+ * every image it asked for or none of them. Returns false when there wasn't
+ * room for the full count.
  */
 export async function recordImageUsage(
   userId: string,
   generationId: string,
+  count = 1,
 ): Promise<boolean> {
   const start = startOfUtcDay();
+  const ids = Array.from({ length: count }, () => randomUUID());
   const inserted = await prisma.$executeRaw`
     INSERT INTO "ImageUsage" ("id", "userId", "generationId", "createdAt")
-    SELECT ${randomUUID()}, ${userId}, ${generationId}, now()
+    SELECT unnest(${ids}::uuid[]), ${userId}, ${generationId}, now()
     WHERE (
       SELECT COUNT(*) FROM "ImageUsage"
       WHERE "userId" = ${userId} AND "createdAt" >= ${start}
-    ) < ${env.IMAGE_DAILY_LIMIT}`;
-  return inserted === 1;
+    ) + ${count} <= ${env.IMAGE_DAILY_LIMIT}`;
+  return inserted === count;
 }
 
 /** Give the quota back when a generation fails. */

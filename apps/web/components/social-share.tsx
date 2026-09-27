@@ -7,6 +7,7 @@ import {
   CalendarPlus,
   Check,
   ExternalLink,
+  ImageIcon,
   Loader2,
   Plus,
   RotateCw,
@@ -16,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  SOCIAL_MAX_CAROUSEL_IMAGES,
   X_MAX_CHARS,
   type GenerationDto,
   type SocialAccountDto,
@@ -31,6 +33,7 @@ import {
   useConversation,
   useCreateSocialPosts,
   useDeleteSocialAccount,
+  useGenerations,
   useRetrySocialPost,
   useSocialAccounts,
   useSocialPlatforms,
@@ -302,6 +305,144 @@ function PostRow({
   );
 }
 
+/**
+ * An image beyond the post's own first one, queued to join this post's
+ * carousel — either another frame of a generation that already produced a
+ * set, or another generation's image entirely.
+ */
+interface CarouselImage {
+  generationId: string;
+  index: number;
+  url: string;
+}
+
+/** The post's own first image (locked, always first) plus any added extras - removable and reorderable. */
+function PhotoStrip({
+  primaryUrl,
+  extras,
+  onRemove,
+  onMove,
+}: {
+  primaryUrl: string;
+  extras: CarouselImage[];
+  onRemove: (position: number) => void;
+  onMove: (position: number, dir: -1 | 1) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <div className="relative size-16 shrink-0 overflow-hidden rounded-md border border-border">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={primaryUrl} alt="" className="h-full w-full object-cover" />
+        <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">1</span>
+      </div>
+      {extras.map((img, i) => (
+        <div
+          key={`${img.generationId}-${img.index}`}
+          className="group relative size-16 shrink-0 overflow-hidden rounded-md border border-border"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img.url} alt="" className="h-full w-full object-cover" />
+          <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">{i + 2}</span>
+          <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 bg-black/70 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <button
+              type="button"
+              aria-label="Move earlier"
+              disabled={i === 0}
+              onClick={() => onMove(i, -1)}
+              className="px-1 py-0.5 text-xs text-white disabled:opacity-30"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              aria-label={`Remove photo ${i + 2}`}
+              onClick={() => onRemove(i)}
+              className="px-1 py-0.5 text-white"
+            >
+              <X className="size-3" />
+            </button>
+            <button
+              type="button"
+              aria-label="Move later"
+              disabled={i === extras.length - 1}
+              onClick={() => onMove(i, 1)}
+              className="px-1 py-0.5 text-xs text-white disabled:opacity-30"
+            >
+              →
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Picks up to `remaining` past generations' images (their first/only frame) to append to the carousel. */
+function AddPhotosDialog({
+  excludeIds,
+  remaining,
+  onAdd,
+}: {
+  excludeIds: Set<string>;
+  remaining: number;
+  onAdd: (img: CarouselImage) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = useGenerations();
+  const options = useMemo(
+    () =>
+      (data?.items ?? []).filter(
+        (g) => g.status === "completed" && g.imageUrls.length > 0 && !excludeIds.has(g.id),
+      ),
+    [data, excludeIds],
+  );
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" size="sm" variant="outline" disabled={remaining <= 0}>
+          <Plus />
+          Add photo{remaining > 0 ? ` (${remaining} left)` : ""}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[80dvh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Add photos to this post</DialogTitle>
+          <DialogDescription>
+            Pick up to {remaining} more image{remaining === 1 ? "" : "s"} from your past generations to build a
+            carousel.
+          </DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="animate-spin text-muted-foreground" />
+          </div>
+        ) : options.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
+            <ImageIcon className="size-6" />
+            No other images to add yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-2">
+            {options.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                title={g.prompt}
+                disabled={remaining <= 0}
+                onClick={() => onAdd({ generationId: g.id, index: 0, url: g.imageUrls[0]! })}
+                className="aspect-square overflow-hidden rounded-md border border-border hover:border-primary disabled:pointer-events-none disabled:opacity-40"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={g.imageUrls[0]} alt="" className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SocialShareBody({
   generation,
   initialWhen,
@@ -334,6 +475,11 @@ function SocialShareBody({
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<SocialPreviewsDto>({});
+  // A generation that already produced a carousel set starts with its own
+  // other frames pre-loaded; the user can still remove or reorder them.
+  const [extraImages, setExtraImages] = useState<CarouselImage[]>(() =>
+    generation.imageUrls.slice(1).map((url, i) => ({ generationId: generation.id, index: i + 1, url })),
+  );
 
   const selectedAccounts = useMemo(
     () => (accounts ?? []).filter((a) => selected.has(a.id)),
@@ -342,6 +488,12 @@ function SocialShareBody({
   const neededPlatforms = useMemo(
     () => [...new Set(selectedAccounts.map((a) => a.platform))],
     [selectedAccounts],
+  );
+  // Only Instagram and Facebook turn extra images into a carousel / multi-photo post.
+  const carouselEligible = neededPlatforms.includes("instagram") || neededPlatforms.includes("facebook");
+  const extraImageIds = useMemo(
+    () => new Set([generation.id, ...extraImages.map((i) => i.generationId)]),
+    [generation.id, extraImages],
   );
   const missing = neededPlatforms.filter((p) => !drafts[p]);
   const hasAllDrafts = neededPlatforms.length > 0 && missing.length === 0;
@@ -430,6 +582,9 @@ function SocialShareBody({
           const d = drafts[a.platform]!;
           return { accountId: a.id, content: d as Record<string, unknown> };
         }),
+        additionalImages: carouselEligible
+          ? extraImages.map(({ generationId, index }) => ({ generationId, index }))
+          : undefined,
         scheduledFor,
         complianceOverride,
       },
@@ -437,6 +592,10 @@ function SocialShareBody({
         onSuccess: () => {
           setSelected(new Set());
           setDrafts({});
+          // Back to the generation's own carousel set, not an empty strip.
+          setExtraImages(
+            generation.imageUrls.slice(1).map((url, i) => ({ generationId: generation.id, index: i + 1, url })),
+          );
           setScheduling(!!initialWhen);
           if (scheduledFor) onScheduled?.();
         },
@@ -585,6 +744,37 @@ function SocialShareBody({
           YouTube posts will be <strong>private</strong> while this app&apos;s Google
           verification is pending - they won&apos;t be public.
         </p>
+      )}
+
+      {carouselEligible && (
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium">Photos</h3>
+          <PhotoStrip
+            primaryUrl={generation.imageUrls[0]!}
+            extras={extraImages}
+            onRemove={(position) => setExtraImages((imgs) => imgs.filter((_, i) => i !== position))}
+            onMove={(index, dir) =>
+              setExtraImages((imgs) => {
+                const next = [...imgs];
+                const swapWith = index + dir;
+                if (swapWith < 0 || swapWith >= next.length) return imgs;
+                [next[index], next[swapWith]] = [next[swapWith]!, next[index]!];
+                return next;
+              })
+            }
+          />
+          <AddPhotosDialog
+            excludeIds={extraImageIds}
+            remaining={SOCIAL_MAX_CAROUSEL_IMAGES - 1 - extraImages.length}
+            onAdd={(img) => setExtraImages((imgs) => [...imgs, img])}
+          />
+          {extraImages.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              Instagram and Facebook will post these {1 + extraImages.length} photos as one carousel; other
+              selected platforms only use the first.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="flex items-center gap-2">

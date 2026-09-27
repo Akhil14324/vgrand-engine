@@ -125,6 +125,7 @@ export class OpenAIImageProvider implements ImageProvider {
           image,
           ...(mask ? { mask } : {}),
           prompt: params.prompt,
+          n: params.n ?? 1,
           size: size === "auto" ? undefined : (size as never),
           quality,
         });
@@ -137,7 +138,10 @@ export class OpenAIImageProvider implements ImageProvider {
       // Draft mode can stream progressive previews — partial images arrive
       // while the final render completes. Any stream failure falls back to a
       // plain generate call so the request never dies on a preview hiccup.
-      if (params.onPartialImage) {
+      // A multi-image (carousel) request skips streaming entirely: the
+      // stream only ever surfaces one "completed" image at a time, so with
+      // n > 1 every image but the last would be silently dropped.
+      if (params.onPartialImage && (params.n ?? 1) <= 1) {
         try {
           const stream = await client.images.generate({
             model,

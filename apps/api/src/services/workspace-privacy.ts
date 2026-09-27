@@ -38,9 +38,9 @@ export async function deleteFilesUnlessInUse(urls: string[]): Promise<void> {
   if (unique.length === 0) return;
   const [assets, posts] = await Promise.all([
     prisma.brandAsset.findMany({ where: { url: { in: unique } }, select: { url: true } }),
-    prisma.socialPost.findMany({ where: { mediaUrl: { in: unique } }, select: { mediaUrl: true } }),
+    prisma.socialPost.findMany({ where: { mediaUrls: { hasSome: unique } }, select: { mediaUrls: true } }),
   ]);
-  const used = new Set([...assets.map((a) => a.url), ...posts.map((p) => p.mediaUrl)]);
+  const used = new Set([...assets.map((a) => a.url), ...posts.flatMap((p) => p.mediaUrls)]);
   await deleteStoredFiles(unique.filter((u) => !used.has(u)));
 }
 
@@ -142,7 +142,7 @@ export async function exportWorkspaceData(userId: string, workspaceId: string) {
     }),
     prisma.socialPost.findMany({
       where: { workspaceId },
-      select: { id: true, generationId: true, status: true, content: true, mediaUrl: true, scheduledFor: true, postedAt: true, remoteUrl: true, account: { select: { platform: true, handle: true } } },
+      select: { id: true, generationId: true, status: true, content: true, mediaUrls: true, scheduledFor: true, postedAt: true, remoteUrl: true, account: { select: { platform: true, handle: true } } },
       take: EXPORT_LIMIT,
     }),
     prisma.complianceCheck.findMany({

@@ -33,7 +33,8 @@ export class IdeogramProvider implements ImageProvider {
       aspect_ratio: toAspectRatio(params.size),
       rendering_speed: params.quality === "high" ? "QUALITY" : "DEFAULT",
       magic_prompt: "OFF",
-      num_images: params.n ?? 1,
+      // Ideogram's own ceiling is lower than our 10-image carousel cap.
+      num_images: Math.min(params.n ?? 1, 8),
     };
     if (params.mode === "edit" && params.referenceImageUrl) {
       body.image = params.referenceImageUrl;

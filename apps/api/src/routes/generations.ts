@@ -3,6 +3,7 @@ import { prisma } from "@catgpt/db";
 import {
   createGenerationSchema,
   regenerateGenerationSchema,
+  SOCIAL_MAX_CAROUSEL_IMAGES,
   type GenerationEvent,
   type ImageEditOperation,
   type ThemeStyleGuide,
@@ -50,13 +51,6 @@ import { isTrustedImageUrl } from "../lib/urls.js";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const IMAGE_TRIGGER = /create\s+an?\s+image/i;
-/**
- * Words that make a plain message worth an intent check. Without an explicit
- * "create an image", only prompts mentioning one of these reach the classifier,
- * so ordinary questions never pay for it.
- */
-const IMAGE_CUE =
-  /\b(?:images?|pictures?|photos?|photograph|posters?|logos?|banners?|illustrations?|wallpapers?|thumbnails?|flyers?|mock-?ups?|artwork|graphics?|draw(?:ing)?|paint(?:ing)?|sketch|render|visuals?|creatives?)\b/i;
 
 const EDIT_OPERATION_PROMPTS: Record<Exclude<ImageEditOperation, "edit">, string> = {
   inpaint:
@@ -247,9 +241,13 @@ export async function generationRoutes(app: FastifyInstance) {
       visionOnly = intent === "text";
     }
 
-    // A plain request such as "generate a biryani image" has no exact trigger
-    // phrase; when it carries an image cue, let the intent classifier decide
-    // instead of answering it as chat (where the model can only pretend).
+    // A plain request such as "generate a biryani image" or "show me what a
+    // treehouse in the clouds would look like" has no exact trigger phrase
+    // and no guarantee of hitting one of the IMAGE_CUE words either — so
+    // instead of gating the classifier on a keyword guess, let it look at
+    // every plain prompt (plus recent history) and decide for itself. Jev is
+    // a cheap typed-choice call, not a full chat completion, so this is
+    // worth paying on every turn that isn't already resolved above.
     let inferredImage = false;
     if (
       !body.voice &&
@@ -257,7 +255,6 @@ export async function generationRoutes(app: FastifyInstance) {
       userRefs.length === 0 &&
       !effectiveParentId &&
       !IMAGE_TRIGGER.test(body.prompt) &&
-      IMAGE_CUE.test(body.prompt) &&
       !isCampaignPrompt(body.prompt) &&
       !(await inCampaignChat())
     ) {
@@ -295,7 +292,14 @@ export async function generationRoutes(app: FastifyInstance) {
         ? ("image" as const)
         : ("text" as const);
 
-    if (kind === "image") await assertImageQuota(req.userId);
+    // A ready-made carousel set: only for a fresh, non-edit-chain image
+    // request that wasn't already split into distinct per-item briefs.
+    const imageCount =
+      kind === "image" && !effectiveParentId && !isBatch
+        ? Math.min(Math.max(body.imageCount ?? 1, 1), SOCIAL_MAX_CAROUSEL_IMAGES)
+        : 1;
+
+    if (kind === "image") await assertImageQuota(req.userId, imageCount);
 
     // Theme brand references come first — they're the base the edit keeps;
     // any user-attached refs are extra guidance on top.
@@ -375,6 +379,7 @@ export async function generationRoutes(app: FastifyInstance) {
             ...(brand ? { brandId: brand.id } : {}),
             ...(body.voice ? { voice: true } : {}),
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
+            ...(imageCount > 1 ? { imageCount } : {}),
           },
         },
         }),
@@ -412,7 +417,7 @@ export async function generationRoutes(app: FastifyInstance) {
     try {
       if (
         kind === "image" &&
-        !(await recordImageUsage(req.userId, generation.id))
+        !(await recordImageUsage(req.userId, generation.id, imageCount))
       ) {
         throw quotaError(env.IMAGE_DAILY_LIMIT);
       }

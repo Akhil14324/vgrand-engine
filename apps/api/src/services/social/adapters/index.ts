@@ -13,4 +13,11 @@ const ADAPTERS: Record<SocialPlatform, SocialAdapter> = {
 };
 
 export const getAdapter = (platform: SocialPlatform): SocialAdapter => ADAPTERS[platform];
-export type { PreparedMedia, ProviderState, PublishInput, PublishResult, SocialAdapter } from "./types.js";
+export type {
+  PreparedMedia,
+  PreparedMediaItem,
+  ProviderState,
+  PublishInput,
+  PublishResult,
+  SocialAdapter,
+} from "./types.js";
