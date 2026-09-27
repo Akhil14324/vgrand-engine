@@ -241,7 +241,7 @@ export function GuavaReport({
         <TabsContent value="overview" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">How Guava understands your business</CardTitle>
+              <CardTitle className="text-base">How Brand Strategist understands your business</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 text-sm md:grid-cols-2">
               <Fact label="What you sell" value={report.understanding.sells} />
@@ -282,7 +282,7 @@ export function GuavaReport({
         </TabsContent>
 
         <TabsContent value="strengths">
-          <Findings items={report.strengths} empty="No clear strengths could be confirmed from what Guava knows yet." />
+          <Findings items={report.strengths} empty="No clear strengths could be confirmed from what Brand Strategist knows yet." />
         </TabsContent>
 
         <TabsContent value="problems" className="space-y-4">
@@ -324,7 +324,7 @@ export function GuavaReport({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <HelpCircle className="h-4 w-4" />
-              What Guava is unsure about
+              What Brand Strategist is unsure about
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -409,7 +409,7 @@ function FollowUp({ brandId, diagnosis }: { brandId: string; diagnosis: GuavaDia
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Ask Guava about this diagnosis</CardTitle>
+        <CardTitle className="text-base">Ask Brand Strategist about this diagnosis</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {diagnosis.messages.length === 0 && !pending && (
@@ -436,7 +436,7 @@ function FollowUp({ brandId, diagnosis }: { brandId: string; diagnosis: GuavaDia
             <>
               <Bubble role="user">{pending}</Bubble>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Guava is thinking…
+                <Loader2 className="h-4 w-4 animate-spin" /> Brand Strategist is thinking…
               </div>
             </>
           )}
@@ -454,7 +454,7 @@ function FollowUp({ brandId, diagnosis }: { brandId: string; diagnosis: GuavaDia
             rows={2}
             maxLength={1000}
             placeholder="e.g. Why is following up on enquiries my top priority?"
-            aria-label="Your question for Guava"
+            aria-label="Your question for Brand Strategist"
           />
           <Button type="submit" size="icon" disabled={!question.trim() || ask.isPending} aria-label="Send">
             <Send className="h-4 w-4" />

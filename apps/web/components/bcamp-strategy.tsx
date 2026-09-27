@@ -88,7 +88,7 @@ function Body({ s }: { s: StrategyDto }) {
             <Badge variant={s.status === "active" ? "default" : "muted"}>{s.status}</Badge>
             <span>Version {s.version}</span>
             {s.approvedAt && <span>Approved {fmtDay(s.approvedAt)}</span>}
-            {s.sourceRef?.recommendation && <span>From Guava: {s.sourceRef.recommendation}</span>}
+            {s.sourceRef?.recommendation && <span>From Brand Strategist: {s.sourceRef.recommendation}</span>}
             {s.sourceRef?.learnings && s.sourceRef.learnings.length > 0 && (
               <span title={s.sourceRef.learnings.map((l) => l.title).join(", ")}>
                 Informed by {s.sourceRef.learnings.length} earlier campaign(s), as evidence only

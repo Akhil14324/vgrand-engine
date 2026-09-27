@@ -24,7 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: Store, label: "Brand", href: "/brand" },
   { icon: ImageIcon, label: "Library", href: "/library" },
   { icon: CalendarDays, label: "Social Calendar", href: "/calendar" },
-  { icon: Compass, label: "Guava", href: "/guava" },
+  { icon: Compass, label: "Brand Strategist", href: "/guava" },
   { icon: Target, label: "B Camp", href: "/bcamp" },
   { icon: ListChecks, label: "Execution", href: "/execution" },
   { icon: TrendingUp, label: "Growth", href: "/growth" },

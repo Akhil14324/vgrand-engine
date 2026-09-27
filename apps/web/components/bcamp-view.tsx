@@ -41,7 +41,7 @@ function Router({ brand }: { brand: BrandDto }) {
 
 const SOURCE_LABEL: Record<StrategySource, { label: string; placeholder: string }> = {
   goal: { label: "A business goal", placeholder: "e.g. Get more qualified property inquiries for our new project in the next 60 days" },
-  guava: { label: "A Guava recommendation", placeholder: "Anything you want to add or change about that recommendation" },
+  guava: { label: "A Brand Strategist recommendation", placeholder: "Anything you want to add or change about that recommendation" },
   idea: { label: "A campaign idea I already have", placeholder: "Describe the idea in your own words" },
   seasonal: { label: "A season or event", placeholder: "e.g. Diwali weekend offer, monsoon special, a local festival" },
   custom: { label: "My own instruction", placeholder: "Tell B Camp what you want planned" },
@@ -97,9 +97,9 @@ function Dashboard({ brand }: { brand: BrandDto }) {
           <h3 className="text-sm font-semibold">Strategic priorities</h3>
           {!data.hasDiagnosis ? (
             <p className="text-sm text-muted-foreground">
-              No Guava diagnosis yet. B Camp works from your profile alone until you run one.{" "}
+              No Brand Strategist diagnosis yet. B Camp works from your profile alone until you run one.{" "}
               <Link href="/guava" className="text-primary hover:underline">
-                Open Guava
+                Open Brand Strategist
               </Link>
             </p>
           ) : (
@@ -120,7 +120,7 @@ function Dashboard({ brand }: { brand: BrandDto }) {
         <Card className="space-y-3 p-4">
           <h3 className="text-sm font-semibold">Recommended next actions</h3>
           {data.recommendations.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Recommendations from Guava appear here.</p>
+            <p className="text-sm text-muted-foreground">Recommendations from Brand Strategist appear here.</p>
           ) : (
             <ul className="space-y-2 text-sm">
               {data.recommendations.slice(0, 5).map((r) => (
@@ -143,7 +143,7 @@ function Dashboard({ brand }: { brand: BrandDto }) {
               ))}
             </ul>
           )}
-          <p className="text-xs text-muted-foreground">Guava's advice is a starting point. Items tagged estimate or hypothesis are not verified.</p>
+          <p className="text-xs text-muted-foreground">Brand Strategist's advice is a starting point. Items tagged estimate or hypothesis are not verified.</p>
         </Card>
       </div>
 

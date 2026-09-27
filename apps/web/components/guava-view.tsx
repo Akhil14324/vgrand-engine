@@ -43,7 +43,7 @@ function GuavaContent() {
           </Link>
         </Button>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-lg font-semibold leading-tight tracking-tight">Guava</h1>
+          <h1 className="font-display text-lg font-semibold leading-tight tracking-tight">Brand Strategist</h1>
           <p className="truncate text-xs text-muted-foreground">Your business strategist</p>
         </div>
         {brands && brands.length > 1 && brand && (
@@ -83,8 +83,8 @@ function NoBusiness() {
       <Compass className="mx-auto h-8 w-8 text-primary" />
       <h2 className="mt-3 text-lg font-semibold">Start with your business</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Guava works on one business at a time. Create your brand first, then come back to have Guava diagnose your
-        marketing.
+        Brand Strategist works on one business at a time. Create your brand first, then come back to have Brand
+        Strategist diagnose your marketing.
       </p>
       <Button asChild className="mt-4">
         <Link href="/brand">Create your brand</Link>
@@ -154,7 +154,7 @@ function Workspace({ brand }: { brand: BrandDto }) {
             <p className="mt-1.5 text-xs text-muted-foreground">
               {lastDone
                 ? `Last diagnosed ${fmtDate(lastDone.createdAt)}. Update your answers any time and diagnose again.`
-                : "Tell Guava about your business at your own pace, then ask for a diagnosis. You can improve it later."}
+                : "Tell Brand Strategist about your business at your own pace, then ask for a diagnosis. You can improve it later."}
             </p>
           </div>
           <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">
@@ -220,7 +220,7 @@ function FirstTime({ missing, onProfile }: { missing: string[]; onProfile: () =>
     <Card className="p-6">
       <h2 className="text-lg font-semibold">Ready when you are</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Guava studies your business, finds what&apos;s holding your marketing and sales back, and recommends what to do
+        Brand Strategist studies your business, finds what&apos;s holding your marketing and sales back, and recommends what to do
         about it. It never posts or launches anything on its own. You don&apos;t need to fill in everything: start with a
         few answers and add more later.
       </p>
@@ -255,7 +255,7 @@ function DiagnosisPanel({
     return (
       <Card className="flex flex-col items-center gap-3 p-10 text-center">
         <Loader2 className="h-7 w-7 animate-spin text-primary" />
-        <h2 className="text-base font-semibold">Guava is studying your business</h2>
+        <h2 className="text-base font-semibold">Brand Strategist is studying your business</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
           It&apos;s reading your profile and marketing activity. This usually takes about a minute. You can leave this page
           and come back.
@@ -288,7 +288,7 @@ function History({
   if (!items.length) {
     return (
       <Card className="p-6 text-sm text-muted-foreground">
-        Past diagnoses will appear here, so you can see how your business and Guava&apos;s advice change over time.
+        Past diagnoses will appear here, so you can see how your business and Brand Strategist&apos;s advice change over time.
       </Card>
     );
   }

@@ -132,7 +132,10 @@ CHAT: questions, explanations, coding help, document requests, conversation, or 
 /**
  * IMAGE or CHAT for an ambiguous prompt. Explicit opt-ins (armed /theme,
  * reference image, regenerate) are resolved by the caller before this runs.
- * On classifier failure we default to image — the studio's primary job.
+ * On classifier failure we default to text: this now runs on every plain
+ * message (not just ones that already look image-ish), so defaulting to
+ * image on a transient API error would silently spend the user's image
+ * quota on what was probably an ordinary chat message.
  *
  * Jev answers this as a typed choice question — a fast eval call instead of
  * a chat completion. Without TYPESAFE_API_KEY (or if Jev errors) the OpenAI
@@ -200,7 +203,7 @@ export async function classifyIntent(
     const verdict = res.choices[0]?.message.content?.trim().toUpperCase();
     return verdict?.startsWith("IMAGE") ? "image" : "text";
   } catch {
-    return "image";
+    return "text";
   }
 }
 

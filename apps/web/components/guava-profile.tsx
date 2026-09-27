@@ -86,7 +86,7 @@ export function GuavaProfileEditor({
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           {profile.industry
-            ? `Guava has added a few questions that matter for ${industry.label.toLowerCase()}.`
+            ? `Brand Strategist has added a few questions that matter for ${industry.label.toLowerCase()}.`
             : "Picking a type adds the questions that matter most for it. You can change it any time."}
         </p>
       </Card>
@@ -100,7 +100,7 @@ export function GuavaProfileEditor({
         {completeness.missing.length > 0 ? (
           <div className="mt-3">
             <p className="text-xs text-muted-foreground">
-              Guava can diagnose with what it has. These answers would sharpen it most:
+              Brand Strategist can diagnose with what it has. These answers would sharpen it most:
             </p>
             <ul className="mt-2 flex flex-col gap-1">
               {completeness.missing.slice(0, 5).map((m) => (
@@ -117,7 +117,7 @@ export function GuavaProfileEditor({
             </ul>
           </div>
         ) : (
-          <p className="mt-3 text-sm text-muted-foreground">Everything Guava usually asks for is filled in.</p>
+          <p className="mt-3 text-sm text-muted-foreground">Everything Brand Strategist usually asks for is filled in.</p>
         )}
       </Card>
 
