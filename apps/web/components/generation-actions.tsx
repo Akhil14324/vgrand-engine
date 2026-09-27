@@ -576,8 +576,8 @@ export function RegenerateButton({ generation }: { generation: GenerationDto }) 
         <DialogHeader>
           <DialogTitle>Edit & regenerate</DialogTitle>
           <DialogDescription>
-            Runs on gpt-image-2.5-sunburst — keeps the current image intact and
-            changes only what you describe.
+            Keeps the current image intact and changes only what you
+            describe.
           </DialogDescription>
         </DialogHeader>
         <Textarea

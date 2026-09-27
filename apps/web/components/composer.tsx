@@ -483,13 +483,6 @@ export function Composer() {
     if (e.dataTransfer.files.length) void uploadFiles(e.dataTransfer.files);
   };
 
-  const providerLabel = armedTheme
-    ? ((armedTheme.styleGuide?.preferredProvider as string | undefined) ??
-      "gpt-image-2.5")
-    : refImages.length
-      ? "gpt-image-2.5-sunburst"
-      : "gpt-image-2.5-flare";
-
   const canSend =
     (Boolean(value.trim()) || docs.length > 0) &&
     value !== "/" &&
@@ -718,14 +711,14 @@ export function Composer() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    aria-label="Model, image quality and canvas"
-                    title="Model — click to set image quality and canvas"
+                    aria-label="Image quality and canvas"
+                    title="Click to set image quality and canvas"
                     className={cn(
                       badgeVariants({ variant: "muted" }),
                       "ml-1 hidden shrink-0 font-mono text-[10px] hover:bg-accent hover:text-foreground sm:inline-flex",
                     )}
                   >
-                    {providerLabel} · {quality}
+                    {QUALITY_LABEL[quality]}
                     {size !== "auto" ? ` · ${channelLabel(size)}` : ""}
                   </button>
                 </DropdownMenuTrigger>

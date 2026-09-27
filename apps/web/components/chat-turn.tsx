@@ -15,6 +15,7 @@ import type { GenerationDto, WebSource } from "@catgpt/types";
 import { useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { friendlyEngineLabel } from "@/lib/model-labels";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "./markdown";
 import { ActionRow } from "./generation-actions";
@@ -270,7 +271,7 @@ export function ChatTurn({ generation }: { generation: GenerationDto }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <ActionRow generation={generation} />
           <span className="text-[10px] text-muted-foreground">
-            {generation.model ?? generation.provider}
+            {friendlyEngineLabel(generation.model ?? generation.provider)}
             {typeof meta.latencyMs === "number" &&
               ` · ${(meta.latencyMs / 1000).toFixed(1)}s`}
           </span>

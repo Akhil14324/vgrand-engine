@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import type { PublicShareDto } from "@catgpt/types";
 import { API_URL } from "@/lib/config";
+import { friendlyEngineLabel } from "@/lib/model-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -44,7 +45,7 @@ export default async function SharePage({
           <div className="flex flex-col gap-3 p-4">
             <div className="flex items-center gap-2">
               {data.themeLabel && <Badge>{data.themeLabel}</Badge>}
-              <Badge variant="outline">{data.provider}</Badge>
+              <Badge variant="outline">{friendlyEngineLabel(data.provider)}</Badge>
             </div>
             <p className="text-sm leading-relaxed">{data.prompt}</p>
           </div>
