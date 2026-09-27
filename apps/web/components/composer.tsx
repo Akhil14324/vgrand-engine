@@ -12,7 +12,6 @@ import {
 } from "react";
 import {
   AlertCircle,
-  AudioLines,
   ArrowUp,
   FileText,
   Globe,
@@ -21,7 +20,6 @@ import {
   Square,
   Loader2,
   Mic,
-  MicOff,
   Plus,
   Sparkles,
   X,
@@ -47,7 +45,6 @@ import {
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
 import { CHANNEL_PRESETS, channelLabel } from "@/lib/channels";
 import { THEME_ICONS } from "@/lib/theme-icons";
-import { KillBill } from "@/components/kill-bill";
 import { useStudio } from "@/lib/store";
 import { useClickPulse } from "@/lib/use-click-pulse";
 import { DrawBorder } from "@/components/draw-border";
@@ -159,9 +156,10 @@ export function Composer() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [listening, setListening] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   // Not-yet-final speech transcript, shown live while dictating.
   const [interim, setInterim] = useState("");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [phIndex, setPhIndex] = useState(0);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -171,7 +169,11 @@ export function Composer() {
   // PDFs already attached to this chat (uploaded on earlier turns).
   const { data: conversationDocs } = useDocuments(activeConversationId);
 
-  // Browser speech recognition (Chrome/Edge/Safari) — zero API cost.
+  // Browser speech recognition (Chrome/Edge/Safari) — zero API cost, live
+  // interim words as you talk. Where it isn't available (Firefox, some
+  // in-app browsers) dictation falls back to recording + the existing
+  // /voice/transcribe endpoint (same one voice mode already used), which
+  // fills the box once per press-and-release instead of word by word.
   // Detected post-mount: reading `window` during render would diverge from
   // the server HTML (no mic → mic) and break hydration.
   const [speechSupported, setSpeechSupported] = useState(false);
@@ -181,11 +183,91 @@ export function Composer() {
     );
   }, []);
 
-  const toggleMic = useCallback(() => {
-    if (listening) {
-      recRef.current?.stop();
-      return;
+  // Live waveform — reacts to actual mic input, not a canned animation.
+  const waveBarRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const waveRafRef = useRef<number>(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+
+  const startWaveform = useCallback((stream: MediaStream) => {
+    const ctx = new AudioContext();
+    audioCtxRef.current = ctx;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.6;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    analyserRef.current = analyser;
+    const bins = new Uint8Array(analyser.frequencyBinCount);
+    const bars = waveBarRefs.current;
+    const perBar = Math.max(1, Math.floor(bins.length / bars.length));
+    const tick = () => {
+      analyser.getByteFrequencyData(bins);
+      for (let i = 0; i < bars.length; i++) {
+        let sum = 0;
+        for (let j = i * perBar; j < i * perBar + perBar; j++) sum += bins[j] ?? 0;
+        // 0..1, with a floor so idle bars still read as "a bar" not a dot.
+        const level = Math.min(1, sum / perBar / 200);
+        const bar = bars[i];
+        if (bar) bar.style.transform = `scaleY(${0.22 + level * 0.78})`;
+      }
+      waveRafRef.current = requestAnimationFrame(tick);
+    };
+    waveRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const stopWaveform = useCallback(() => {
+    cancelAnimationFrame(waveRafRef.current);
+    analyserRef.current = null;
+    void audioCtxRef.current?.close();
+    audioCtxRef.current = null;
+    for (const bar of waveBarRefs.current) {
+      if (bar) bar.style.transform = "scaleY(0.22)";
     }
+  }, []);
+
+  const releaseMic = useCallback(() => {
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
+  }, []);
+
+  /** Fallback path when SpeechRecognition isn't available: record and send
+   *  the whole clip to the existing transcription endpoint on stop. */
+  const startRecorderDictation = useCallback((stream: MediaStream) => {
+    const rec = new MediaRecorder(stream);
+    chunksRef.current = [];
+    rec.ondataavailable = (e) => e.data.size && chunksRef.current.push(e.data);
+    rec.onstop = () => {
+      stopWaveform();
+      releaseMic();
+      setListening(false);
+      const blob = new Blob(chunksRef.current, {
+        type: rec.mimeType || "audio/webm",
+      });
+      chunksRef.current = [];
+      if (blob.size < 512) return; // essentially silence
+      setTranscribing(true);
+      const form = new FormData();
+      form.append("file", blob, "speech.webm");
+      apiFetch<{ text: string }>("/voice/transcribe", {
+        method: "POST",
+        body: form,
+      })
+        .then(({ text }) => {
+          if (text.trim()) {
+            setValue((v) => (v ? v.replace(/\s+$/, "") + " " : "") + text.trim());
+          }
+        })
+        .catch(() => setVoiceError("Couldn't transcribe that — try again."))
+        .finally(() => setTranscribing(false));
+    };
+    rec.start();
+    mediaRecorderRef.current = rec;
+  }, [releaseMic, stopWaveform]);
+
+  const startSpeechRecognition = useCallback(() => {
     const w = window as unknown as Record<string, unknown>;
     const SR = (w.SpeechRecognition ?? w.webkitSpeechRecognition) as
       | (new () => {
@@ -219,20 +301,59 @@ export function Composer() {
       setInterim(interimText);
     };
     rec.onend = () => {
+      stopWaveform();
+      releaseMic();
       setListening(false);
       setInterim("");
     };
     rec.onerror = () => {
+      stopWaveform();
+      releaseMic();
       setListening(false);
       setInterim("");
     };
     rec.start();
     recRef.current = rec;
-    setListening(true);
-  }, [listening]);
+  }, [releaseMic, stopWaveform]);
+
+  const toggleMic = useCallback(async () => {
+    if (listening) {
+      // Stopping tears everything down from inside each engine's own
+      // onend/onstop (that's also where the transcribe request fires for
+      // the fallback path), so just ask it to stop here.
+      recRef.current?.stop();
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+    setVoiceError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      micStreamRef.current = stream;
+      startWaveform(stream);
+      if (speechSupported) startSpeechRecognition();
+      else startRecorderDictation(stream);
+      setListening(true);
+    } catch {
+      setVoiceError("Microphone access was blocked — allow it and try again.");
+    }
+  }, [listening, speechSupported, startRecorderDictation, startSpeechRecognition, startWaveform]);
 
   // Stop dictation if the composer unmounts mid-recording.
-  useEffect(() => () => recRef.current?.stop(), []);
+  useEffect(
+    () => () => {
+      recRef.current?.stop();
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      stopWaveform();
+      releaseMic();
+    },
+    [releaseMic, stopWaveform],
+  );
 
   // Cycle the idle placeholder every few seconds (skipped once typing).
   useEffect(() => {
@@ -659,19 +780,37 @@ export function Composer() {
 
             {listening && (
               <div className="flex items-center gap-2.5 px-3 pt-1 text-xs text-muted-foreground animate-fade-in">
-                <span className="flex h-3.5 shrink-0 items-center gap-[3px]">
+                {/* Real waveform — each bar's height tracks the mic's live
+                    input level, not a canned animation. */}
+                <span className="flex h-3.5 shrink-0 items-end gap-[3px]">
                   {[0, 1, 2, 3, 4].map((i) => (
                     <span
                       key={i}
-                      className="h-3 w-[3px] animate-wave rounded-full bg-primary"
-                      style={{ animationDelay: `${i * 120}ms` }}
+                      ref={(el) => {
+                        waveBarRefs.current[i] = el;
+                      }}
+                      className="h-3.5 w-[3px] origin-bottom rounded-full bg-primary transition-transform duration-75"
+                      style={{ transform: "scaleY(0.22)" }}
                     />
                   ))}
                 </span>
                 <span className="min-w-0 flex-1 truncate italic">
-                  {interim || "Listening…"}
+                  {speechSupported
+                    ? interim || "Listening…"
+                    : "Listening… tap stop to transcribe"}
                 </span>
               </div>
+            )}
+            {transcribing && !listening && (
+              <div className="flex items-center gap-2 px-3 pt-1 text-xs text-muted-foreground animate-fade-in">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Transcribing…
+              </div>
+            )}
+            {voiceError && (
+              <p className="px-3 pt-1 text-xs text-destructive animate-fade-in">
+                {voiceError}
+              </p>
             )}
 
             <Textarea
@@ -712,37 +851,25 @@ export function Composer() {
                 <Plus />
               </Button>
 
-              {speechSupported && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    "h-9 w-9 shrink-0 rounded-full",
-                    listening
-                      ? "text-destructive"
-                      : "text-muted-foreground",
-                  )}
-                  onClick={toggleMic}
-                  aria-label={listening ? "Stop dictation" : "Dictate"}
-                  title={listening ? "Stop dictation" : "Dictate"}
-                >
-                  {listening ? (
-                    <MicOff className="animate-pulse" />
-                  ) : (
-                    <Mic />
-                  )}
-                </Button>
-              )}
-
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 shrink-0 rounded-full text-muted-foreground"
-                onClick={() => setVoiceOpen(true)}
-                aria-label="Voice conversation"
-                title="Voice conversation - talk to CatGPT hands-free"
+                className={cn(
+                  "h-9 w-9 shrink-0 rounded-full",
+                  listening ? "text-destructive" : "text-muted-foreground",
+                )}
+                onClick={() => void toggleMic()}
+                disabled={transcribing}
+                aria-label={listening ? "Stop dictation" : "Dictate"}
+                title={listening ? "Stop dictation" : "Dictate"}
               >
-                <AudioLines />
+                {transcribing ? (
+                  <Loader2 className="animate-spin" />
+                ) : listening ? (
+                  <Square className="fill-current animate-pulse" />
+                ) : (
+                  <Mic />
+                )}
               </Button>
 
               <DropdownMenu>
@@ -982,7 +1109,6 @@ export function Composer() {
         </div>
       )}
 
-      {voiceOpen && <KillBill onClose={() => setVoiceOpen(false)} />}
     </div>
   );
 }
