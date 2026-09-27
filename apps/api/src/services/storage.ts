@@ -107,7 +107,14 @@ export async function storeImage(input: StoreImageInput): Promise<string> {
     await ensureBucket(client);
     const { error } = await client.storage
       .from(BUCKET)
-      .upload(key, buffer, { contentType: mimeType ?? "image/png" });
+      // key embeds a random suffix per upload — this exact URL never points to
+      // different content, so browsers/CDN can cache it forever instead of the
+      // 1h default (which meant re-downloading every generated image on every
+      // revisit to a chat).
+      .upload(key, buffer, {
+        contentType: mimeType ?? "image/png",
+        cacheControl: "31536000",
+      });
     if (error) throw new Error(`storage upload failed: ${error.message}`);
     const { data } = client.storage
       .from(BUCKET)
