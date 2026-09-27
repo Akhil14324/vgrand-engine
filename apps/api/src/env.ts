@@ -130,7 +130,7 @@ export const env = {
   VOICE_STT_MODEL: parsed.VOICE_STT_MODEL ?? "gpt-4o-mini-transcribe",
   VOICE_TTS_MODEL: parsed.VOICE_TTS_MODEL ?? "gpt-4o-mini-tts",
   VOICE_TTS_VOICE: parsed.VOICE_TTS_VOICE ?? "alloy",
-  CAMPAIGN_IMAGE_QUALITY: parsed.CAMPAIGN_IMAGE_QUALITY ?? "medium",
+  CAMPAIGN_IMAGE_QUALITY: parsed.CAMPAIGN_IMAGE_QUALITY ?? "low",
   EMBEDDING_MODEL: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
   JEV_MODEL: parsed.JEV_MODEL ?? "jev-latest",
   TYPESAFE_BASE_URL: parsed.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai",
@@ -176,6 +176,47 @@ export const env = {
     return Boolean(this.SUPABASE_URL && this.SUPABASE_SERVICE_ROLE_KEY);
   },
 };
+
+/**
+ * Hard environment boundary — a non-production process may only reach local
+ * datastores, and production may never point at localhost. Fail closed at
+ * boot so a pasted prod DATABASE_URL/REDIS_URL (or a prod deploy missing
+ * NODE_ENV=production) can never cross the local/production data boundary.
+ */
+const LOCAL_DATA_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "postgres", // docker-compose service names
+  "redis",
+  "host.docker.internal",
+]);
+
+{
+  const prod = env.NODE_ENV === "production";
+  for (const [name, raw] of [
+    ["DATABASE_URL", env.DATABASE_URL],
+    ["REDIS_URL", parsed.REDIS_URL],
+  ] as const) {
+    if (!raw) continue;
+    let host: string;
+    try {
+      host = new URL(raw).hostname.toLowerCase();
+    } catch {
+      continue; // unparsable URLs fail later at the client that uses them
+    }
+    if (prod && LOCAL_DATA_HOSTS.has(host)) {
+      throw new Error(
+        `${name} points at local host "${host}" — production must use the production datastore.`,
+      );
+    }
+    if (!prod && !LOCAL_DATA_HOSTS.has(host)) {
+      throw new Error(
+        `${name} points at remote host "${host}" — remote/production datastores are refused unless NODE_ENV=production. Use the local docker DB instead.`,
+      );
+    }
+  }
+}
 
 // Every request is authenticated against Supabase — there is no anonymous or
 // shared "dev" identity, so a missing config must stop the boot, not degrade.
