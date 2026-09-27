@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@catgpt/types": "workspace:*",
+    "@napi-rs/canvas": "^1.0.9",
     "openai": "^5.0.0"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
 import OpenAI, { toFile } from "openai";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   GenerateParams,
   GenerateResult,
@@ -241,6 +242,33 @@ function mapImages(
 
 const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+/** Longest edge of a reference/mask sent to the model — input tokens scale
+ *  with resolution, and edits don't benefit from refs larger than the output
+ *  grid (~1024px). Downscaling also shrinks the upload itself. */
+const REF_MAX_EDGE = 1024;
+
+async function downscaleIfNeeded(buf: Buffer): Promise<Buffer> {
+  try {
+    const img = await loadImage(buf);
+    const w = img.width;
+    const h = img.height;
+    const max = Math.max(w, h);
+    if (max <= REF_MAX_EDGE) return buf;
+    const scale = REF_MAX_EDGE / max;
+    const canvas = createCanvas(
+      Math.round(w * scale),
+      Math.round(h * scale),
+    );
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    // PNG keeps alpha — logos/masks depend on transparency.
+    return canvas.encode("png");
+  } catch {
+    // Undecodable or non-raster input — send it through untouched rather
+    // than failing the generation over an optimisation.
+    return buf;
+  }
+}
+
 async function fetchImageFile(url: string): Promise<File> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -249,13 +277,14 @@ async function fetchImageFile(url: string): Promise<File> {
       `failed to fetch reference image (${res.status})`,
     );
   }
-  const buf = Buffer.from(await res.arrayBuffer());
-  const name = url.split("/").pop()?.split("?")[0] || "reference.png";
+  const raw = Buffer.from(await res.arrayBuffer());
+  const buf = await downscaleIfNeeded(raw);
+  let name = url.split("/").pop()?.split("?")[0] || "reference.png";
   // OpenAI rejects octet-stream, so set the type explicitly: prefer the
   // response header when it's an image, else infer from the file extension.
   const headerType = res.headers.get("content-type")?.split(";")[0]?.trim();
   const ext = name.split(".").pop()?.toLowerCase();
-  const type =
+  let type =
     headerType && SUPPORTED_IMAGE_TYPES.has(headerType)
       ? headerType
       : ext === "jpg" || ext === "jpeg"
@@ -263,5 +292,10 @@ async function fetchImageFile(url: string): Promise<File> {
         : ext === "webp"
           ? "image/webp"
           : "image/png";
+  if (buf !== raw) {
+    // Downscaled bytes are PNG — keep name/type honest about the payload.
+    name = name.replace(/\.[^.]+$/, "") + ".png";
+    type = "image/png";
+  }
   return toFile(buf, name, { type });
 }

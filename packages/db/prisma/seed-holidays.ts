@@ -8,8 +8,10 @@ const prisma = new PrismaClient();
  * (upserts on date+name+country, safe to re-run).
  *
  * - "fixed": same calendar date every year, generated for YEARS.
- * - "curated": lunar/moon-dependent dates copied in by hand for one year. These
- *   need re-checking against an official panchang each year; add next year's rows below.
+ * - "curated": lunar/moon-dependent dates copied in by hand per year. Verified
+ *   against national panchang sources and government holiday lists for the
+ *   years present below; extend with the next year's rows before it begins.
+ *   Eid dates remain subject to moon sighting.
  */
 const YEARS = [2026, 2027, 2028];
 
@@ -44,28 +46,74 @@ const nthWeekday = (year: number, month: number, weekday: number, n: number) => 
   return 1 + ((weekday - first + 7) % 7) + (n - 1) * 7;
 };
 
-const CURATED_2026: [string, string, string][] = [
-  ["2026-02-15", "Maha Shivratri", "festival"],
-  ["2026-03-04", "Holi", "festival"],
-  ["2026-03-19", "Ugadi / Gudi Padwa", "festival"],
-  ["2026-03-21", "Eid al-Fitr", "festival"],
-  ["2026-03-26", "Ram Navami", "festival"],
-  ["2026-04-03", "Good Friday", "festival"],
-  ["2026-04-05", "Easter", "festival"],
-  ["2026-05-01", "Buddha Purnima", "festival"],
-  ["2026-05-27", "Eid al-Adha (Bakrid)", "festival"],
-  ["2026-08-26", "Onam", "festival"],
-  ["2026-08-28", "Raksha Bandhan", "festival"],
-  ["2026-09-04", "Janmashtami", "festival"],
-  ["2026-09-14", "Ganesh Chaturthi", "festival"],
-  ["2026-10-11", "Navratri begins", "festival"],
-  ["2026-10-20", "Dussehra", "festival"],
-  ["2026-10-29", "Karwa Chauth", "festival"],
-  ["2026-11-06", "Dhanteras", "festival"],
-  ["2026-11-08", "Diwali", "festival"],
-  ["2026-11-11", "Bhai Dooj", "festival"],
-  ["2026-11-24", "Guru Nanak Jayanti", "festival"],
-];
+const CURATED: Record<number, [string, string, string][]> = {
+  2026: [
+    ["2026-02-15", "Maha Shivratri", "festival"],
+    ["2026-03-04", "Holi", "festival"],
+    ["2026-03-19", "Ugadi / Gudi Padwa", "festival"],
+    ["2026-03-21", "Eid al-Fitr", "festival"],
+    ["2026-03-26", "Ram Navami", "festival"],
+    ["2026-04-03", "Good Friday", "festival"],
+    ["2026-04-05", "Easter", "festival"],
+    ["2026-05-01", "Buddha Purnima", "festival"],
+    ["2026-05-27", "Eid al-Adha (Bakrid)", "festival"],
+    ["2026-08-26", "Onam", "festival"],
+    ["2026-08-28", "Raksha Bandhan", "festival"],
+    ["2026-09-04", "Janmashtami", "festival"],
+    ["2026-09-14", "Ganesh Chaturthi", "festival"],
+    ["2026-10-11", "Navratri begins", "festival"],
+    ["2026-10-20", "Dussehra", "festival"],
+    ["2026-10-29", "Karwa Chauth", "festival"],
+    ["2026-11-06", "Dhanteras", "festival"],
+    ["2026-11-08", "Diwali", "festival"],
+    ["2026-11-11", "Bhai Dooj", "festival"],
+    ["2026-11-24", "Guru Nanak Jayanti", "festival"],
+  ],
+  2027: [
+    ["2027-03-06", "Maha Shivratri", "festival"],
+    ["2027-03-10", "Eid al-Fitr", "festival"],
+    ["2027-03-23", "Holi", "festival"],
+    ["2027-03-26", "Good Friday", "festival"],
+    ["2027-03-28", "Easter", "festival"],
+    ["2027-04-07", "Ugadi / Gudi Padwa", "festival"],
+    ["2027-04-15", "Ram Navami", "festival"],
+    ["2027-05-17", "Eid al-Adha (Bakrid)", "festival"],
+    ["2027-05-20", "Buddha Purnima", "festival"],
+    ["2027-08-17", "Raksha Bandhan", "festival"],
+    ["2027-08-25", "Janmashtami", "festival"],
+    ["2027-09-04", "Ganesh Chaturthi", "festival"],
+    ["2027-09-12", "Onam", "festival"],
+    ["2027-09-30", "Navratri begins", "festival"],
+    ["2027-10-09", "Dussehra", "festival"],
+    ["2027-10-18", "Karwa Chauth", "festival"],
+    ["2027-10-27", "Dhanteras", "festival"],
+    ["2027-10-29", "Diwali", "festival"],
+    ["2027-10-31", "Bhai Dooj", "festival"],
+    ["2027-11-14", "Guru Nanak Jayanti", "festival"],
+  ],
+  2028: [
+    ["2028-02-23", "Maha Shivratri", "festival"],
+    ["2028-02-27", "Eid al-Fitr", "festival"],
+    ["2028-03-11", "Holi", "festival"],
+    ["2028-03-27", "Ugadi / Gudi Padwa", "festival"],
+    ["2028-04-03", "Ram Navami", "festival"],
+    ["2028-04-14", "Good Friday", "festival"],
+    ["2028-04-16", "Easter", "festival"],
+    ["2028-05-05", "Eid al-Adha (Bakrid)", "festival"],
+    ["2028-05-08", "Buddha Purnima", "festival"],
+    ["2028-08-05", "Raksha Bandhan", "festival"],
+    ["2028-08-13", "Janmashtami", "festival"],
+    ["2028-08-23", "Ganesh Chaturthi", "festival"],
+    ["2028-09-01", "Onam", "festival"],
+    ["2028-09-19", "Navratri begins", "festival"],
+    ["2028-09-27", "Dussehra", "festival"],
+    ["2028-10-07", "Karwa Chauth", "festival"],
+    ["2028-10-15", "Dhanteras", "festival"],
+    ["2028-10-17", "Diwali", "festival"],
+    ["2028-10-19", "Bhai Dooj", "festival"],
+    ["2028-11-02", "Guru Nanak Jayanti", "festival"],
+  ],
+};
 
 function build(): Row[] {
   const rows: Row[] = [];
@@ -76,7 +124,8 @@ function build(): Row[] {
     rows.push({ date: iso(6, nthWeekday(y, 6, 0, 3)), name: "Father's Day", country: "ALL", type: "observance", source: "fixed" });
     rows.push({ date: iso(8, nthWeekday(y, 8, 0, 1)), name: "Friendship Day", country: "ALL", type: "observance", source: "fixed" });
   }
-  for (const [date, name, type] of CURATED_2026) rows.push({ date, name, country: "IN", type, source: "curated-2026" });
+  for (const [year, curated] of Object.entries(CURATED))
+    for (const [date, name, type] of curated) rows.push({ date, name, country: "IN", type, source: `curated-${year}` });
   return rows;
 }
 

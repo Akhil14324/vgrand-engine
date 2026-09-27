@@ -375,20 +375,34 @@ interface FormState {
   description: string;
   location: string;
   stage: string;
+  vision: string;
+  mission: string;
+  values: string;
+  brandPersonality: string;
   offer: string;
   avgPrice: string;
   avgCost: string;
   customers: string;
   painPoints: string;
+  customerPerception: string;
   differentiator: string;
+  strengths: string;
+  weaknesses: string;
+  competitiveAdvantage: string;
   channels: string[];
   monthlyOrders: string;
   monthlyRevenue: string;
   goalRevenue: string;
   goalDays: string;
   monthlyBudget: string;
+  businessGoals: string;
+  marketingGoals: string;
+  aspirations: string;
   problems: string;
+  opportunities: string;
+  avoidances: string;
   competitors: string;
+  notes: string;
   colors: string[];
   tagline: string;
   tone: string;
@@ -432,20 +446,34 @@ function toForm(b: BrandDto): FormState {
     description: p.description ?? "",
     location: p.location ?? "",
     stage: p.stage ?? "",
+    vision: p.vision ?? "",
+    mission: p.mission ?? "",
+    values: p.values ?? "",
+    brandPersonality: p.brandPersonality ?? "",
     offer: p.offer ?? "",
     avgPrice: n2s(p.avgPrice),
     avgCost: n2s(p.avgCost),
     customers: p.customers ?? "",
     painPoints: p.painPoints ?? "",
+    customerPerception: p.customerPerception ?? "",
     differentiator: p.differentiator ?? "",
+    strengths: p.strengths ?? "",
+    weaknesses: p.weaknesses ?? "",
+    competitiveAdvantage: p.competitiveAdvantage ?? "",
     channels: p.channels ?? [],
     monthlyOrders: n2s(p.monthlyOrders),
     monthlyRevenue: n2s(p.monthlyRevenue),
     goalRevenue: n2s(p.goalRevenue),
     goalDays: n2s(p.goalDays),
     monthlyBudget: n2s(p.monthlyBudget),
+    businessGoals: p.businessGoals ?? "",
+    marketingGoals: p.marketingGoals ?? "",
+    aspirations: p.aspirations ?? "",
     problems: p.problems ?? "",
+    opportunities: p.opportunities ?? "",
+    avoidances: p.avoidances ?? "",
     competitors: p.competitors ?? "",
+    notes: p.notes ?? "",
     colors: p.colors ?? [],
     tagline: p.tagline ?? "",
     tone: p.tone ?? "",
@@ -468,20 +496,34 @@ function toProfile(f: FormState): BrandProfile {
     description: str(f.description),
     location: str(f.location),
     stage: str(f.stage),
+    vision: str(f.vision),
+    mission: str(f.mission),
+    values: str(f.values),
+    brandPersonality: str(f.brandPersonality),
     offer: str(f.offer),
     avgPrice: s2n(f.avgPrice),
     avgCost: s2n(f.avgCost),
     customers: str(f.customers),
     painPoints: str(f.painPoints),
+    customerPerception: str(f.customerPerception),
     differentiator: str(f.differentiator),
+    strengths: str(f.strengths),
+    weaknesses: str(f.weaknesses),
+    competitiveAdvantage: str(f.competitiveAdvantage),
     channels: f.channels.length ? f.channels : undefined,
     monthlyOrders: s2n(f.monthlyOrders),
     monthlyRevenue: s2n(f.monthlyRevenue),
     goalRevenue: s2n(f.goalRevenue),
     goalDays: goalDays !== undefined ? Math.max(1, Math.round(goalDays)) : undefined,
     monthlyBudget: s2n(f.monthlyBudget),
+    businessGoals: str(f.businessGoals),
+    marketingGoals: str(f.marketingGoals),
+    aspirations: str(f.aspirations),
     problems: str(f.problems),
+    opportunities: str(f.opportunities),
+    avoidances: str(f.avoidances),
     competitors: str(f.competitors),
+    notes: str(f.notes),
     colors: f.colors.length ? f.colors : undefined,
     tagline: str(f.tagline),
     tone: str(f.tone),
@@ -647,6 +689,46 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
         </Q>
       </Section>
 
+      <Section
+        title="What you stand for"
+        hint="The identity behind the products — every campaign and caption is written to sound like this."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Q label="Mission — why does the brand exist?">
+            <Textarea
+              rows={2}
+              value={form.mission}
+              onChange={(e) => set("mission", e.target.value.slice(0, 500))}
+              placeholder="e.g. To make honest, preservative-free food affordable for every family."
+            />
+          </Q>
+          <Q label="Vision — where is it going?">
+            <Textarea
+              rows={2}
+              value={form.vision}
+              onChange={(e) => set("vision", e.target.value.slice(0, 500))}
+              placeholder="e.g. Become the most trusted homemade food brand in the state."
+            />
+          </Q>
+          <Q label="Core values">
+            <Textarea
+              rows={2}
+              value={form.values}
+              onChange={(e) => set("values", e.target.value.slice(0, 600))}
+              placeholder="e.g. Honesty, quality over shortcuts, respect for tradition."
+            />
+          </Q>
+          <Q label="Brand personality — if it were a person?">
+            <Textarea
+              rows={2}
+              value={form.brandPersonality}
+              onChange={(e) => set("brandPersonality", e.target.value.slice(0, 600))}
+              placeholder="e.g. A confident elder sister — warm, straightforward, never pushy."
+            />
+          </Q>
+        </div>
+      </Section>
+
       <Section title="What you sell">
         <Q label="Your main products or services">
           <Textarea rows={2} value={form.offer} onChange={(e) => set("offer", e.target.value.slice(0, 800))} />
@@ -668,8 +750,45 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
         <Q label="What problem do you solve for them?">
           <Textarea rows={2} value={form.painPoints} onChange={(e) => set("painPoints", e.target.value.slice(0, 800))} />
         </Q>
-        <Q label="Why do they choose you over others?">
+        <Q label="Why do they choose you over others? (USP)">
           <Textarea rows={2} value={form.differentiator} onChange={(e) => set("differentiator", e.target.value.slice(0, 800))} />
+        </Q>
+        <Q label="How do customers currently see you?">
+          <Textarea
+            rows={2}
+            value={form.customerPerception}
+            onChange={(e) => set("customerPerception", e.target.value.slice(0, 500))}
+            placeholder="e.g. They trust our quality but think we're slightly expensive; many find us through word of mouth."
+          />
+        </Q>
+      </Section>
+
+      <Section title="Strengths and weaknesses">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Q label="Brand strengths — what are you genuinely good at?">
+            <Textarea
+              rows={3}
+              value={form.strengths}
+              onChange={(e) => set("strengths", e.target.value.slice(0, 800))}
+              placeholder="e.g. Authentic recipes, loyal repeat customers, fast local delivery."
+            />
+          </Q>
+          <Q label="Brand weaknesses — where do you fall short?">
+            <Textarea
+              rows={3}
+              value={form.weaknesses}
+              onChange={(e) => set("weaknesses", e.target.value.slice(0, 800))}
+              placeholder="e.g. Small team, inconsistent posting, packaging could look more premium."
+            />
+          </Q>
+        </div>
+        <Q label="Competitive advantage — the one thing rivals can't easily copy?">
+          <Textarea
+            rows={2}
+            value={form.competitiveAdvantage}
+            onChange={(e) => set("competitiveAdvantage", e.target.value.slice(0, 600))}
+            placeholder="e.g. Grandmother's original recipe — no competitor has it."
+          />
         </Q>
       </Section>
 
@@ -705,6 +824,32 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
             <Input inputMode="decimal" value={form.monthlyBudget} onChange={(e) => set("monthlyBudget", e.target.value)} />
           </Q>
         </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Q label="Business goals — in your own words">
+            <Textarea
+              rows={2}
+              value={form.businessGoals}
+              onChange={(e) => set("businessGoals", e.target.value.slice(0, 800))}
+              placeholder="e.g. Open a second kitchen, get 50 subscription customers, enter 2 marketplaces."
+            />
+          </Q>
+          <Q label="Marketing goals">
+            <Textarea
+              rows={2}
+              value={form.marketingGoals}
+              onChange={(e) => set("marketingGoals", e.target.value.slice(0, 800))}
+              placeholder="e.g. Grow Instagram to 10k, 30% of orders from repeat customers, WhatsApp list of 500."
+            />
+          </Q>
+        </div>
+        <Q label="Ultimately, what do you want this brand to achieve?">
+          <Textarea
+            rows={2}
+            value={form.aspirations}
+            onChange={(e) => set("aspirations", e.target.value.slice(0, 600))}
+            placeholder="e.g. A name every household in the city knows; a business my kids can inherit."
+          />
+        </Q>
       </Section>
 
       <Section title="What is holding sales back?">
@@ -719,6 +864,36 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
         <Q label="Main competitors">
           <Textarea rows={2} value={form.competitors} onChange={(e) => set("competitors", e.target.value.slice(0, 600))} />
         </Q>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Q label="Opportunities you see">
+            <Textarea
+              rows={2}
+              value={form.opportunities}
+              onChange={(e) => set("opportunities", e.target.value.slice(0, 600))}
+              placeholder="e.g. Festive gifting, corporate bulk orders, nobody local does same-day delivery."
+            />
+          </Q>
+          <Q label="What should the brand never do or say?">
+            <Textarea
+              rows={2}
+              value={form.avoidances}
+              onChange={(e) => set("avoidances", e.target.value.slice(0, 500))}
+              placeholder="e.g. Never discount heavily, never use aggressive sales tone, no health claims."
+            />
+          </Q>
+        </div>
+      </Section>
+
+      <Section
+        title="In your own words"
+        hint="Anything else that helps us understand the brand — your story, opinions about the market, expectations, pet peeves. We read all of it before generating."
+      >
+        <Textarea
+          rows={4}
+          value={form.notes}
+          onChange={(e) => set("notes", e.target.value.slice(0, 2000))}
+          placeholder="e.g. I started this after my mother's pickles became famous at family events. I care more about reputation than fast growth. Customers often tell me the packaging reminds them of home…"
+        />
       </Section>
 
       <Section title="Look and voice">

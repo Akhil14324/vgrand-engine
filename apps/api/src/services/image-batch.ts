@@ -99,6 +99,7 @@ export async function spawnImageBatch(params: {
         (brand.profile ?? {}) as BrandProfile,
         brand.assets.some((a) => a.kind === "logo"),
         brand.mascot,
+        brand.assets.some((a) => a.kind === "product"),
       )
     : "";
 

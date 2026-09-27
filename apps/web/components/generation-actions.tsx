@@ -8,6 +8,7 @@ import {
   FileDown,
   Link2,
   Loader2,
+  Pencil,
   RefreshCw,
   Trash2,
   UserCheck,
@@ -29,6 +30,7 @@ import {
   useGenerationApprovals,
   useExportPdf,
   useRevokeApprovalLink,
+  useCreateGeneration,
   useRegenerate,
   useShareGeneration,
 } from "@/lib/hooks";
@@ -44,7 +46,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { CalendarApproveButton, SocialShareButton } from "@/components/social-share";
@@ -423,7 +424,7 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
   // on every composer interaction.
   const select = useStudio((s) => s.select);
   const [busy, setBusy] = useState(false);
-  const [tool, setTool] = useState<"inpaint" | "outpaint" | null>(null);
+  const [tool, setTool] = useState<"describe" | "inpaint" | "outpaint" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const url = generation.imageUrls[0]!;
 
@@ -454,6 +455,10 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
         </Tooltip>
         <DropdownMenuContent align="start">
           <DropdownMenuLabel>AI edit suite</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => setTool("describe")}>
+            Describe edit…
+            <span className="ml-auto pl-3 text-[10px] text-muted-foreground">prompt</span>
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setTool("inpaint")}>
             Edit selected area…
             <span className="ml-auto pl-3 text-[10px] text-muted-foreground">mask</span>
@@ -535,6 +540,11 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <DescribeEditDialog
+        generation={generation}
+        open={tool === "describe"}
+        onOpenChange={(open) => setTool(open ? "describe" : null)}
+      />
       <InpaintDialog
         generation={generation}
         open={tool === "inpaint"}
@@ -550,22 +560,58 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
   );
 }
 
-export function RegenerateButton({ generation }: { generation: GenerationDto }) {
+function DescribeEditDialog({
+  generation,
+  open,
+  onOpenChange,
+}: {
+  generation: GenerationDto;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const regenerate = useRegenerate();
+  const createGen = useCreateGeneration();
   // Selector, not the whole store: this renders per-turn, so subscribing to
   // every unrelated field (sidebar, quality, theme, ...) would re-render it
   // on every composer interaction.
   const select = useStudio((s) => s.select);
-  const [open, setOpen] = useState(false);
-  const [prompt, setPrompt] = useState(generation.prompt);
+  const [mode, setMode] = useState<"edit" | "recreate">("edit");
+  const [editText, setEditText] = useState("");
+  const [recreateText, setRecreateText] = useState(generation.prompt);
   const [quality, setQuality] = useState<Quality>("medium");
+  const busy = regenerate.isPending || createGen.isPending;
+  const error = regenerate.error ?? createGen.error;
 
-  const run = () => {
-    regenerate.mutate(
-      { id: generation.id, prompt: prompt.trim() || undefined, quality },
+  const submit = () => {
+    if (mode === "edit") {
+      const prompt = editText.trim();
+      if (!prompt) return;
+      regenerate.mutate(
+        { id: generation.id, prompt, operation: "edit", quality },
+        {
+          onSuccess: (res) => {
+            onOpenChange(false);
+            select(res.generationId);
+          },
+        },
+      );
+      return;
+    }
+    const metaBrandId =
+      typeof generation.metadata?.brandId === "string"
+        ? generation.metadata.brandId
+        : undefined;
+    createGen.mutate(
+      {
+        prompt: recreateText.trim() || generation.prompt,
+        conversationId: generation.conversationId ?? undefined,
+        brandId: metaBrandId,
+        recreate: true,
+        quality,
+      },
       {
         onSuccess: (res) => {
-          setOpen(false);
+          onOpenChange(false);
           select(res.generationId);
         },
       },
@@ -573,30 +619,50 @@ export function RegenerateButton({ generation }: { generation: GenerationDto }) 
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Regenerate">
-              <RefreshCw />
-            </Button>
-          </DialogTrigger>
-        </TooltipTrigger>
-        <TooltipContent>Edit & regenerate</TooltipContent>
-      </Tooltip>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit & regenerate</DialogTitle>
+          <DialogTitle>Describe edit</DialogTitle>
           <DialogDescription>
-            Keeps the current image intact and changes only what you
-            describe.
+            {mode === "edit"
+              ? "Change only what you describe - the rest of the image stays exactly the same."
+              : "Start over with a brand-new image - the original is left untouched."}
           </DialogDescription>
         </DialogHeader>
+        <div className="flex gap-1">
+          {(
+            [
+              ["edit", "Edit this image"],
+              ["recreate", "Recreate completely"],
+            ] as const
+          ).map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={cn(
+                "rounded-md border px-3 py-1.5 text-xs transition-colors",
+                mode === m
+                  ? "border-primary/60 bg-primary/15 text-primary"
+                  : "border-border text-muted-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <Textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          value={mode === "edit" ? editText : recreateText}
+          onChange={(e) =>
+            mode === "edit"
+              ? setEditText(e.target.value)
+              : setRecreateText(e.target.value)
+          }
           className="min-h-[100px]"
-          placeholder="e.g. same layout, but change the offer to 30% off"
+          placeholder={
+            mode === "edit"
+              ? "Describe only the change - e.g. change the offer text to 30% off"
+              : "Describe the new image from scratch"
+          }
         />
         <div className="flex items-center justify-between">
           <div className="flex gap-1">
@@ -615,20 +681,49 @@ export function RegenerateButton({ generation }: { generation: GenerationDto }) 
               </button>
             ))}
           </div>
-          <Button onClick={run} disabled={regenerate.isPending}>
-            {regenerate.isPending ? (
+          <Button
+            onClick={submit}
+            disabled={busy || (mode === "edit" && !editText.trim())}
+          >
+            {busy ? (
               <Loader2 className="animate-spin" />
+            ) : mode === "edit" ? (
+              <Wand2 />
             ) : (
               <RefreshCw />
             )}
-            Regenerate
+            {mode === "edit" ? "Apply edit" : "Recreate"}
           </Button>
         </div>
-        {regenerate.isError && (
-          <p className="text-xs text-destructive">{regenerate.error.message}</p>
-        )}
+        {error && <p className="text-xs text-destructive">{error.message}</p>}
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function DescribeEditButton({ generation }: { generation: GenerationDto }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Describe edit"
+            onClick={() => setOpen(true)}
+          >
+            <Pencil />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Describe edit</TooltipContent>
+      </Tooltip>
+      <DescribeEditDialog
+        generation={generation}
+        open={open}
+        onOpenChange={setOpen}
+      />
+    </>
   );
 }
 
@@ -1062,7 +1157,7 @@ export function ActionRow({
           <TooltipContent>Download</TooltipContent>
         </Tooltip>
       )}
-      {ready && <RegenerateButton generation={generation} />}
+      {ready && <DescribeEditButton generation={generation} />}
       {ready && <ApplyBrandKitButton generation={generation} />}
       {ready && <ComplianceCheckButton generation={generation} />}
       {ready && <CalendarApproveButton generation={generation} />}

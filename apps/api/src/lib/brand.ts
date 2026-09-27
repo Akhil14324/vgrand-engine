@@ -137,6 +137,10 @@ export function buildBrandSummary(
   add("What it does", clip(profile.description, 240));
   add("Market/location", clip(profile.location, 80));
   add("Stage", clip(profile.stage, 60));
+  add("Vision", clip(profile.vision, 200));
+  add("Mission", clip(profile.mission, 200));
+  add("Values", clip(profile.values, 200));
+  add("Brand personality", clip(profile.brandPersonality, 200));
   add("Offer", clip(profile.offer, 240));
   if (profile.avgPrice !== undefined) {
     add(
@@ -152,7 +156,11 @@ export function buildBrandSummary(
   }
   add("Customers", clip(profile.customers, 200));
   add("Customer pain points", clip(profile.painPoints, 200));
-  add("Differentiator", clip(profile.differentiator, 200));
+  add("How customers see us", clip(profile.customerPerception, 200));
+  add("Differentiator (USP)", clip(profile.differentiator, 200));
+  add("Edge over competitors", clip(profile.competitiveAdvantage, 200));
+  add("Brand strengths", clip(profile.strengths, 240));
+  add("Brand weaknesses", clip(profile.weaknesses, 240));
   add("Sells/promotes via", profile.channels?.length ? profile.channels.join(", ") : null);
   if (profile.monthlyOrders !== undefined || profile.monthlyRevenue !== undefined) {
     add(
@@ -167,7 +175,12 @@ export function buildBrandSummary(
     );
   }
   add("Marketing budget", profile.monthlyBudget !== undefined ? `${num(profile.monthlyBudget)}/month` : null);
+  add("Business goals", clip(profile.businessGoals, 240));
+  add("Marketing goals", clip(profile.marketingGoals, 240));
+  add("Aims to achieve", clip(profile.aspirations, 200));
   add("Biggest problems", clip(profile.problems, 240));
+  add("Opportunities", clip(profile.opportunities, 200));
+  add("Wants to avoid", clip(profile.avoidances, 200));
   add("Competitors", clip(profile.competitors, 160));
   add("Brand colours", profile.colors?.length ? profile.colors.join(", ") : null);
   add("Tagline", clip(profile.tagline, 120));
@@ -193,6 +206,7 @@ export function buildBrandSummary(
     "Content languages",
     profile.contentLanguages?.length ? profile.contentLanguages.join(", ") : null,
   );
+  add("Founder's notes", clip(profile.notes, 400));
   return lines.join("\n");
 }
 
@@ -268,7 +282,7 @@ export async function loadBrandContext(brandId: string, userId?: string) {
   return brand;
 }
 
-/** Logo first, then mascot, products, references - capped so references stay light. */
+/** Logo first, then the brand's own product photos, mascot, references — capped so references stay light. Products outrank the mascot: the real product must reach the model before a decorative character does. */
 export function brandReferenceUrls(
   assets: { kind: string; url: string }[],
   mascotUrl?: string | null,
@@ -282,8 +296,8 @@ export function brandReferenceUrls(
   return [
     ...new Set([
       ...logos.slice(0, 1).map((a) => a.url),
-      ...mascotUrls,
       ...products.map((a) => a.url),
+      ...mascotUrls,
       ...references.map((a) => a.url),
     ]),
   ].slice(0, MAX_BRAND_REFERENCES);
@@ -295,6 +309,7 @@ export function brandImageGuidance(
   profile: BrandProfile,
   hasLogo: boolean,
   mascot?: { name: string; description: string; status: string } | null,
+  hasProducts?: boolean,
 ): string {
   const parts = [`\nBrand: ${name}. Keep the creative on-brand.`];
   if (profile.overlayDefault && profile.logoPlacement) {
@@ -333,5 +348,13 @@ export function brandImageGuidance(
       "The logo reference image is the brand logo - reproduce it faithfully where a logo belongs, without altering it.",
     );
   }
+  if (hasProducts) {
+    parts.push(
+      "Product-photo references are this brand's real products - show the actual product faithfully (shape, colours, packaging, labels); never substitute a generic look-alike.",
+    );
+  }
+  parts.push(
+    "The image must have a clear marketing job tied to this brand's offer and audience - a merely attractive but purposeless image is a failure.",
+  );
   return parts.join(" ");
 }

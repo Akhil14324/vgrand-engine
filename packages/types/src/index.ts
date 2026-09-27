@@ -291,6 +291,11 @@ export const createGenerationSchema = z.object({
   /** Answer/create as this brand (brand mode). Omit for a common answer. */
   brandId: z.string().uuid().optional(),
   parentId: z.string().uuid().optional(),
+  /**
+   * Explicit "start over": skips the follow-up edit auto-attach so a prompt
+   * sent right after an image becomes a fresh draft, not an edit of it.
+   */
+  recreate: z.boolean().optional(),
 });
 export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;
 
@@ -449,11 +454,21 @@ export const brandProfileSchema = z.object({
   description: z.string().max(1200).optional(),
   location: z.string().max(200).optional(),
   stage: z.string().max(100).optional(),
+  /* Brand identity — what the brand stands for. */
+  vision: z.string().max(500).optional(),
+  mission: z.string().max(500).optional(),
+  values: z.string().max(600).optional(),
+  brandPersonality: z.string().max(600).optional(),
+  /* Position — why it wins. */
+  strengths: z.string().max(800).optional(),
+  weaknesses: z.string().max(800).optional(),
+  competitiveAdvantage: z.string().max(600).optional(),
   offer: z.string().max(800).optional(),
   avgPrice: z.number().nonnegative().optional(),
   avgCost: z.number().nonnegative().optional(),
   customers: z.string().max(800).optional(),
   painPoints: z.string().max(800).optional(),
+  customerPerception: z.string().max(500).optional(),
   differentiator: z.string().max(800).optional(),
   channels: z.array(z.string().max(40)).max(12).optional(),
   monthlyOrders: z.number().nonnegative().optional(),
@@ -461,8 +476,16 @@ export const brandProfileSchema = z.object({
   goalRevenue: z.number().nonnegative().optional(),
   goalDays: z.number().int().positive().max(365).optional(),
   monthlyBudget: z.number().nonnegative().optional(),
+  /* Direction — where the brand is headed. */
+  businessGoals: z.string().max(800).optional(),
+  marketingGoals: z.string().max(800).optional(),
+  aspirations: z.string().max(600).optional(),
   problems: z.string().max(1000).optional(),
+  opportunities: z.string().max(600).optional(),
+  avoidances: z.string().max(500).optional(),
   competitors: z.string().max(600).optional(),
+  /** Catch-all: founder's own words — story, opinions, expectations. */
+  notes: z.string().max(2000).optional(),
   colors: z.array(hexColor).max(6).optional(),
   tagline: z.string().max(160).optional(),
   tone: z.string().max(300).optional(),

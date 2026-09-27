@@ -293,6 +293,7 @@ export async function brandRoutes(app: FastifyInstance) {
             profile,
             brand.assets.some((a) => a.kind === "logo"),
             brand.mascot,
+            brand.assets.some((a) => a.kind === "product"),
           ),
         provider: resolveProvider(null),
         metadata: {

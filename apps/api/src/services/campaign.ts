@@ -97,7 +97,7 @@ where N is the number of image creatives to generate: ${MAX_CREATIVES} after a f
 
 const CREATIVE_SYSTEM = `You write image-generation prompts for sales advertising creatives. Return JSON only: {"creatives":[{"title":"...","prompt":"..."}]}.
 
-Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (vertical 4:5 Instagram feed post unless the conversation specifies another platform or aspect ratio), bright, clean, balanced lighting with even exposure, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly, every word letter-perfect. Hard rule on readability: the whole background stays light and clean (white, cream, pastel or bright daylight scene); NEVER place a dark panel, black gradient, smoke, vignette or scrim behind text, and every word must sit on a light, uncluttered area with strong contrast. No dark overlays, muddy color casts, underexposure or heavy shadows anywhere unless the user explicitly asks for a dark or dramatic look. Use the same language as the user's campaign request for on-image copy; use natural Telugu for Telugu prompts unless another language is requested. Do not put social-media captions or hashtags on the image; captions and hashtags are delivered separately as text. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. When more than one creative is requested, each one MUST come from a different day/moment of the campaign's posting calendar and MUST NOT repeat another creative's headline, on-image text or theme - never describe the same day, event or announcement twice. "title" is a short label (max 6 words).
+Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (vertical 4:5 Instagram feed post unless the conversation specifies another platform or aspect ratio), bright, clean, balanced lighting with even exposure, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly, every word letter-perfect. Hard rule on readability: the whole background stays light and clean (white, cream, pastel or bright daylight scene); NEVER place a dark panel, black gradient, smoke, vignette or scrim behind text, and every word must sit on a light, uncluttered area with strong contrast. No dark overlays, muddy color casts, underexposure or heavy shadows anywhere unless the user explicitly asks for a dark or dramatic look. Every creative must have one specific marketing job tied to the campaign objective (announce the offer, sell the product, create urgency, answer an objection, build trust) - decide the job first, then design the visual around it; a merely attractive image with no clear message is a failure. Use the same language as the user's campaign request for on-image copy; use natural Telugu for Telugu prompts unless another language is requested. Do not put social-media captions or hashtags on the image; captions and hashtags are delivered separately as text. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. When more than one creative is requested, each one MUST come from a different day/moment of the campaign's posting calendar and MUST NOT repeat another creative's headline, on-image text or theme - never describe the same day, event or announcement twice. "title" is a short label (max 6 words).
 
 Never depict real people or public figures — politicians, celebrities, historical leaders. Image providers refuse their likenesses, so the creative would fail. For occasions tied to a person (birth anniversaries, memorial days, founder tributes), use symbolic imagery instead: their iconic objects, signature colours, a famous quote as text, or the event's symbols. If a brand mascot or character appears in a brief, render it as a small supporting cameo or accent — never the focal subject; the product and offer lead the composition.`;
 
@@ -132,7 +132,10 @@ export function parseCampaignDateRange(
   prompt: string,
   now = new Date(),
 ): string[] | null {
-  if (!/(calendar|festival|observance|occasion|holiday|panchang|indian\s+(?:calendar|festival|holiday)|(?:calendar|festival).{0,20}india|భారతీయ క్యాలెండర్|భారత క్యాలెండర్|పండుగ|పండుగలు)/i.test(prompt)) {
+  // Gate is deliberately broad (any dated posting/content ask), while the
+  // range/duration patterns below decide precision - a multi-day schedule
+  // request should check the real calendar even without the word "calendar".
+  if (!/(calendar|festival|observance|occasion|holiday|panchang|posts?|content|schedule|posting|days?|weeks?|indian\s+(?:calendar|festival|holiday)|(?:calendar|festival).{0,20}india|భారతీయ క్యాలెండర్|భారత క్యాలెండర్|పండుగ|పండుగలు)/i.test(prompt)) {
     return null;
   }
   const explicit = prompt.match(/\b(20\d{2}-\d{2}-\d{2})\s+(?:to|through|until|–|-)\s*(20\d{2}-\d{2}-\d{2})\b/i);
@@ -174,6 +177,28 @@ export async function researchCalendarEvents(
   let sources: { title: string; url: string }[] = [];
   let days: CampaignCalendarPlan["days"] = emptyDays;
   let verified = false;
+
+  // The seeded Holiday table is the deterministic half of the check: fixed
+  // dates and hand-verified festival dates already known for India. These are
+  // offered to the evaluator as authoritative candidates alongside whatever
+  // live search finds, and they keep the calendar honest if search is down.
+  const dbRows = await prisma.holiday
+    .findMany({
+      where: {
+        date: { in: dates.map((d) => new Date(`${d}T00:00:00Z`)) },
+        country: { in: ["IN", "ALL"] },
+      },
+      select: { date: true, name: true, region: true, type: true },
+      orderBy: { date: "asc" },
+    })
+    .catch(() => [] as { date: Date; name: string; region: string | null; type: string }[]);
+  const dbCandidates = dbRows
+    .map(
+      (r) =>
+        `${r.date.toISOString().slice(0, 10)}: ${r.name} (${r.type}${r.region ? `, region: ${r.region}` : ""})`,
+    )
+    .join("\n");
+
   try {
     const search = await streamChatWithSearch(
       `Find verified Indian calendar events falling on these exact dates: ${dates.join(", ")}. Include national days and observances, major festivals, and regional occasions only where relevant to the stated location/audience; include Telugu occasions when the brand location or audience indicates Telugu-speaking. Return a concise date-by-date candidate list, with region and source names. Do not invent events or move lunar-calendar dates. If none are found for a date, say none found.\n\nBusiness and campaign context:\n${context.slice(0, 6000)}`,
@@ -186,38 +211,47 @@ export async function researchCalendarEvents(
     );
     researchNotes = search.text.slice(0, 5000);
     sources = search.sources;
-    const assessment = await getClient().chat.completions.create({
-      model: env.CAMPAIGN_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `You are a calendar-event relevance evaluator. Use only candidate events in the supplied research; never add or infer an event. For every supplied date, select at most one event only if it is directly relevant to the business, audience, location, or campaign. Otherwise return null. Output JSON only with this shape and exactly one entry per requested date: {"days":[{"date":"YYYY-MM-DD","relevantEvent":null,"reason":null}]}.`,
-        },
-        {
-          role: "user",
-          content: `Business and campaign context:\n${context.slice(0, 6000)}\n\nRequested dates:\n${dates.join(", ")}\n\nCalendar search results:\n${researchNotes}`,
-        },
-      ],
-    });
-    const parsed = JSON.parse(assessment.choices[0]?.message.content ?? "{}") as {
-      days?: { date?: string; relevantEvent?: string | null; reason?: string | null }[];
-    };
-    const byDate = new Map((parsed.days ?? []).map((day) => [day.date, day]));
-    if (dates.every((date) => byDate.has(date))) {
-      days = dates.map((date) => {
-        const item = byDate.get(date)!;
-        return {
-          date,
-          relevantEvent: item.relevantEvent?.trim() || null,
-          reason: item.reason?.trim() || null,
-        };
-      });
-      verified = true;
-    }
   } catch {
-    researchNotes = researchNotes || "Live Indian calendar lookup or event assessment was unavailable.";
+    researchNotes = "Live Indian calendar lookup was unavailable; only the curated holiday calendar was used.";
+  }
+
+  // Never ask the evaluator to work from nothing — an empty input would
+  // invite it to invent occasions.
+  if (researchNotes.trim() || dbCandidates) {
+    try {
+      const assessment = await getClient().chat.completions.create({
+        model: env.CAMPAIGN_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `You are a calendar-event relevance evaluator. Use only candidate events in the supplied curated calendar rows or live research; never add or infer an event. For every supplied date, select at most one event only if it is directly relevant to the business, audience, location, or campaign. Otherwise return null. Output JSON only with this shape and exactly one entry per requested date: {"days":[{"date":"YYYY-MM-DD","relevantEvent":null,"reason":null}]}.`,
+          },
+          {
+            role: "user",
+            content: `Business and campaign context:\n${context.slice(0, 6000)}\n\nRequested dates:\n${dates.join(", ")}\n\nCurated holiday-calendar rows (authoritative — already verified, may be used directly):\n${dbCandidates || "none for these dates"}\n\nCalendar search results:\n${researchNotes || "unavailable"}`,
+          },
+        ],
+      });
+      const parsed = JSON.parse(assessment.choices[0]?.message.content ?? "{}") as {
+        days?: { date?: string; relevantEvent?: string | null; reason?: string | null }[];
+      };
+      const byDate = new Map((parsed.days ?? []).map((day) => [day.date, day]));
+      if (dates.every((date) => byDate.has(date))) {
+        days = dates.map((date) => {
+          const item = byDate.get(date)!;
+          return {
+            date,
+            relevantEvent: item.relevantEvent?.trim() || null,
+            reason: item.reason?.trim() || null,
+          };
+        });
+        verified = true;
+      }
+    } catch {
+      researchNotes += "\nPer-date relevance assessment was unavailable.";
+    }
   }
   return { dates, days, sources, researchNotes, verified };
 }
@@ -561,6 +595,7 @@ export async function spawnCreatives(params: {
         (brand.profile ?? {}) as BrandProfile,
         brand.assets.some((a) => a.kind === "logo"),
         brand.mascot,
+        brand.assets.some((a) => a.kind === "product"),
       )
     : "";
   const usage = await getImageUsage(userId);

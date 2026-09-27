@@ -21,6 +21,16 @@ export const DEFAULT_PROMPT_TEMPLATE = `Create a high-quality, polished image ba
 export const CAMPAIGN_CREATIVE_STYLE =
   "\nHard style rules: bright, even lighting and a light, clean background; no dark panels, gradients, smoke, vignettes or scrims anywhere; every on-image word sits on a light, uncluttered area with strong contrast and is spelled exactly as written.";
 
+/**
+ * Wraps a described change to an already-generated image. The reference image
+ * is the base to modify — unlike the creation template, nothing here invites
+ * the model to re-compose, so everything the request doesn't mention survives
+ * untouched. A complete redesign should be a fresh generation, not an edit.
+ */
+export function buildEditPrompt(prompt: string): string {
+  return `Edit the provided image. Apply only this change: ${prompt.trim()}\nKeep everything else exactly as it is - subject, composition, colours, lighting, background, text and overall style. Do not redraw, replace, restyle or re-imagine any element the request does not mention; output the same image with only that change applied.`;
+}
+
 export function buildFinalPrompt(
   theme: Pick<Theme, "promptTemplate" | "styleGuide"> | null,
   prompt: string,

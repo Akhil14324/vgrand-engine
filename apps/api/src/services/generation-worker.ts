@@ -28,6 +28,7 @@ import { storeImage } from "./storage.js";
 import { composeBrandKit, loadAutoStampKit } from "./brand-compose.js";
 import { startRetentionScheduler } from "./workspace-privacy.js";
 import {
+  getClient,
   loadChatHistory,
   runWithCodeInterpreter,
   streamChat,
@@ -75,11 +76,49 @@ interface GenerationMetadata {
   workerAttempts?: number;
   /** A ready-made carousel set: how many images to generate for this one prompt. */
   imageCount?: number;
+  /** Verified per-date occasions resolved at request time for calendar asks. */
+  calendarNote?: string;
   [key: string]: unknown;
 }
 
 /** Thrown mid-stream when the user hit Stop (row flipped to "cancelled"). */
 class GenerationCancelled extends Error {}
+
+/**
+ * One cheap chat call that answers "why did I just pay for this image?" —
+ * a 1–2 sentence note on the concrete use it serves and the business effect
+ * it drives. Runs on every image turn; failure must never fail the job, so
+ * callers wrap it. ~150 output tokens ≈ a fraction of a cent against the
+ * image cost itself.
+ */
+async function describeImageValue(opts: {
+  prompt: string;
+  themeSlug: string | null;
+  mode: "draft" | "edit";
+  brandSummary: string | null;
+}): Promise<string | null> {
+  const res = await getClient().chat.completions.create({
+    model: env.CHAT_MODEL,
+    temperature: 0.6,
+    max_tokens: 120,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You write the note shown under a freshly generated image in a marketing studio. In at most 2 sentences say concretely what this specific image is good for (post, story, menu board, WhatsApp status, ad…) and the business effect it can drive (attention, trust, orders, footfall). Tie it to the request — never generic praise, no hashtags, no emoji, no bullet points.",
+      },
+      {
+        role: "user",
+        content: `Request: "${opts.prompt.slice(0, 600)}"${
+          opts.themeSlug ? ` (theme /${opts.themeSlug})` : ""
+        }${opts.mode === "edit" ? " — an edit of an earlier image" : ""}${
+          opts.brandSummary ? `\n\nBrand:\n${opts.brandSummary}` : ""
+        }`,
+      },
+    ],
+  });
+  return res.choices[0]?.message.content?.trim() || null;
+}
 
 export function startGenerationWorker(): Worker | null {
   startCampaignScheduler();
@@ -478,10 +517,14 @@ export async function runGeneration(generationId: string): Promise<void> {
           ? retrievePassages(
               generation.prompt,
               scopeDocs.map((d) => d.id),
-            ).catch(() => [])
-          : Promise.resolve([]),
+            ).catch((): string[] => [])
+          : Promise.resolve<string[]>([]),
         loadLearnedMemories(generation.userId).catch(() => []),
       ]);
+      // Verified per-date occasions resolved when the request came in (a
+      // non-campaign "posts for the next N days" ask) — keeps the reply's
+      // day-by-day content factual instead of letting the model guess.
+      if (meta.calendarNote) context.push(meta.calendarNote);
 
       const onDelta = (delta: string) => {
         partialText += delta;
@@ -835,12 +878,40 @@ export async function runGeneration(generationId: string): Promise<void> {
       }
     }
 
+    // Every image ships with a why-it-matters note — the value framing turns
+    // a render into a business asset the user knows how to deploy.
+    const noteBrandId =
+      generation.brandId ??
+      (typeof meta.brandId === "string" ? meta.brandId : null);
+    const noteBrand = noteBrandId
+      ? await loadBrandContext(noteBrandId, generation.userId).catch(() => null)
+      : null;
+    const valueNote = await describeImageValue({
+      prompt: generation.prompt,
+      themeSlug: generation.theme?.slug ?? null,
+      mode,
+      brandSummary: noteBrand?.summary?.trim() || null,
+    }).catch((err) => {
+      console.warn(
+        "[worker] image value note failed:",
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    });
+    const textResponse =
+      [
+        campaignPostCopy,
+        valueNote ? `**Why this helps:** ${valueNote}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n") || null;
+
     const finished = await prisma.generation.updateMany({
       where: { id: generationId, status: "processing" },
       data: {
         status: "completed",
         imageUrls,
-        textResponse: campaignPostCopy,
+        textResponse,
         provider: result.providerUsed,
         model: (result.metadata.model as string | undefined) ?? null,
         metadata: {

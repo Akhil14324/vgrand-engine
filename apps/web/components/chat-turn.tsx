@@ -397,7 +397,7 @@ export const ChatTurn = memo(function ChatTurn({
             ))}
           </div>
         )}
-        {image && creative && generation.textResponse && (
+        {image && generation.textResponse && (
           <div className="w-full max-w-md rounded-xl border bg-card p-4">
             <Markdown>{generation.textResponse}</Markdown>
           </div>

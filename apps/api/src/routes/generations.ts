@@ -9,7 +9,11 @@ import {
   type ThemeStyleGuide,
 } from "@catgpt/types";
 import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
-import { buildFinalPrompt, resolveProvider } from "../lib/prompt.js";
+import {
+  buildEditPrompt,
+  buildFinalPrompt,
+  resolveProvider,
+} from "../lib/prompt.js";
 import { toGenerationDto } from "../lib/serialize.js";
 import { enqueueGeneration } from "../services/queue.js";
 import {
@@ -30,7 +34,7 @@ import {
   recordImageUsage,
   refundImageUsage,
 } from "../lib/usage.js";
-import { isCampaignConversation, isCampaignPrompt } from "../services/campaign.js";
+import { isCampaignConversation, isCampaignPrompt, prepareCampaignCalendar } from "../services/campaign.js";
 import { spawnImageBatch, splitImageBatch } from "../services/image-batch.js";
 import {
   brandImageGuidance,
@@ -57,6 +61,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const IMAGE_TRIGGER =
   /\b(?:crea[ts]e?d?|make|makes|generate?[sd]?|gen(?:erat)?e|genereate|genarate|genrate|draw|drawn|design(?:ed)?|render(?:ed)?|produce[sd]?|paint(?:ed)?|sketch(?:ed)?|illustrate[sd]?)\b\s*(?:\w+\s+){0,3}\b(?:an?\s+)?(?:image|images|imag\w*|imge|immage|iamge|photo|photos|picture|pictures|pic|pics|piture|pitcure|artwork|logo|logos|poster|posters|graphic|graphics)\b/i;
+
+/**
+ * Explicit "start over" phrasing — the user is asking for a complete
+ * transformation, so the follow-up must NOT auto-attach the last image as an
+ * edit base; it becomes a fresh draft. Narrow on purpose: "replace the
+ * background" is an edit, "replace this image" is a recreate.
+ */
+const RECREATE_IMAGE =
+  /\b(?:recreate|re-create|remake|re-?do|start over|from scratch|brand[- ]new|entirely (?:new|different)|totally different|completely (?:change|different|new|redo|remake|redesign|transform)|(?:redesign|replace|change) (?:the|this|that|my) (?:image|images|picture|pictures|photo|photos|poster|creative|design)|(?:new|different|another) (?:image|picture|photo|poster|design))\b/i;
 
 const EDIT_OPERATION_PROMPTS: Record<Exclude<ImageEditOperation, "edit">, string> = {
   inpaint:
@@ -192,12 +205,17 @@ export async function generationRoutes(app: FastifyInstance) {
     // The classifier only runs in this narrow branch, not on every message.
     let effectiveParentId: string | null = body.parentId ?? null;
     // Campaign chats never take this path: "make 5 more images" there means
-    // new campaign creatives, not an edit of the last image.
+    // new campaign creatives, not an edit of the last image. Likewise an
+    // explicit "recreate it completely" (or a UI recreate flag) is a fresh
+    // draft — the rule is: described change edits the exact image, a full
+    // redo starts a new one.
     if (
       conversationId &&
       !body.parentId &&
+      !body.recreate &&
       userRefs.length === 0 &&
       !IMAGE_TRIGGER.test(body.prompt) &&
+      !RECREATE_IMAGE.test(body.prompt) &&
       !isCampaignPrompt(body.prompt)
     ) {
       const [inCampaign, lastImage] = await Promise.all([
@@ -271,6 +289,36 @@ export async function generationRoutes(app: FastifyInstance) {
       inferredImage = intent === "image";
     }
 
+    // A dated multi-day content ask in a normal chat ("posts for the next 7
+    // days") still gets the same verified calendar check campaign mode runs:
+    // per-date occasions feed the reply text and any per-day image briefs,
+    // so day content is grounded in real events rather than guessed. Campaign
+    // chats run their own (richer-context) check in the worker instead.
+    let calendarNote: string | null = null;
+    if (
+      !body.voice &&
+      !visionOnly &&
+      !isCampaignPrompt(body.prompt) &&
+      !(await inCampaignChat())
+    ) {
+      const cal = await prepareCampaignCalendar(
+        body.prompt,
+        brand ? `Brand: ${brand.name}\n${brand.summary ?? ""}` : "",
+        brand?.name ?? null,
+      );
+      if (cal) {
+        calendarNote = [
+          "Verified calendar check for the requested dates (Asia/Kolkata):",
+          ...cal.days.map(
+            (d) =>
+              `- ${d.date}: ${d.relevantEvent ?? "no relevant occasion - normal brand content"}`,
+          ),
+          `Sources: ${cal.sources.map((s) => `${s.title} ${s.url}`).join("; ") || "curated holiday calendar"}`,
+          "When a date lists an occasion, theme that day's post on it; otherwise write a normal on-brand post. Never invent or assume an occasion not listed here.",
+        ].join("\n");
+      }
+    }
+
     // One message can describe several distinct images ("Days 10 to 14,
     // each with its own Telugu text") — without this split the chat model
     // cannot actually call the image tool more than once, so it used to
@@ -278,7 +326,7 @@ export async function generationRoutes(app: FastifyInstance) {
     // one. Only worth checking once we already know this is an image ask.
     const batchBriefs = inferredImage
       ? await splitImageBatch(
-          body.prompt,
+          calendarNote ? `${body.prompt}\n\n${calendarNote}` : body.prompt,
           conversationId ? await loadChatHistory(conversationId) : [],
         )
       : [];
@@ -354,13 +402,19 @@ export async function generationRoutes(app: FastifyInstance) {
           prompt: body.prompt,
           finalPrompt:
             kind === "image"
-              ? buildFinalPrompt(theme, isBatch ? batchBriefs[0]!.prompt : body.prompt) +
+              ? (effectiveParentId
+                  ? buildEditPrompt(body.prompt)
+                  : buildFinalPrompt(
+                      theme,
+                      isBatch ? batchBriefs[0]!.prompt : body.prompt,
+                    )) +
                 (brand
                   ? brandImageGuidance(
                       brand.name,
                       (brand.profile ?? {}) as BrandProfile,
                       brand.assets.some((a) => a.kind === "logo"),
                       brand.mascot,
+                      brand.assets.some((a) => a.kind === "product"),
                     )
                   : "")
               : body.prompt,
@@ -386,6 +440,7 @@ export async function generationRoutes(app: FastifyInstance) {
             ...(body.voice ? { voice: true } : {}),
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
             ...(imageCount > 1 ? { imageCount } : {}),
+            ...(calendarNote ? { calendarNote } : {}),
           },
         },
         }),
@@ -607,13 +662,14 @@ export async function generationRoutes(app: FastifyInstance) {
         conversationId: parent.conversationId,
         prompt,
         finalPrompt:
-          buildFinalPrompt(theme, prompt) +
+          buildEditPrompt(prompt) +
           (brand
             ? brandImageGuidance(
                 brand.name,
                 (brand.profile ?? {}) as BrandProfile,
                 brand.assets.some((a) => a.kind === "logo"),
                 brand.mascot,
+                brand.assets.some((a) => a.kind === "product"),
               )
             : ""),
         provider:

@@ -12,9 +12,10 @@ import type {
 import { env } from "../env.js";
 import { brandImageGuidance, brandReferenceUrls, findAccessibleBrand, loadBrandContext } from "../lib/brand.js";
 import { badRequest, HttpError } from "../lib/errors.js";
-import { buildFinalPrompt, CAMPAIGN_CREATIVE_STYLE, resolveProvider } from "../lib/prompt.js";
+import { buildEditPrompt, buildFinalPrompt, CAMPAIGN_CREATIVE_STYLE, resolveProvider } from "../lib/prompt.js";
 import { getImageUsage, recordImageUsage, refundImageUsage } from "../lib/usage.js";
 import { planAutopilotPosts, safeTimezone } from "./campaign-autopilot.js";
+import { researchCalendarEvents } from "./campaign.js";
 import { enqueueGeneration } from "./queue.js";
 
 const DAY_MS = 86_400_000;
@@ -82,6 +83,27 @@ async function holidayMap(dates: string[]): Promise<Record<string, string>> {
   return Object.fromEntries(Object.entries(best).map(([d, h]) => [d, h.name]));
 }
 
+/**
+ * Occasions worth posting about on each date: the live verified calendar
+ * research (which already merges the seeded holiday table with a web search,
+ * then scores each candidate against the brand). The seeded map alone is the
+ * fallback so a search outage can never silently drop a known festival.
+ */
+async function suggestHolidays(
+  dates: string[],
+  context: string,
+  brandName: string,
+): Promise<Record<string, string>> {
+  try {
+    const cal = await researchCalendarEvents(dates, context, brandName);
+    const map: Record<string, string> = {};
+    for (const d of cal.days) if (d.relevantEvent) map[d.date] = d.relevantEvent;
+    return map;
+  } catch {
+    return holidayMap(dates);
+  }
+}
+
 /** Create + enqueue an on-brand image generation, charging (and on failure refunding) the daily quota. */
 async function startBrandImage(
   userId: string,
@@ -109,10 +131,13 @@ async function startBrandImage(
       kind: "image",
       prompt,
       finalPrompt:
-        buildFinalPrompt(null, prompt) +
+        // Edit chains (regenerate with feedback) keep the parent's image as the
+        // base and must change only what the feedback asks - the creation
+        // template and the fresh-creative style rules would fight that.
+        (opts.parent ? buildEditPrompt(prompt) : buildFinalPrompt(null, prompt)) +
         (brand
-          ? brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot) +
-            CAMPAIGN_CREATIVE_STYLE
+          ? brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot, brand.assets.some((a) => a.kind === "product")) +
+            (opts.parent ? "" : CAMPAIGN_CREATIVE_STYLE)
           : ""),
       provider: resolveProvider(null, opts.parent?.provider),
       parentId: opts.parent?.id ?? null,
@@ -173,7 +198,11 @@ export async function createDayPost(userId: string, body: CalendarDayPostRequest
   const tz = safeTimezone(body.timezone);
   if (body.date < todayIn(tz)) throw badRequest("Pick today or a future date");
 
-  const holidays = await holidayMap([body.date]);
+  const holidays = await suggestHolidays(
+    [body.date],
+    brand.summary ?? brand.name,
+    brand.name,
+  );
   let planned;
   try {
     [planned] = await planAutopilotPosts({
@@ -241,7 +270,10 @@ export async function fillCalendar(userId: string, body: CalendarFillRequest) {
   }
   if (!dates.length) throw badRequest("No posting days in that range");
 
-  const holidays = (body.holidays ?? "suggest") === "suggest" ? await holidayMap(dates) : {};
+  const holidays =
+    (body.holidays ?? "suggest") === "suggest"
+      ? await suggestHolidays(dates, brand.summary ?? brand.name, brand.name)
+      : {};
   let planned;
   try {
     planned = await planAutopilotPosts({

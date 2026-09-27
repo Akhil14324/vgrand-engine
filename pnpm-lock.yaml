@@ -256,6 +256,9 @@ importers:
       '@catgpt/types':
         specifier: workspace:*
         version: link:../types
+      '@napi-rs/canvas':
+        specifier: ^1.0.9
+        version: 1.0.9
       openai:
         specifier: ^5.0.0
         version: 5.23.2(zod@3.25.76)
