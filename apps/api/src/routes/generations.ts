@@ -43,14 +43,20 @@ import { env } from "../env.js";
 import { isTrustedImageUrl } from "../lib/urls.js";
 
 /**
- * Strict image gate — a prompt must explicitly ask to "create an image"
- * (anywhere in the text) to produce one. Everything else is a chat reply,
- * even with a theme armed; the theme only shapes image output, it is not
- * itself a request to generate.
+ * Fast-path image trigger — an explicit "create/make/generate/draw/design an
+ * image" (any of a set of synonyms, plus a few common misspellings) skips
+ * the classifyIntent() call below entirely. This is NOT the only way to
+ * trigger an image: anything that doesn't match this regex still falls
+ * through to classifyIntent(), which judges intent semantically (via Jev or
+ * the chat model) rather than by keyword, so novel phrasing, synonyms not
+ * listed here, and typos not listed here are still expected to route
+ * correctly. This regex only exists to skip that extra call/latency for the
+ * common, obvious phrasings.
  */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const IMAGE_TRIGGER = /create\s+an?\s+image/i;
+const IMAGE_TRIGGER =
+  /\b(?:crea[ts]e?d?|make|makes|generate?[sd]?|gen(?:erat)?e|genereate|genarate|genrate|draw|drawn|design(?:ed)?|render(?:ed)?|produce[sd]?|paint(?:ed)?|sketch(?:ed)?|illustrate[sd]?)\b\s*(?:\w+\s+){0,3}\b(?:an?\s+)?(?:image|images|imag\w*|imge|immage|iamge|photo|photos|picture|pictures|pic|pics|piture|pitcure|artwork|logo|logos|poster|posters|graphic|graphics)\b/i;
 
 const EDIT_OPERATION_PROMPTS: Record<Exclude<ImageEditOperation, "edit">, string> = {
   inpaint:

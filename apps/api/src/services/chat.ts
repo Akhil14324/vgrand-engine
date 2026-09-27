@@ -125,7 +125,7 @@ export function isImageCaptionRequest(prompt: string): boolean {
 
 const CLASSIFY_SYSTEM = `You classify messages sent to CatGPT, an AI image-generation studio. Reply with exactly one word: IMAGE or CHAT.
 
-IMAGE: the user wants an image created or edited — poster, logo, scene, artwork, UI mock, photo — including follow-ups like "make it darker" or "same but at night" when the conversation already produced images.
+IMAGE: the user wants an image created or edited — poster, logo, scene, artwork, UI mock, photo — including follow-ups like "make it darker" or "same but at night" when the conversation already produced images. "Create" is only one of many equivalent verbs — treat "make", "generate", "draw", "design", "render", "produce", "paint", "sketch", "illustrate", "show me a picture of", "give me an image of" the same way, and don't let typos or misspellings of these verbs or of "image"/"photo"/"picture" (e.g. "geneate", "imge", "pls draww me") stop you from recognizing an image request — judge the intent, not the exact spelling.
 
 CHAT: questions, explanations, coding help, document requests, conversation, or anything that does not ask for an image.`;
 
@@ -168,7 +168,7 @@ export async function classifyIntent(
             : "Classify the user's latest message for CatGPT, an AI image-generation studio.",
           criteria: {
             image:
-              "The user wants an image created or edited — poster, logo, scene, artwork, UI mock, photo — including follow-ups like 'make it darker' or 'same but at night' when the conversation already produced images.",
+              "The user wants an image created or edited — poster, logo, scene, artwork, UI mock, photo — including follow-ups like 'make it darker' or 'same but at night' when the conversation already produced images. 'Create' is only one of many equivalent verbs: 'make', 'generate', 'draw', 'design', 'render', 'produce', 'paint', 'sketch', 'illustrate', 'show me a picture of', 'give me an image of' all count the same way. Typos or misspellings of these verbs or of 'image'/'photo'/'picture' (e.g. 'geneate', 'imge', 'draww') still count — judge intent, not exact spelling.",
             chat: "Questions, explanations, coding help, document requests, conversation, or anything that does not ask for an image.",
           },
         },
@@ -305,7 +305,31 @@ export async function answerChat(
   });
   const text = res.choices[0]?.message.content?.trim();
   if (!text) throw new Error("chat model returned an empty response");
-  return text;
+  return assertNoFakeImageOutput(text);
+}
+
+/**
+ * Catches a model bluffing an image in a plain text turn — a literal
+ * "[Generated Image]"/"[Attached Image]" placeholder, a "here's your image"
+ * narration, or actual markdown image syntax — none of which is ever real
+ * here: a text-kind turn never has an image to point to, only kind="image"
+ * generations do. Mirrors campaign.ts's assertNoFakeGenerationClaim: it runs
+ * once the full reply is in, can't unsend what already streamed, and appends
+ * one corrective note instead.
+ */
+const FAKE_IMAGE_OUTPUT =
+  /!\[[^\]]*\]\([^)]*\)|\[\s*(?:generated|attached|created|newly generated)\s+image[^\]]*\]|\bhere(?:'|’)s (?:the|your)(?: newly (?:generated|created))? image\b|\bi(?:'|’)ve (?:generated|created|attached|produced|made)(?: you| an?| the| your)? image\b/i;
+
+function assertNoFakeImageOutput(text: string): string {
+  if (!FAKE_IMAGE_OUTPUT.test(text)) return text;
+  console.warn(
+    "[chat] model claimed/rendered an image in a text turn (caught by text assertion):",
+    text.slice(0, 300),
+  );
+  return (
+    text +
+    "\n\n> Note: I didn't actually attach an image above - I can't generate one in a plain reply. Ask me to \"create an image\" (or make/generate/draw one) and I'll produce it for real."
+  );
 }
 
 /**
@@ -343,6 +367,11 @@ export async function streamChat(
     }
   }
   if (!acc.trim()) throw new Error("chat model returned an empty response");
+  const withAssertion = assertNoFakeImageOutput(acc);
+  if (withAssertion !== acc) {
+    onDelta(withAssertion.slice(acc.length));
+    acc = withAssertion;
+  }
   return acc;
 }
 
@@ -591,5 +620,10 @@ export async function streamChatWithSearch(
     }
   }
   if (!text.trim()) throw new Error("web search returned an empty response");
+  const withAssertion = assertNoFakeImageOutput(text);
+  if (withAssertion !== text) {
+    onDelta(withAssertion.slice(text.length));
+    text = withAssertion;
+  }
   return { text, sources: [...sources.values()] };
 }

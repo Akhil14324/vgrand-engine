@@ -106,8 +106,17 @@ function useSmoothReveal(text: string, active: boolean): string {
  */
 export const ChatTurn = memo(function ChatTurn({
   generation,
+  priority = false,
 }: {
   generation: GenerationDto;
+  /**
+   * True for turns near the top (the first ones a reader sees before
+   * scrolling) or near the bottom (where the feed lands on open). Their
+   * images load eagerly instead of lazily, so the chat isn't stuck showing
+   * shimmer placeholders where a reply is actually already in view.
+   * Everything else stays lazy and loads in as the reader scrolls to it.
+   */
+  priority?: boolean;
 }) {
   const select = useStudio((s) => s.select);
   const selectedId = useStudio((s) => s.selectedId);
@@ -342,7 +351,8 @@ export const ChatTurn = memo(function ChatTurn({
               src={image}
               alt={generation.prompt}
               className="w-full object-cover"
-              loading="lazy"
+              loading={priority ? "eager" : "lazy"}
+              fetchPriority={priority ? "high" : "auto"}
               onLoad={onImageLoad}
             />
           </button>

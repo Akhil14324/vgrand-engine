@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -255,6 +256,50 @@ export function useConversations(
       return pending ? 4000 : false;
     },
   });
+}
+
+/** Chat sidebar page size — small on purpose so the list doesn't fetch every
+ *  chat up front; more pages load as the reader scrolls near the bottom. */
+const CONVERSATIONS_PAGE_SIZE = 15;
+
+/** Sidebar list, paged: starts with one page of `CONVERSATIONS_PAGE_SIZE`
+ *  and fetches more only when `fetchNextPage` is called (on scroll). */
+export function useConversationsInfinite(
+  opts: { archived?: boolean; search?: string } = {},
+) {
+  const search = opts.search?.trim();
+  const query = useInfiniteQuery({
+    queryKey: [
+      "conversations",
+      "infinite",
+      opts.archived ? "archived" : "active",
+      search ?? "",
+    ],
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      apiFetch<Paginated<ConversationDto>>(
+        `/conversations?limit=${CONVERSATIONS_PAGE_SIZE}${opts.archived ? "&archived=true" : ""}${
+          search ? `&search=${encodeURIComponent(search)}` : ""
+        }${pageParam ? `&cursor=${pageParam}` : ""}`,
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+    refetchInterval: (query) => {
+      const pending = query.state.data?.pages.some((p) =>
+        p.items.some(
+          (c) =>
+            c.preview &&
+            (c.preview.status === "pending" ||
+              c.preview.status === "processing"),
+        ),
+      );
+      return pending ? 4000 : false;
+    },
+  });
+  const items = useMemo(
+    () => query.data?.pages.flatMap((p) => p.items) ?? [],
+    [query.data],
+  );
+  return { ...query, items };
 }
 
 export function useConversation(id: string | null) {

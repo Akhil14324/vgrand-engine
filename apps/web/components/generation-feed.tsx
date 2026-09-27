@@ -14,6 +14,10 @@ import { ChatTurn } from "./chat-turn";
 
 gsap.registerPlugin(ScrollToPlugin);
 
+// How many turns from the end get their images loaded eagerly — enough to
+// cover what's actually on screen once the feed lands on the bottom.
+const PRIORITY_TAIL_COUNT = 6;
+
 /** Chat thread: oldest at top, newest at bottom, auto-scrolls like ChatGPT. */
 export function GenerationFeed() {
   // Selectors: this wraps every visible turn, so subscribing to the whole
@@ -74,11 +78,33 @@ export function GenerationFeed() {
     !landed;
 
   const endRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Whether the feed should keep following the bottom. Set whenever we land
+  // on a chat or a new turn arrives; cleared the moment the reader manually
+  // scrolls away from the bottom, so a late image load can't drag them back.
+  const pinnedRef = useRef(true);
+  // True while our own gsap tween is moving the viewport, so the scroll
+  // listener that unpins on manual scroll doesn't mistake it for the reader.
+  const programmaticRef = useRef(false);
   const last = items.at(-1);
   const lastStatus = last?.status;
   const streamedLength = last?.textResponse?.length ?? 0;
   const scrollKey = `${items.length}:${lastStatus}:${activeConversationId}:${showPending}`;
   const lastScrollKey = useRef("");
+
+  const scrollToBottom = (viewport: HTMLElement, duration: number) => {
+    programmaticRef.current = true;
+    gsap.killTweensOf(viewport);
+    gsap.to(viewport, {
+      scrollTo: { y: "max" },
+      duration,
+      ease: "power2.out",
+      onComplete: () => {
+        programmaticRef.current = false;
+      },
+    });
+  };
+
   useEffect(() => {
     const el = endRef.current;
     if (!el) return;
@@ -87,25 +113,50 @@ export function GenerationFeed() {
     const gap = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     const structural = scrollKey !== lastScrollKey.current;
     lastScrollKey.current = scrollKey;
-    // New turns/chats always scroll; streamed tokens only follow along while
-    // the reader is still near the bottom, so scrolling up to read isn't fought.
-    // Animated (not an instant jump) so a send visibly glides the composer's
-    // new bubble down to rest, rather than snapping there.
-    if (structural || gap < 240) {
-      gsap.killTweensOf(viewport);
-      gsap.to(viewport, {
-        scrollTo: { y: "max" },
-        // Sending a new turn gets a slightly more deliberate glide; keeping
-        // up with in-progress streaming stays quick so it doesn't lag behind.
-        duration: structural ? 0.45 : 0.25,
-        ease: "power2.out",
-      });
+    // New turns/chats always re-pin and scroll; streamed tokens only follow
+    // along while the reader is still near the bottom, so scrolling up to
+    // read isn't fought.
+    if (structural) pinnedRef.current = true;
+    if (structural || (pinnedRef.current && gap < 240)) {
+      // Sending a new turn gets a slightly more deliberate glide; keeping
+      // up with in-progress streaming stays quick so it doesn't lag behind.
+      scrollToBottom(viewport, structural ? 0.45 : 0.25);
     }
   }, [scrollKey, streamedLength]);
 
+  // Opening a chat scrolls to the bottom immediately, but images inside it
+  // load lazily and grow the page afterwards, which used to leave the view
+  // stranded partway up (looking like it opened at the start of the chat).
+  // Stay pinned to the bottom as the content's height changes until the
+  // reader scrolls away on their own.
+  useEffect(() => {
+    const content = contentRef.current;
+    const el = endRef.current;
+    if (!content || !el) return;
+    const viewport = el.closest("[data-radix-scroll-area-viewport]");
+    if (!(viewport instanceof HTMLElement)) return;
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) scrollToBottom(viewport, 0);
+    });
+    ro.observe(content);
+    const onScroll = () => {
+      if (programmaticRef.current) return;
+      const gap = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      pinnedRef.current = gap < 32;
+    };
+    viewport.addEventListener("scroll", onScroll);
+    return () => {
+      ro.disconnect();
+      viewport.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-4 pb-6 md:p-6">
+      <div
+        ref={contentRef}
+        className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-4 pb-6 md:p-6"
+      >
         {conversation && (
           <p className="text-right text-xs text-muted-foreground">
             {conversation.generationCount}{" "}
@@ -145,7 +196,16 @@ export function GenerationFeed() {
                 Load earlier messages
               </button>
             )}
-            {items.map((g) => <ChatTurn key={g.id} generation={g} />)}
+            {items.map((g, i) => (
+              <ChatTurn
+                key={g.id}
+                generation={g}
+                // Eager-load the first turn (visible before any scroll) and
+                // the last few (where the feed lands on open); everything
+                // between stays lazy and loads in as the reader scrolls up.
+                priority={i === 0 || i >= items.length - PRIORITY_TAIL_COUNT}
+              />
+            ))}
           </>
         )}
         {/* Optimistic turn — the user's bubble the instant they hit Send,

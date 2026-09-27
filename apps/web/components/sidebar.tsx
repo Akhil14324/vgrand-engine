@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -12,6 +12,7 @@ import {
   Layers,
   ImageIcon,
   LayoutGrid,
+  Loader2,
   Store,
   LogOut,
   MoreHorizontal,
@@ -34,7 +35,7 @@ import { useAuth } from "@/lib/auth";
 import { useStudio } from "@/lib/store";
 import { THEME_ICONS } from "@/lib/theme-icons";
 import {
-  useConversations,
+  useConversationsInfinite,
   useDeleteConversation,
   useShareGeneration,
   useThemes,
@@ -90,19 +91,20 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [search, setSearch] = useState("");
   const [themesOpen, setThemesOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [moreNavOpen, setMoreNavOpen] = useState(false);
+  const moreCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Server-side search — matches title AND generation contents inside chats.
   const deferredSearch = useDeferredValue(search.trim());
-  const { data: conversations } = useConversations({
+  const {
+    items: filteredChats,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useConversationsInfinite({
     search: deferredSearch || undefined,
   });
 
   const q = search.trim().toLowerCase();
-
-  // Already filtered server-side.
-  const filteredChats = useMemo(
-    () => conversations?.items ?? [],
-    [conversations],
-  );
 
   // ChatGPT-style grouping: pinned float into their own section, the rest
   // bucket by recency. All derived from updatedAt — nothing hardcoded.
@@ -119,6 +121,40 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     startNewChat();
     onNavigate?.();
   };
+
+  // Desktop keeps the primary nav short (through Library) with the rest
+  // tucked behind "More"; the mobile drawer has room to just list everything.
+  const libraryIdx = NAV_ITEMS.findIndex((item) => item.label === "Library");
+  const primaryNavItems = onNavigate
+    ? NAV_ITEMS
+    : NAV_ITEMS.slice(0, libraryIdx + 1);
+  const moreNavItems = onNavigate ? [] : NAV_ITEMS.slice(libraryIdx + 1);
+
+  const openMoreNav = () => {
+    if (moreCloseTimer.current) clearTimeout(moreCloseTimer.current);
+    setMoreNavOpen(true);
+  };
+  const scheduleCloseMoreNav = () => {
+    moreCloseTimer.current = setTimeout(() => setMoreNavOpen(false), 150);
+  };
+
+  // Load the next page of chats only once the sentinel below the list
+  // scrolls into view — keeps the sidebar from ever fetching every chat.
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
     <div className="flex h-full min-h-0 flex-col text-sidebar-foreground">
@@ -176,12 +212,52 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Primary nav */}
       <nav className="flex flex-col gap-0.5 px-2 pt-1">
         <NavRow icon={SquarePen} label="New chat" onClick={newChat} />
-        {NAV_ITEMS.map((item, i) => (
+        {primaryNavItems.map((item, i) => (
           <div key={item.href} className="contents">
-            {item.group && item.group !== NAV_ITEMS[i - 1]?.group && <SectionLabel label={item.group} />}
+            {item.group && item.group !== primaryNavItems[i - 1]?.group && <SectionLabel label={item.group} />}
             <NavRow icon={item.icon} label={item.label} href={item.href} onNavigate={onNavigate} />
           </div>
         ))}
+        {moreNavItems.length > 0 && (
+          <div
+            className="relative"
+            onMouseEnter={openMoreNav}
+            onMouseLeave={scheduleCloseMoreNav}
+          >
+            <button
+              onClick={() => setMoreNavOpen((v) => !v)}
+              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm transition-colors hover:bg-accent"
+              aria-expanded={moreNavOpen}
+            >
+              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              <span className="flex-1 text-left">More</span>
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 text-muted-foreground transition-transform",
+                  moreNavOpen && "rotate-180",
+                )}
+              />
+            </button>
+            {moreNavOpen && (
+              <div className="flex flex-col gap-0.5">
+                {moreNavItems.map((item, i) => (
+                  <div key={item.href} className="contents">
+                    {item.group &&
+                      item.group !== moreNavItems[i - 1]?.group && (
+                        <SectionLabel label={item.group} />
+                      )}
+                    <NavRow
+                      icon={item.icon}
+                      label={item.label}
+                      href={item.href}
+                      onNavigate={onNavigate}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <button
           onClick={() => setThemesOpen((v) => !v)}
           className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-accent"
@@ -250,6 +326,15 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <p className="px-5 py-4 text-xs text-muted-foreground">
             {q ? "No chats match." : "Your conversations appear here."}
           </p>
+        )}
+        {/* Sentinel — loads the next page of chats once it scrolls into
+            view, so the sidebar never fetches the full chat history up front. */}
+        {hasNextPage && (
+          <div ref={loadMoreRef} className="flex justify-center py-2">
+            {isFetchingNextPage && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            )}
+          </div>
         )}
         {/* Archived chats — hidden like ChatGPT until expanded */}
         <button
@@ -647,8 +732,7 @@ function ArchivedChats({
   onNavigate?: () => void;
   activeId: string | null;
 }) {
-  const { data } = useConversations({ archived: true });
-  const items = data?.items ?? [];
+  const { items } = useConversationsInfinite({ archived: true });
   if (items.length === 0) {
     return (
       <p className="px-5 py-2 text-xs text-muted-foreground">
