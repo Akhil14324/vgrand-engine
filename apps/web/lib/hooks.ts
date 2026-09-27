@@ -7,6 +7,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import type { InfiniteData } from "@tanstack/react-query";
 import type {
   ApprovalLinkDto,
   BrandAssetDto,
@@ -318,11 +319,49 @@ const sortConversations = (items: ConversationDto[]) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );
 
-type ConvoSnapshot = [readonly unknown[], Paginated<ConversationDto> | undefined][];
+type ConversationPage = Paginated<ConversationDto>;
+type ConversationCache =
+  | ConversationPage
+  | InfiniteData<ConversationPage, string | null>;
+type ConvoSnapshot = [readonly unknown[], ConversationCache | undefined][];
+
+const isInfiniteConversationCache = (
+  data: ConversationCache,
+): data is InfiniteData<ConversationPage, string | null> =>
+  "pages" in data && Array.isArray(data.pages);
+
+const conversationItems = (data: ConversationCache) =>
+  isInfiniteConversationCache(data)
+    ? data.pages.flatMap((page) => page.items)
+    : data.items;
+
+const mapConversationItems = (
+  data: ConversationCache,
+  map: (items: ConversationDto[]) => ConversationDto[],
+): ConversationCache => {
+  if (isInfiniteConversationCache(data)) {
+    return {
+      ...data,
+      pages: data.pages.map((page) => ({
+        ...page,
+        items: map(page.items),
+      })),
+    };
+  }
+  return { ...data, items: map(data.items) };
+};
+
+const conversationQueryShape = (key: readonly unknown[]) => {
+  const infinite = key[1] === "infinite";
+  return {
+    archivedIndex: infinite ? 2 : 1,
+    searchIndex: infinite ? 3 : 2,
+  };
+};
 
 /** Snapshot + rollback helpers shared by the two optimistic mutations. */
 const convoCaches = (qc: ReturnType<typeof useQueryClient>) =>
-  qc.getQueriesData<Paginated<ConversationDto>>({
+  qc.getQueriesData<ConversationCache>({
     queryKey: ["conversations"],
   }) as ConvoSnapshot;
 
@@ -348,24 +387,35 @@ export function useUpdateConversation() {
       // Find the conversation in whichever cached list holds it.
       let convo: ConversationDto | undefined;
       for (const [, data] of prev) {
-        convo = convo ?? data?.items.find((c) => c.id === id);
+        convo =
+          convo ?? (data && conversationItems(data).find((c) => c.id === id));
       }
       if (!convo) return { prev };
       const patched = { ...convo, ...body };
       const targetArchived = body.archived ?? convo.archived;
       for (const [key, data] of prev) {
         if (!data) continue;
-        const isArchivedList = key[1] === "archived";
-        const isSearchList = Boolean(key[2]);
+        const { archivedIndex, searchIndex } = conversationQueryShape(key);
+        const isArchivedList = key[archivedIndex] === "archived";
+        const isSearchList = Boolean(key[searchIndex]);
+        const containsConversation = conversationItems(data).some(
+          (c) => c.id === id,
+        );
         // An archived-toggle moves the chat between the two lists. Search
         // results are only edited in place: a rename must not pull a chat into
         // a search it doesn't match.
         const belongs = isSearchList
-          ? data.items.some((c) => c.id === id) && targetArchived === isArchivedList
+          ? containsConversation && targetArchived === isArchivedList
           : targetArchived === isArchivedList;
-        const items = data.items.filter((c) => c.id !== id);
-        if (belongs) items.push(patched);
-        qc.setQueryData(key, { ...data, items: sortConversations(items) });
+        qc.setQueryData(
+          key,
+          mapConversationItems(data, (current) => {
+            const currentIds = new Set(current.map((c) => c.id));
+            const nextItems = current.filter((c) => c.id !== id);
+            if (belongs && currentIds.has(id)) nextItems.push(patched);
+            return sortConversations(nextItems);
+          }),
+        );
       }
       return { prev };
     },
@@ -384,10 +434,12 @@ export function useDeleteConversation() {
       const prev = convoCaches(qc);
       for (const [key, data] of prev) {
         if (!data) continue;
-        qc.setQueryData(key, {
-          ...data,
-          items: data.items.filter((c) => c.id !== id),
-        });
+        qc.setQueryData(
+          key,
+          mapConversationItems(data, (items) =>
+            items.filter((c) => c.id !== id),
+          ),
+        );
       }
       return { prev };
     },
