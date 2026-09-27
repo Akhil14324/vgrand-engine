@@ -547,18 +547,24 @@ export async function commitConversion(userId: string, id: string, body: Convert
     });
     // Dependencies resolve after every task exists.
     const taskIds = new Map((await tx.execTask.findMany({ where: { strategyId: id }, select: { dedupeKey: true, id: true } })).map((t) => [t.dedupeKey, t.id]));
-    for (const i of newT) {
+    const depUpdates = newT.flatMap((i) => {
       const dep = tMap.get(i.dedupeKey)!.dependsOnDedupeKey;
-      if (dep && taskIds.get(dep) && taskIds.get(i.dedupeKey)) {
-        await tx.execTask.update({ where: { id: taskIds.get(i.dedupeKey)! }, data: { dependsOnId: taskIds.get(dep)! } });
-      }
+      const self = taskIds.get(i.dedupeKey);
+      const target = dep ? taskIds.get(dep) : undefined;
+      return self && target ? [{ id: self, dependsOnId: target }] : [];
+    });
+    // Group by dependency target so a plan with many tasks needs few round trips.
+    const byTarget = new Map<string, string[]>();
+    for (const u of depUpdates) byTarget.set(u.dependsOnId, [...(byTarget.get(u.dependsOnId) ?? []), u.id]);
+    for (const [dependsOnId, ids] of byTarget) {
+      await tx.execTask.updateMany({ where: { id: { in: ids } }, data: { dependsOnId } });
     }
     await tx.strategy.update({ where: { id }, data: { convertedAt: strategy.convertedAt ?? new Date() } });
     await tx.execEvent.create({
       data: { strategyId: id, userId, kind: "created", note: `Converted plan v${strategy.version}: ${created.count} deliverable(s), ${createdT.count} task(s) created`, data: { skipped: body.deliverables.length - newD.length + (body.tasks.length - newT.length) } },
     });
     return { deliverablesCreated: created.count, tasksCreated: createdT.count, alreadyExisted: body.deliverables.length - newD.length + (body.tasks.length - newT.length) };
-  });
+  }, { maxWait: 10_000, timeout: 60_000 }); // remote pooled DB: the 5s default is too tight for a full plan
   return result;
 }
 
@@ -646,6 +652,7 @@ const ASSIST_SYSTEM = `You are B Camp's strategic assistant. You are discussing 
 
 RULES
 - Answer follow-up questions about THIS plan. Do not produce a brand-new unrelated strategy.
+- Format answers as a one-line answer followed by short Markdown bullets (bold key terms); when offering choices, lead with "**Recommended:**" plus a reason, then list the alternatives with trade-offs.
 - Challenge weak assumptions and say plainly what is unknown. Compare approaches without pretending certainty. Explain why you recommend something.
 - Never invent performance, revenue, audience sizes, competitor facts or prices. Results listed below are the only measured data; label what is recorded by the platform, entered by a person, or estimated.
 - Never assume or approve a budget. spendApproved stays as given.

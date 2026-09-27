@@ -49,6 +49,13 @@ import { isTrustedImageUrl } from "../lib/urls.js";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const IMAGE_TRIGGER = /create\s+an?\s+image/i;
+/**
+ * Words that make a plain message worth an intent check. Without an explicit
+ * "create an image", only prompts mentioning one of these reach the classifier,
+ * so ordinary questions never pay for it.
+ */
+const IMAGE_CUE =
+  /\b(?:images?|pictures?|photos?|photograph|posters?|logos?|banners?|illustrations?|wallpapers?|thumbnails?|flyers?|mock-?ups?|artwork|graphics?|draw(?:ing)?|paint(?:ing)?|sketch|render|visuals?|creatives?)\b/i;
 
 const EDIT_OPERATION_PROMPTS: Record<Exclude<ImageEditOperation, "edit">, string> = {
   inpaint:
@@ -239,6 +246,27 @@ export async function generationRoutes(app: FastifyInstance) {
       visionOnly = intent === "text";
     }
 
+    // A plain request such as "generate a biryani image" has no exact trigger
+    // phrase; when it carries an image cue, let the intent classifier decide
+    // instead of answering it as chat (where the model can only pretend).
+    let inferredImage = false;
+    if (
+      !body.voice &&
+      !visionOnly &&
+      userRefs.length === 0 &&
+      !effectiveParentId &&
+      !IMAGE_TRIGGER.test(body.prompt) &&
+      IMAGE_CUE.test(body.prompt) &&
+      !isCampaignPrompt(body.prompt) &&
+      !(await inCampaignChat())
+    ) {
+      const intent = await classifyIntent(
+        body.prompt,
+        conversationId ? await loadChatHistory(conversationId) : [],
+      );
+      inferredImage = intent === "image";
+    }
+
     // Strict gate: an image only on explicit request — "create an image" in
     // the prompt, attached references, or a regenerate/edit chain (explicit
     // or inferred just above). Everything else is a text reply.
@@ -248,7 +276,8 @@ export async function generationRoutes(app: FastifyInstance) {
       !visionOnly &&
       (userRefs.length > 0 ||
         effectiveParentId ||
-        IMAGE_TRIGGER.test(body.prompt))
+        IMAGE_TRIGGER.test(body.prompt) ||
+        inferredImage)
         ? ("image" as const)
         : ("text" as const);
 

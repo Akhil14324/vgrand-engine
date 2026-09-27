@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   AlertCircle,
+  AudioLines,
   ArrowUp,
   FileText,
   Globe,
@@ -39,6 +40,7 @@ import {
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
 import { CHANNEL_PRESETS, channelLabel } from "@/lib/channels";
 import { THEME_ICONS } from "@/lib/theme-icons";
+import { KillBill } from "@/components/kill-bill";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge, badgeVariants } from "@/components/ui/badge";
@@ -143,6 +145,7 @@ export function Composer() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [listening, setListening] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   // Not-yet-final speech transcript, shown live while dictating.
   const [interim, setInterim] = useState("");
   const [phIndex, setPhIndex] = useState(0);
@@ -700,6 +703,17 @@ export function Composer() {
                 </Button>
               )}
 
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 shrink-0 rounded-full text-muted-foreground"
+                onClick={() => setVoiceOpen(true)}
+                aria-label="Voice conversation"
+                title="Voice conversation - talk to CatGPT hands-free"
+              >
+                <AudioLines />
+              </Button>
+
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -918,6 +932,8 @@ export function Composer() {
           />
         </div>
       )}
+
+      {voiceOpen && <KillBill onClose={() => setVoiceOpen(false)} />}
     </div>
   );
 }

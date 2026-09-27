@@ -216,14 +216,14 @@ function Goals({ goals }: { goals: GoalDto[] }) {
                   <p className="text-xs">
                     {g.progress.recorded.toLocaleString()} {g.progress.metric.toLowerCase()} recorded of {g.progress.target.toLocaleString()} ({g.progress.pct}%)
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <div className="text-xs text-muted-foreground">
                     <EvidenceBadge label={g.progress.evidence} /> {g.progress.note}
-                  </p>
+                  </div>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   <EvidenceBadge label="unknown" /> {g.note}
-                </p>
+                </div>
               )}
               <p className="text-xs text-muted-foreground">
                 {g.supportedBy.length ? (
@@ -308,10 +308,10 @@ function Campaigns({ campaigns }: { campaigns: CampaignStatusDto[] }) {
                   <div className="space-y-1 rounded-md border p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Business results</p>
                     <p className="text-sm">{o.text}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       <EvidenceBadge label={o.label} />{" "}
                       {c.outcomes.recorded.length ? c.outcomes.recorded.map((m) => RESULT_METRIC_LABELS[m as ResultMetric] ?? m).join(", ") : "Nothing recorded"}
-                    </p>
+                    </div>
                   </div>
                 </div>
               </Card>

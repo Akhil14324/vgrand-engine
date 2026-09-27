@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Mic, Swords, X } from "lucide-react";
+import { AudioLines, Loader2, Mic, X } from "lucide-react";
 import type { GenerationEvent } from "@catgpt/types";
 import { API_URL } from "@/lib/config";
 import { apiFetch, apiFetchBlob } from "@/lib/api";
@@ -311,6 +311,7 @@ export function KillBill({ onClose }: { onClose: () => void }) {
 
     audioCtxRef.current ??= new AudioContext();
     const ctx = audioCtxRef.current;
+    if (ctx.state === "suspended") await ctx.resume().catch(() => {});
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     ctx.createMediaStreamSource(stream).connect(analyser);
@@ -378,14 +379,14 @@ export function KillBill({ onClose }: { onClose: () => void }) {
     <div className="safe-area-overlay fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-background/95 backdrop-blur">
       <button
         onClick={onClose}
-        aria-label="Close Kill Bill"
+        aria-label="Close voice mode"
         className="safe-area-top-right absolute rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <X className="h-5 w-5" />
       </button>
 
       <div className="flex items-center gap-2 text-sm font-medium tracking-wide text-muted-foreground">
-        <Swords className="h-4 w-4" /> KILL BILL
+        <AudioLines className="h-4 w-4" /> VOICE MODE
       </div>
 
       <button
