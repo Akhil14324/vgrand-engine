@@ -63,6 +63,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     root: path.resolve(env.UPLOAD_DIR),
     prefix: "/uploads/",
     decorateReply: false,
+    // Filenames are random per upload and never reused for different content
+    // (see storage.ts) - safe to cache forever instead of re-fetching on
+    // every visit to a chat.
+    maxAge: "1y",
+    immutable: true,
   });
   // Brand reference posters committed with the repo — providers fetch these
   // over HTTP as the edit base for themed generations.
@@ -70,6 +75,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     root: fileURLToPath(new URL("../assets/themes", import.meta.url)),
     prefix: "/theme-assets/",
     decorateReply: false,
+    maxAge: "1d",
   });
   await app.register(authPlugin);
   // One heavy client (or a retry storm) shouldn't degrade everyone. Keyed per
