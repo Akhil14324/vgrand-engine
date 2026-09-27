@@ -37,6 +37,7 @@ import { THEME_ICONS } from "@/lib/theme-icons";
 import {
   useConversationsInfinite,
   useDeleteConversation,
+  useShareConversation,
   useShareGeneration,
   useThemes,
   useUpdateConversation,
@@ -546,20 +547,25 @@ function ChatRow({
   const update = useUpdateConversation();
   const del = useDeleteConversation();
   const share = useShareGeneration();
+  const shareConvo = useShareConversation();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(conversation.title);
   const [copied, setCopied] = useState(false);
 
   const copyShareLink = () => {
+    const onSuccess = (link: { url: string }) => {
+      void navigator.clipboard.writeText(link.url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
     const genId = conversation.preview?.id;
-    if (!genId) return;
-    share.mutate(genId, {
-      onSuccess: (link) => {
-        void navigator.clipboard.writeText(link.url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      },
-    });
+    // Image turns get the single-image share page; everything else shares the
+    // whole chat — otherwise Share was silently dead on text chats.
+    if (conversation.preview?.imageUrl && genId) {
+      share.mutate(genId, { onSuccess });
+    } else {
+      shareConvo.mutate(conversation.id, { onSuccess });
+    }
   };
 
   const commit = () => {
@@ -655,10 +661,7 @@ function ChatRow({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="right" className="w-44">
-              <DropdownMenuItem
-                disabled={!conversation.preview?.imageUrl}
-                onClick={copyShareLink}
-              >
+              <DropdownMenuItem onClick={copyShareLink}>
                 <Share2 className="mr-2 h-3.5 w-3.5" />
                 Share
               </DropdownMenuItem>

@@ -335,20 +335,35 @@ const conversationItems = (data: ConversationCache) =>
     ? data.pages.flatMap((page) => page.items)
     : data.items;
 
-const mapConversationItems = (
+/**
+ * Apply an update inside one cached conversation list: strip `id` from every
+ * page, then re-insert `patched` into the FIRST page when `insert` — matching
+ * the server's ordering (a PATCH bumps updatedAt, so an edited chat floats
+ * to the top of its list anyway). First-page insertion is also what lets a
+ * chat visibly travel between the active and archived lists: gating on the
+ * item already being present would just make it vanish until the refetch.
+ */
+const moveConversation = (
   data: ConversationCache,
-  map: (items: ConversationDto[]) => ConversationDto[],
+  id: string,
+  patched: ConversationDto | null,
+  insert: boolean,
 ): ConversationCache => {
+  const merge = (items: ConversationDto[], allowInsert: boolean) =>
+    sortConversations([
+      ...(patched && allowInsert ? [patched] : []),
+      ...items.filter((c) => c.id !== id),
+    ]);
   if (isInfiniteConversationCache(data)) {
     return {
       ...data,
-      pages: data.pages.map((page) => ({
+      pages: data.pages.map((page, i) => ({
         ...page,
-        items: map(page.items),
+        items: merge(page.items, insert && i === 0),
       })),
     };
   }
-  return { ...data, items: map(data.items) };
+  return { ...data, items: merge(data.items, insert) };
 };
 
 const conversationQueryShape = (key: readonly unknown[]) => {
@@ -404,18 +419,10 @@ export function useUpdateConversation() {
         // An archived-toggle moves the chat between the two lists. Search
         // results are only edited in place: a rename must not pull a chat into
         // a search it doesn't match.
-        const belongs = isSearchList
+        const insert = isSearchList
           ? containsConversation && targetArchived === isArchivedList
           : targetArchived === isArchivedList;
-        qc.setQueryData(
-          key,
-          mapConversationItems(data, (current) => {
-            const currentIds = new Set(current.map((c) => c.id));
-            const nextItems = current.filter((c) => c.id !== id);
-            if (belongs && currentIds.has(id)) nextItems.push(patched);
-            return sortConversations(nextItems);
-          }),
-        );
+        qc.setQueryData(key, moveConversation(data, id, patched, insert));
       }
       return { prev };
     },
@@ -434,12 +441,7 @@ export function useDeleteConversation() {
       const prev = convoCaches(qc);
       for (const [key, data] of prev) {
         if (!data) continue;
-        qc.setQueryData(
-          key,
-          mapConversationItems(data, (items) =>
-            items.filter((c) => c.id !== id),
-          ),
-        );
+        qc.setQueryData(key, moveConversation(data, id, null, false));
       }
       return { prev };
     },
@@ -455,6 +457,17 @@ export function useShareGeneration() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<ShareLinkDto>(`/share/${id}`, { method: "POST" }),
+  });
+}
+
+/** Public read-only link for a whole chat — the sidebar's share fallback for
+ *  chats whose last turn isn't an image (they have no generation link). */
+export function useShareConversation() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ token: string; url: string }>(`/share/conversation/${id}`, {
+        method: "POST",
+      }),
   });
 }
 
