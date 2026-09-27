@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
-import { Splash } from "@/components/splash";
 import { PwaRegister } from "@/components/pwa";
 
 const inter = Inter({
@@ -46,7 +45,6 @@ export default function RootLayout({
       <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans`}>
         <Providers>
           {children}
-          <Splash />
           <PwaRegister />
         </Providers>
       </body>
