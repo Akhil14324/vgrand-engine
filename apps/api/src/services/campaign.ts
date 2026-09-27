@@ -90,13 +90,14 @@ Write a complete, practical, revenue-first campaign in Markdown with these secti
 Honesty rules: never invent statistics, market sizes, competitor facts, testimonials, prices or phone numbers. Use only what the user told you, and label everything else as an assumption or as a benchmark to verify. A discount, bundle or price change you propose is a SUGGESTION - call it "suggested offer" and show its margin impact; never present it as something the user already runs. Be direct and specific; no filler.
 
 ## Images
-The system generates the image creatives for you. After you deliver a full campaign, OR when the user asks for (more) campaign images/creatives/posters, end your message with a final line that is exactly:
+The system generates the image creatives for you - you never draw, render or synthesize an image yourself. NEVER write or output code (Python, PIL, HTML canvas, or anything else) that claims to create, draw or save an image; that code cannot actually run and produces nothing, so it only misleads the user. The only way any image gets made is the marker below.
+After you deliver a full campaign, OR when the user asks for (more) campaign images/creatives/posters, end your message with a final line that is exactly:
 <<CAMPAIGN_READY:N>>
-where N is the number of image creatives to generate: 2 after a full campaign, or the number the user asked for in their latest image request, capped at ${MAX_CREATIVES} (for "2 more" N is 2, not the running total). Never request or generate more than two images for one campaign response. When asked only for more images, reply in one or two sentences saying what you are creating, then the marker line. NEVER output the marker while you are still interviewing, and never mention the marker or explain it.`;
+where N is the number of image creatives to generate: 2 after a full campaign, or the number the user asked for in their latest image request, capped at ${MAX_CREATIVES} (for "2 more" N is 2, not the running total). Never request or generate more than two images for one campaign response, even if the user asks for more at once (e.g. "all 5 remaining days," "days 10 to 14") - in that case generate only the first ${MAX_CREATIVES} now, say in your reply exactly which ones you are creating and that the rest need a follow-up ask (at most ${MAX_CREATIVES} at a time), then the marker line for those ${MAX_CREATIVES}. When asked only for more images, reply in one or two sentences saying what you are creating, then the marker line. NEVER output the marker while you are still interviewing, and never mention the marker itself or explain it.`;
 
 const CREATIVE_SYSTEM = `You write image-generation prompts for sales advertising creatives. Return JSON only: {"creatives":[{"title":"...","prompt":"..."}]}.
 
-Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (vertical 4:5 Instagram feed post unless the conversation specifies another platform or aspect ratio), bright, clean, balanced lighting with even exposure, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly, every word letter-perfect. Hard rule on readability: the whole background stays light and clean (white, cream, pastel or bright daylight scene); NEVER place a dark panel, black gradient, smoke, vignette or scrim behind text, and every word must sit on a light, uncluttered area with strong contrast. No dark overlays, muddy color casts, underexposure or heavy shadows anywhere unless the user explicitly asks for a dark or dramatic look. Use the same language as the user's campaign request for on-image copy; use natural Telugu for Telugu prompts unless another language is requested. Do not put social-media captions or hashtags on the image; captions and hashtags are delivered separately as text. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. "title" is a short label (max 6 words).
+Each "prompt" must be complete and stand-alone (the image model sees nothing else): the product/offer, the scene, composition (vertical 4:5 Instagram feed post unless the conversation specifies another platform or aspect ratio), bright, clean, balanced lighting with even exposure, and the exact short on-image text - a headline, the offer and a call to action - written out in quotes and spelled exactly, every word letter-perfect. Hard rule on readability: the whole background stays light and clean (white, cream, pastel or bright daylight scene); NEVER place a dark panel, black gradient, smoke, vignette or scrim behind text, and every word must sit on a light, uncluttered area with strong contrast. No dark overlays, muddy color casts, underexposure or heavy shadows anywhere unless the user explicitly asks for a dark or dramatic look. Use the same language as the user's campaign request for on-image copy; use natural Telugu for Telugu prompts unless another language is requested. Do not put social-media captions or hashtags on the image; captions and hashtags are delivered separately as text. Use brand colours, product names and prices ONLY if the user gave them; never invent prices, phone numbers, discounts, awards or testimonials. Make every creative a genuinely different angle (for example hero product, offer + urgency, lifestyle / social proof, festive or seasonal) so the set can be A/B tested. When more than one creative is requested, each one MUST come from a different day/moment of the campaign's posting calendar and MUST NOT repeat another creative's headline, on-image text or theme - never describe the same day, event or announcement twice. "title" is a short label (max 6 words).
 
 Never depict real people or public figures — politicians, celebrities, historical leaders. Image providers refuse their likenesses, so the creative would fail. For occasions tied to a person (birth anniversaries, memorial days, founder tributes), use symbolic imagery instead: their iconic objects, signature colours, a famous quote as text, or the event's symbols. If a brand mascot or character appears in a brief, render it as a small supporting cameo or accent — never the focal subject; the product and offer lead the composition.`;
 
@@ -420,9 +421,21 @@ async function planCreatives(
   });
   const raw = res.choices[0]?.message.content ?? "{}";
   const parsed = JSON.parse(raw) as { creatives?: Partial<Creative>[] };
+  const seen = new Set<string>();
   return (parsed.creatives ?? [])
     .filter((c): c is Creative => Boolean(c.prompt?.trim()))
     .map((c) => ({ title: c.title?.trim() ?? "", prompt: c.prompt.trim() }))
+    // The model is asked to keep every creative distinct, but nothing stops
+    // it from writing the same day/announcement twice (seen in practice:
+    // two "Day 3" creatives, word-for-word). Collapse near-identical briefs
+    // here so a duplicate never reaches image generation, rather than
+    // shipping the same card + image to the user twice.
+    .filter((c) => {
+      const key = `${c.title}\n${c.prompt}`.toLowerCase().replace(/\s+/g, " ").trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .slice(0, count);
 }
 
