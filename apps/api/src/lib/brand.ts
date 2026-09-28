@@ -262,7 +262,7 @@ export async function loadBrandContext(brandId: string, userId?: string) {
       assets: {
         where: { kind: { in: ["mascot", "logo", "product", "reference"] } },
         orderBy: { createdAt: "asc" },
-        select: { kind: true, url: true },
+        select: { id: true, kind: true, url: true, label: true },
       },
       mascot: {
         select: {
@@ -286,11 +286,14 @@ export async function loadBrandContext(brandId: string, userId?: string) {
 export function brandReferenceUrls(
   assets: { kind: string; url: string }[],
   mascotUrl?: string | null,
+  selectedProductUrl?: string,
 ): string[] {
   const mascotUrls = mascotUrl
     ? [mascotUrl]
     : assets.filter((a) => a.kind === "mascot").map((a) => a.url).slice(0, 2);
-  const products = assets.filter((a) => a.kind === "product");
+  const products = selectedProductUrl
+    ? assets.filter((a) => a.kind === "product" && a.url === selectedProductUrl).slice(0, 1)
+    : assets.filter((a) => a.kind === "product");
   const references = assets.filter((a) => a.kind === "reference");
   return [
     ...new Set([

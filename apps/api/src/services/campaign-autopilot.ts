@@ -2,6 +2,7 @@ import { prisma } from "@catgpt/db";
 import type { BrandProfile, CampaignPlanDto, CampaignPostDto } from "@catgpt/types";
 import { env } from "../env.js";
 import { requiresOpenAIForReferences } from "../lib/generation-context.js";
+import { resolveProductImageReference } from "../lib/product-image-reference.js";
 import { brandImageGuidance, brandReferenceUrls, loadBrandContext } from "../lib/brand.js";
 import {
   buildFinalPrompt,
@@ -226,7 +227,30 @@ async function processDueCampaignPosts(): Promise<void> {
       const brand = await loadBrandContext(post.plan.brandId, post.plan.userId);
       if (!brand) throw new Error("brand is no longer accessible");
       const profile = (brand.profile ?? {}) as BrandProfile;
-      const refs = brandReferenceUrls(brand.assets, brand.mascot?.asset.url);
+      const productImageResolution = resolveProductImageReference(
+        post.prompt,
+        brand.assets
+          .filter((asset) => asset.kind === "product")
+          .map(({ id, label, url }) => ({ id, label, url })),
+      );
+      if (productImageResolution.status === "missing") {
+        throw new Error(`Product Image "${productImageResolution.requestedName}" was not found in the Brand`);
+      }
+      if (productImageResolution.status === "ambiguous") {
+        throw new Error(`Product Image name is ambiguous: ${productImageResolution.names.join(", ")}`);
+      }
+      const selectedProduct =
+        productImageResolution.status === "match"
+          ? productImageResolution.asset
+          : null;
+      const refs = brandReferenceUrls(
+        brand.assets,
+        brand.mascot?.asset.url,
+        selectedProduct?.url,
+      );
+      const productGuidance = selectedProduct
+        ? `\nUse the exact saved Product Image ${JSON.stringify(selectedProduct.label)} from the active Brand. This selected image is supplied first as a reference. Do not substitute or reinterpret it as a different product.`
+        : "";
       const generation = await prisma.generation.create({
         data: {
           userId: post.plan.userId,
@@ -236,6 +260,7 @@ async function processDueCampaignPosts(): Promise<void> {
           prompt: post.prompt,
           finalPrompt:
             buildFinalPrompt(null, post.prompt) +
+            productGuidance +
             brandImageGuidance(
               brand.name,
               profile,
@@ -243,7 +268,7 @@ async function processDueCampaignPosts(): Promise<void> {
               brand.mascot,
             ) +
             CAMPAIGN_CREATIVE_STYLE,
-          provider: requiresOpenAIForReferences(refs)
+          provider: selectedProduct || requiresOpenAIForReferences(refs)
             ? "openai"
             : resolveProvider(null),
           metadata: {
@@ -254,6 +279,9 @@ async function processDueCampaignPosts(): Promise<void> {
             size: "1088x1360",
             ...(refs.length
               ? { referenceImageUrl: refs[0], referenceImageUrls: refs }
+              : {}),
+            ...(selectedProduct
+              ? { selectedProductAssetId: selectedProduct.id }
               : {}),
           },
         },

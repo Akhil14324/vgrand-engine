@@ -43,6 +43,7 @@ import type {
   SocialPreviewRequest,
   SocialPreviewsDto,
   ThemeDto,
+  UpdateBrandAssetRequest,
   UpdateBrandRequest,
   UpdateCampaignPlanRequest,
   UpdateCampaignPostRequest,
@@ -749,6 +750,22 @@ export function useAddBrandAsset() {
     }: CreateBrandAssetRequest & { brandId: string }) =>
       apiFetch<BrandAssetDto>(`/brands/${brandId}/assets`, {
         method: "POST",
+        json: body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),
+  });
+}
+
+export function useUpdateBrandAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      brandId,
+      assetId,
+      ...body
+    }: UpdateBrandAssetRequest & { brandId: string; assetId: string }) =>
+      apiFetch<BrandAssetDto>(`/brands/${brandId}/assets/${assetId}`, {
+        method: "PATCH",
         json: body,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["brands"] }),

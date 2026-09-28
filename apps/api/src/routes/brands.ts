@@ -4,12 +4,14 @@ import {
   createBrandAssetSchema,
   createBrandSchema,
   generateBrandMascotSchema,
+  updateBrandAssetSchema,
   updateBrandSchema,
   upsertBrandMascotSchema,
   type BrandProfile,
 } from "@catgpt/types";
 import { HttpError, badRequest, notFound, parseBody } from "../lib/errors.js";
 import { findWorkspaceForUser, workspaceAccess } from "../lib/workspace-access.js";
+import { normalizeProductImageName } from "../lib/product-image-reference.js";
 import { requiresOpenAIForReferences } from "../lib/generation-context.js";
 import { deleteStoredFiles } from "../services/storage.js";
 import {
@@ -362,6 +364,45 @@ export async function brandRoutes(app: FastifyInstance) {
       url: asset.url,
       label: asset.label,
     });
+  });
+
+  app.patch("/brands/:id/assets/:assetId", async (req) => {
+    const { id, assetId } = req.params as { id: string; assetId: string };
+    await findManageableBrand(req.userId, id);
+    const body = parseBody(updateBrandAssetSchema, req.body);
+    const current = await prisma.brandAsset.findFirst({
+      where: { id: assetId, brandId: id },
+      select: { id: true, kind: true },
+    });
+    if (!current) throw notFound("Product image not found");
+    if (current.kind !== "product") {
+      throw badRequest("Only product images can be renamed here");
+    }
+    const label = body.label.trim();
+    const normalizedName = normalizeProductImageName(label);
+    if (!normalizedName) throw badRequest("Product image name must include letters or numbers");
+    const otherProducts = await prisma.brandAsset.findMany({
+      where: { brandId: id, kind: "product", id: { not: assetId }, label: { not: null } },
+      select: { label: true },
+    });
+    if (
+      otherProducts.some(
+        (asset) =>
+          asset.label && normalizeProductImageName(asset.label) === normalizedName,
+      )
+    ) {
+      throw badRequest("Another product image in this brand already has that name");
+    }
+    const asset = await prisma.brandAsset.update({
+      where: { id: current.id },
+      data: { label },
+    });
+    return {
+      id: asset.id,
+      kind: asset.kind,
+      url: asset.url,
+      label: asset.label,
+    };
   });
 
   app.delete("/brands/:id/assets/:assetId", async (req, reply) => {

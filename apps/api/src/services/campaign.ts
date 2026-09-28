@@ -12,6 +12,7 @@ import {
   refundImageUsage,
 } from "../lib/usage.js";
 import { requiresOpenAIForReferences } from "../lib/generation-context.js";
+import { resolveProductImageReference } from "../lib/product-image-reference.js";
 import { publishGenerationEvent } from "./events.js";
 import {
   brandImageGuidance,
@@ -588,8 +589,24 @@ export async function spawnCreatives(params: {
   const brand = params.brandId
     ? await loadBrandContext(params.brandId, userId)
     : null;
+  const productImageResolution = resolveProductImageReference(
+    params.userPrompt,
+    brand?.assets
+      .filter((asset) => asset.kind === "product")
+      .map(({ id, label, url }) => ({ id, label, url })) ?? [],
+  );
+  if (productImageResolution.status === "missing") {
+    return `\n\n> No campaign image was generated: Product Image "${productImageResolution.requestedName}" is not saved in the selected Brand.`;
+  }
+  if (productImageResolution.status === "ambiguous") {
+    return `\n\n> No campaign image was generated: the Product Image name matches multiple assets (${productImageResolution.names.join(", ")}). Rename the duplicates or use one unique name.`;
+  }
+  const selectedProduct =
+    productImageResolution.status === "match"
+      ? productImageResolution.asset
+      : null;
   const brandRefs = brand
-    ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url)
+    ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url, selectedProduct?.url)
     : [];
   const guidance = brand
     ? brandImageGuidance(
@@ -599,6 +616,9 @@ export async function spawnCreatives(params: {
         brand.mascot,
         brand.assets.some((a) => a.kind === "product"),
       )
+    : "";
+  const productGuidance = selectedProduct
+    ? `\nUse the exact saved Product Image ${JSON.stringify(selectedProduct.label)} from the active Brand. This selected image is supplied first as a reference. Do not substitute or reinterpret it as a different product.`
     : "";
   const usage = await getImageUsage(userId);
   const count = Math.min(requested, MAX_CREATIVES, usage.remaining);
@@ -624,9 +644,10 @@ export async function spawnCreatives(params: {
         prompt: brief.prompt,
         finalPrompt:
           buildFinalPrompt(null, brief.prompt) +
+          productGuidance +
           guidance +
           CAMPAIGN_CREATIVE_STYLE,
-        provider: requiresOpenAIForReferences(brandRefs)
+        provider: selectedProduct || requiresOpenAIForReferences(brandRefs)
           ? "openai"
           : resolveProvider(null),
         metadata: {
@@ -636,6 +657,7 @@ export async function spawnCreatives(params: {
             ? { referenceImageUrl: brandRefs[0], referenceImageUrls: brandRefs }
             : {}),
           ...(params.brandId ? { brandId: params.brandId } : {}),
+          ...(selectedProduct ? { selectedProductAssetId: selectedProduct.id } : {}),
           campaignCreative: {
             index: i + 1,
             total: briefs.length,

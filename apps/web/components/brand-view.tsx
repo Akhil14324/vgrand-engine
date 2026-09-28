@@ -42,6 +42,7 @@ import {
   useGenerateBrandMascot,
   useGeneration,
   useUpdateBrand,
+  useUpdateBrandAsset,
   useUpdateCampaignPlan,
   useUpdateCampaignPost,
   useUpsertBrandMascot,
@@ -1041,8 +1042,11 @@ function BrandEditor({ brand }: { brand: BrandDto }) {
 function AssetsSection({ brand }: { brand: BrandDto }) {
   const add = useAddBrandAsset();
   const remove = useDeleteBrandAsset();
+  const updateAsset = useUpdateBrandAsset();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [productName, setProductName] = useState("");
 
   const upload = async (files: FileList, kind: "logo" | "product") => {
     setBusy(true);
@@ -1055,7 +1059,8 @@ function AssetsSection({ brand }: { brand: BrandDto }) {
           method: "POST",
           body: form,
         });
-        await add.mutateAsync({ brandId: brand.id, url, kind, label: file.name });
+        const label = kind === "product" ? file.name.replace(/\.[^.]+$/, "") : file.name;
+        await add.mutateAsync({ brandId: brand.id, url, kind, label });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -1064,10 +1069,25 @@ function AssetsSection({ brand }: { brand: BrandDto }) {
     }
   };
 
+  const saveProductName = async (assetId: string) => {
+    if (!productName.trim()) return;
+    setError(null);
+    try {
+      await updateAsset.mutateAsync({
+        brandId: brand.id,
+        assetId,
+        label: productName.trim(),
+      });
+      setEditingAssetId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't rename product image");
+    }
+  };
+
   return (
     <Section
       title="Logo and photos"
-      hint="Used as references so generated images look like your brand. Up to 20."
+      hint="Name Product Images below, then mention that exact name in an image prompt to use the matching photo. Up to 20."
     >
       <div className="flex flex-wrap gap-2">
         <FilePick accept="image/*" label="Add logo" busy={busy} onFiles={(f) => upload(f, "logo")} />
@@ -1090,6 +1110,65 @@ function AssetsSection({ brand }: { brand: BrandDto }) {
               >
                 <X className="h-3 w-3" />
               </button>
+              {a.kind === "product" && (
+                <div className="absolute inset-x-0 bottom-0 flex min-h-8 items-center gap-1 bg-background/90 p-1 text-[10px]">
+                  {editingAssetId === a.id ? (
+                    <>
+                      <Input
+                        autoFocus
+                        value={productName}
+                        maxLength={120}
+                        placeholder="Product name"
+                        aria-label="Product image name"
+                        className="h-7 min-w-0 px-1 text-[10px]"
+                        onChange={(event) => setProductName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveProductName(a.id);
+                          } else if (event.key === "Escape") {
+                            setEditingAssetId(null);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={!productName.trim() || updateAsset.isPending}
+                        onClick={() => void saveProductName(a.id)}
+                        className="rounded p-1 hover:bg-accent disabled:opacity-50"
+                        aria-label="Save product image name"
+                      >
+                        <Check className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingAssetId(null)}
+                        className="rounded p-1 hover:bg-accent"
+                        aria-label="Cancel renaming product image"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1 truncate" title={a.label ?? undefined}>
+                        {a.label || "Unnamed product"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingAssetId(a.id);
+                          setProductName(a.label ?? "");
+                        }}
+                        className="shrink-0 rounded px-1 py-0.5 hover:bg-accent"
+                        aria-label={`Rename ${a.label || "product image"}`}
+                      >
+                        Rename
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

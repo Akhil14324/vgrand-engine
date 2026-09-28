@@ -85,6 +85,7 @@ export async function spawnImageBatch(params: {
   brandId: string | null;
   provider: string;
   referenceImageUrls: string[];
+  productImage?: { id: string; label: string; url: string };
   quality: string;
   size: string;
 }): Promise<void> {
@@ -111,7 +112,12 @@ export async function spawnImageBatch(params: {
         brandId: params.brandId,
         kind: "image",
         prompt: brief.prompt,
-        finalPrompt: buildFinalPrompt(params.theme, brief.prompt) + guidance,
+        finalPrompt:
+          buildFinalPrompt(params.theme, brief.prompt) +
+          (params.productImage
+            ? `\nUse the exact saved Product Image ${JSON.stringify(params.productImage.label)} from the active Brand. This selected image is supplied first as a reference. Do not substitute or reinterpret it as a different product.`
+            : "") +
+          guidance,
         provider: params.provider,
         metadata: {
           quality: params.quality,
@@ -119,6 +125,9 @@ export async function spawnImageBatch(params: {
           referenceImageUrl: params.referenceImageUrls[0],
           referenceImageUrls: params.referenceImageUrls,
           ...(params.brandId ? { brandId: params.brandId } : {}),
+          ...(params.productImage
+            ? { selectedProductAssetId: params.productImage.id }
+            : {}),
           imageBatch: { label: brief.label },
         },
       },

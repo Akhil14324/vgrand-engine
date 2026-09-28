@@ -16,6 +16,7 @@ import {
   buildGenerationReferenceUrls,
   requiresOpenAIForReferences,
 } from "../lib/generation-context.js";
+import { resolveProductImageReference } from "../lib/product-image-reference.js";
 import { buildEditPrompt, buildFinalPrompt, CAMPAIGN_CREATIVE_STYLE, resolveProvider } from "../lib/prompt.js";
 import { getImageUsage, recordImageUsage, refundImageUsage } from "../lib/usage.js";
 import { planAutopilotPosts, safeTimezone } from "./campaign-autopilot.js";
@@ -127,7 +128,32 @@ async function startBrandImage(
   const brand = brandId ? await loadBrandContext(brandId, userId) : null;
   if (brandId && !brand) throw new HttpError(404, "Brand not found");
   const profile = (brand?.profile ?? {}) as BrandProfile;
-  const refs = brand ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url) : [];
+  const productImageResolution = resolveProductImageReference(
+    prompt,
+    brand?.assets
+      .filter((asset) => asset.kind === "product")
+      .map(({ id, label, url }) => ({ id, label, url })) ?? [],
+  );
+  if (productImageResolution.status === "missing") {
+    throw badRequest(
+      `Product Image "${productImageResolution.requestedName}" was not found in the selected Brand.`,
+    );
+  }
+  if (productImageResolution.status === "ambiguous") {
+    throw badRequest(
+      `More than one Product Image matches the requested name (${productImageResolution.names.join(", ")}). Rename the duplicates or quote one unique name.`,
+    );
+  }
+  const selectedProduct =
+    productImageResolution.status === "match"
+      ? productImageResolution.asset
+      : null;
+  const refs = brand
+    ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url, selectedProduct?.url)
+    : [];
+  const productGuidance = selectedProduct
+    ? `\nUse the exact saved Product Image ${JSON.stringify(selectedProduct.label)} from the active Brand. ${opts.parent ? "It follows the image being edited in the references." : "It is supplied first as a reference."} Do not substitute or reinterpret it as a different product.`
+    : "";
   const generation = await prisma.generation.create({
     data: {
       userId,
@@ -138,27 +164,34 @@ async function startBrandImage(
         // Edit chains (regenerate with feedback) keep the parent's image as the
         // base and must change only what the feedback asks - the creation
         // template and the fresh-creative style rules would fight that.
-        (opts.parent ? buildEditPrompt(prompt) : buildFinalPrompt(null, prompt)) +
+        (opts.parent
+          ? buildEditPrompt(prompt, Boolean(selectedProduct))
+          : buildFinalPrompt(null, prompt)) +
+        productGuidance +
         (brand
           ? brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot, brand.assets.some((a) => a.kind === "product")) +
             (opts.parent ? "" : CAMPAIGN_CREATIVE_STYLE)
           : ""),
-      provider: opts.parent
-        ? resolveProvider(null, opts.parent.provider)
-        : requiresOpenAIForReferences(refs)
-          ? "openai"
-          : resolveProvider(null),
+      provider: selectedProduct
+        ? "openai"
+        : opts.parent
+          ? resolveProvider(null, opts.parent.provider)
+          : requiresOpenAIForReferences(refs)
+            ? "openai"
+            : resolveProvider(null),
       parentId: opts.parent?.id ?? null,
       metadata: {
         ...(brand ? { brandId: brand.id } : {}),
         quality: env.CAMPAIGN_IMAGE_QUALITY,
         size: "1088x1360",
         ...meta,
+        ...(selectedProduct ? { selectedProductAssetId: selectedProduct.id } : {}),
         ...(opts.parent
           ? {
               referenceImageUrl: opts.parent.imageUrl,
               referenceImageUrls: buildGenerationReferenceUrls({
                 parentImageUrl: opts.parent.imageUrl,
+                userReferenceUrls: selectedProduct ? [selectedProduct.url] : [],
               }),
             }
           : refs.length

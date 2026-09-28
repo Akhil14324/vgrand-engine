@@ -11,6 +11,20 @@ describe("brandReferenceUrls", () => {
       ]),
     ).toEqual(["product-photo.png", "brand-style.png"]);
   });
+
+  it("uses only the explicitly selected product image among product assets", () => {
+    expect(
+      brandReferenceUrls(
+        [
+          { kind: "product", url: "chicken.png" },
+          { kind: "product", url: "mutton.png" },
+          { kind: "reference", url: "brand-style.png" },
+        ],
+        null,
+        "mutton.png",
+      ),
+    ).toEqual(["mutton.png", "brand-style.png"]);
+  });
 });
 
 describe("brandImageGuidance", () => {

@@ -45,6 +45,10 @@ import type { BrandProfile } from "@catgpt/types";
 import { findWorkspaceForUser } from "../lib/workspace-access.js";
 import { env } from "../env.js";
 import { isTrustedImageUrl } from "../lib/urls.js";
+import {
+  requestsImageFromProductImage,
+  resolveProductImageReference,
+} from "../lib/product-image-reference.js";
 
 /**
  * Fast-path image trigger — an explicit "create/make/generate/draw/design an
@@ -177,6 +181,13 @@ export async function generationRoutes(app: FastifyInstance) {
       throw badRequest("one or more attached documents were not found");
     }
 
+    const productImageResolution = resolveProductImageReference(
+      body.prompt,
+      brand?.assets
+        .filter((asset) => asset.kind === "product")
+        .map(({ id, label, url }) => ({ id, label, url })) ?? [],
+    );
+    const hasProductImageReference = productImageResolution.status !== "none";
     const userRefs = [
       ...new Set([
         ...(body.referenceImageUrl ? [body.referenceImageUrl] : []),
@@ -204,6 +215,7 @@ export async function generationRoutes(app: FastifyInstance) {
     // turn (no fresh upload, no explicit parent, no "create an image" trigger).
     // The classifier only runs in this narrow branch, not on every message.
     let effectiveParentId: string | null = body.parentId ?? null;
+    let inferredParentImageUrl: string | null = null;
     // Campaign chats never take this path: "make 5 more images" there means
     // new campaign creatives, not an edit of the last image. Likewise an
     // explicit "recreate it completely" (or a UI recreate flag) is a fresh
@@ -213,6 +225,7 @@ export async function generationRoutes(app: FastifyInstance) {
       conversationId &&
       !body.parentId &&
       !body.recreate &&
+      !hasProductImageReference &&
       userRefs.length === 0 &&
       !IMAGE_TRIGGER.test(body.prompt) &&
       !RECREATE_IMAGE.test(body.prompt) &&
@@ -232,9 +245,7 @@ export async function generationRoutes(app: FastifyInstance) {
         );
         if (intent === "image") {
           effectiveParentId = lastImage.id;
-          // Seed refs from the image being edited — same path as an explicit
-          // user upload, so the edit mode/references plumbing is unchanged.
-          userRefs.push(...lastImage.imageUrls);
+          inferredParentImageUrl = lastImage.imageUrls[0] ?? null;
         }
       }
     }
@@ -272,8 +283,12 @@ export async function generationRoutes(app: FastifyInstance) {
     // every plain prompt (plus recent history) and decide for itself. Jev is
     // a cheap typed-choice call, not a full chat completion, so this is
     // worth paying on every turn that isn't already resolved above.
-    let inferredImage = false;
+    let inferredImage = requestsImageFromProductImage(
+      body.prompt,
+      productImageResolution,
+    );
     if (
+      !inferredImage &&
       !body.voice &&
       !visionOnly &&
       userRefs.length === 0 &&
@@ -327,7 +342,7 @@ export async function generationRoutes(app: FastifyInstance) {
     const batchBriefs = inferredImage
       ? await splitImageBatch(
           calendarNote ? `${body.prompt}\n\n${calendarNote}` : body.prompt,
-          conversationId ? await loadChatHistory(conversationId) : [],
+          [],
         )
       : [];
     const isBatch = batchBriefs.length > 1;
@@ -346,6 +361,29 @@ export async function generationRoutes(app: FastifyInstance) {
         ? ("image" as const)
         : ("text" as const);
 
+    if (kind === "image" && productImageResolution.status === "ambiguous") {
+      throw badRequest(
+        `More than one Product Image matches the requested name (${productImageResolution.names.join(", ")}). Rename the duplicates or quote one unique name.`,
+      );
+    }
+    if (kind === "image" && productImageResolution.status === "missing") {
+      if (!brand) {
+        throw badRequest(
+          `Select the Brand that owns Product Image "${productImageResolution.requestedName}" before generating.`,
+        );
+      }
+      const names = brand.assets
+        .filter((asset) => asset.kind === "product" && asset.label?.trim())
+        .map((asset) => asset.label!.trim());
+      throw badRequest(
+        `Product Image "${productImageResolution.requestedName}" was not found in the selected Brand.${names.length ? ` Available names: ${names.join(", ")}.` : " Name a Product Image in the Brand section first."}`,
+      );
+    }
+    const selectedProduct =
+      productImageResolution.status === "match"
+        ? productImageResolution.asset
+        : null;
+
     // A ready-made carousel set: only for a fresh, non-edit-chain image
     // request that wasn't already split into distinct per-item briefs.
     const imageCount =
@@ -355,21 +393,39 @@ export async function generationRoutes(app: FastifyInstance) {
 
     if (kind === "image") await assertImageQuota(req.userId, imageCount);
 
-    // Theme brand references come first — they're the base the edit keeps;
-    // any user-attached refs are extra guidance on top.
+    const parentImageUrl = effectiveParentId
+      ? parent?.id === effectiveParentId
+        ? parent.imageUrls[0] ?? null
+        : inferredParentImageUrl
+      : null;
+    if (effectiveParentId && !parentImageUrl) {
+      throw badRequest("Parent generation has no image to edit");
+    }
     const brandRefs =
       brand && kind === "image"
-        ? brandReferenceUrls(brand.assets, brand.mascot?.asset.url)
+        ? brandReferenceUrls(
+            brand.assets,
+            brand.mascot?.asset.url,
+            selectedProduct?.url,
+          )
         : [];
     const referenceImageUrls =
       kind === "image"
-        ? [
-            ...new Set([
-              ...brandRefs,
-              ...themeReferenceUrls(req, theme),
-              ...userRefs,
-            ]),
-          ].slice(0, 10)
+        ? effectiveParentId
+          ? [
+              ...new Set([
+                parentImageUrl!,
+                ...(selectedProduct ? [selectedProduct.url] : []),
+                ...userRefs,
+              ]),
+            ].slice(0, 10)
+          : [
+              ...new Set([
+                ...brandRefs,
+                ...themeReferenceUrls(req, theme),
+                ...userRefs,
+              ]),
+            ].slice(0, 10)
         : [];
 
     // Plain writes, not an interactive $transaction: behind the Supabase
@@ -403,11 +459,17 @@ export async function generationRoutes(app: FastifyInstance) {
           finalPrompt:
             kind === "image"
               ? (effectiveParentId
-                  ? buildEditPrompt(body.prompt)
+                  ? buildEditPrompt(
+                      body.prompt,
+                      userRefs.length > 0 || Boolean(selectedProduct),
+                    )
                   : buildFinalPrompt(
                       theme,
                       isBatch ? batchBriefs[0]!.prompt : body.prompt,
                     )) +
+                (selectedProduct
+                  ? `\nUse the exact saved Product Image ${JSON.stringify(selectedProduct.label)} from the active Brand. ${effectiveParentId ? "It follows the image being edited in the references." : "It is supplied first as a reference."} Do not substitute or reinterpret it as a different product.`
+                  : "") +
                 (brand
                   ? brandImageGuidance(
                       brand.name,
@@ -419,7 +481,11 @@ export async function generationRoutes(app: FastifyInstance) {
                   : "")
               : body.prompt,
           provider:
-            kind === "image" ? resolveProvider(theme, body.provider) : "openai",
+            kind === "image"
+              ? selectedProduct
+                ? "openai"
+                : resolveProvider(theme, body.provider)
+              : "openai",
           parentId: effectiveParentId,
           metadata: {
             referenceImageUrl: referenceImageUrls[0],
@@ -437,6 +503,7 @@ export async function generationRoutes(app: FastifyInstance) {
             size: body.size ?? "auto",
             ...(body.webSearch ? { webSearch: true } : {}),
             ...(brand ? { brandId: brand.id } : {}),
+            ...(selectedProduct ? { selectedProductAssetId: selectedProduct.id } : {}),
             ...(body.voice ? { voice: true } : {}),
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
             ...(imageCount > 1 ? { imageCount } : {}),
@@ -505,6 +572,15 @@ export async function generationRoutes(app: FastifyInstance) {
         brandId: brand?.id ?? null,
         provider: generation.provider,
         referenceImageUrls,
+        ...(selectedProduct
+          ? {
+              productImage: {
+                id: selectedProduct.id,
+                label: selectedProduct.label ?? "",
+                url: selectedProduct.url,
+              },
+            }
+          : {}),
         quality: body.quality ?? "low",
         size: body.size ?? "auto",
       }).catch((err) =>
@@ -638,7 +714,6 @@ export async function generationRoutes(app: FastifyInstance) {
     if (operation === "outpaint" && !body.referenceImageUrl) {
       throw badRequest("outpaint needs an expanded canvas image");
     }
-    await assertImageQuota(req.userId);
     const prompt =
       body.prompt ??
       (operation === "edit" ? parent.prompt : EDIT_OPERATION_PROMPTS[operation]);
@@ -649,20 +724,42 @@ export async function generationRoutes(app: FastifyInstance) {
     const brandId =
       typeof parentMeta.brandId === "string" ? parentMeta.brandId : null;
     const brand = brandId ? await loadBrandContext(brandId, req.userId) : null;
-    // The image being edited leads; extra references from the original carry over.
-    const extraRefs = Array.isArray(parentMeta.referenceImageUrls)
-      ? (parentMeta.referenceImageUrls as unknown[]).filter(
-          (u): u is string =>
-            typeof u === "string" &&
-            u !== parentImageUrl &&
-            u !== referenceImageUrl,
-        )
-      : [];
-    // The image being edited stays first; the user's fresh uploads follow it,
-    // then whatever extra references the original already carried.
+    const productImageResolution = resolveProductImageReference(
+      prompt,
+      brand?.assets
+        .filter((asset) => asset.kind === "product")
+        .map(({ id, label, url }) => ({ id, label, url })) ?? [],
+    );
+    if (productImageResolution.status === "ambiguous") {
+      throw badRequest(
+        `More than one Product Image matches the requested name (${productImageResolution.names.join(", ")}). Rename the duplicates or quote one unique name.`,
+      );
+    }
+    if (productImageResolution.status === "missing") {
+      if (!brand) {
+        throw badRequest(
+          `Select the Brand that owns Product Image "${productImageResolution.requestedName}" before editing.`,
+        );
+      }
+      const names = brand.assets
+        .filter((asset) => asset.kind === "product" && asset.label?.trim())
+        .map((asset) => asset.label!.trim());
+      throw badRequest(
+        `Product Image "${productImageResolution.requestedName}" was not found in the selected Brand.${names.length ? ` Available names: ${names.join(", ")}.` : " Name a Product Image in the Brand section first."}`,
+      );
+    }
+    const selectedProduct =
+      productImageResolution.status === "match"
+        ? productImageResolution.asset
+        : null;
     const referenceImageUrls = [
-      ...new Set([referenceImageUrl, ...userRefUrls, ...extraRefs]),
+      ...new Set([
+        referenceImageUrl,
+        ...(selectedProduct ? [selectedProduct.url] : []),
+        ...userRefUrls,
+      ]),
     ].slice(0, 10);
+    await assertImageQuota(req.userId);
 
     const child = await prisma.generation.create({
       data: {
@@ -672,7 +769,13 @@ export async function generationRoutes(app: FastifyInstance) {
         conversationId: parent.conversationId,
         prompt,
         finalPrompt:
-          buildEditPrompt(prompt, userRefUrls.length > 0) +
+          buildEditPrompt(
+            prompt,
+            userRefUrls.length > 0 || Boolean(selectedProduct),
+          ) +
+          (selectedProduct
+            ? `\nUse the exact saved Product Image ${JSON.stringify(selectedProduct.label)} from the active Brand. This selected image is supplied after the image being edited. Do not substitute or reinterpret it as a different product.`
+            : "") +
           (brand
             ? brandImageGuidance(
                 brand.name,
@@ -683,10 +786,7 @@ export async function generationRoutes(app: FastifyInstance) {
               )
             : ""),
         provider:
-          // Multi-image edits (user-supplied refs) are OpenAI-only — the
-          // flux/ideogram adapters send just the base image and would
-          // silently drop the extra uploads, so don't inherit them here.
-          operation === "edit" && userRefUrls.length === 0
+          !selectedProduct && operation === "edit" && userRefUrls.length === 0
             ? resolveProvider(theme, parent.provider)
             : "openai",
         parentId: parent.id,
@@ -698,6 +798,7 @@ export async function generationRoutes(app: FastifyInstance) {
           quality: body.quality ?? parentMeta.quality ?? "low",
           size: body.size ?? parentMeta.size ?? "auto",
           ...(brand ? { brandId: brand.id } : {}),
+          ...(selectedProduct ? { selectedProductAssetId: selectedProduct.id } : {}),
         },
       },
     });

@@ -552,6 +552,11 @@ export const createBrandAssetSchema = z.object({
 });
 export type CreateBrandAssetRequest = z.infer<typeof createBrandAssetSchema>;
 
+export const updateBrandAssetSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+});
+export type UpdateBrandAssetRequest = z.infer<typeof updateBrandAssetSchema>;
+
 export interface BrandGuidelinesDto {
   brandId: string;
   /** Markdown; edited in the app. */
