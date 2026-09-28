@@ -307,6 +307,12 @@ export const regenerateGenerationSchema = z.object({
   operation: z.enum(IMAGE_EDIT_OPERATIONS).optional(),
   /** Optional uploaded replacement base (used by outpaint's expanded canvas). */
   referenceImageUrl: z.string().url().optional(),
+  /**
+   * Extra user-uploaded images the edit should draw from (e.g. an uploaded
+   * dish photo to swap in). They follow the image being edited — the base
+   * stays first. Max 9 so base + extras fit the provider's 10-image cap.
+   */
+  referenceImageUrls: z.array(z.string().url()).max(9).optional(),
   /** Uploaded PNG mask for inpainting; transparent pixels mark the edit area. */
   maskImageUrl: z.string().url().optional(),
 });

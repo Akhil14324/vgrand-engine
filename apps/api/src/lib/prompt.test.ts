@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROMPT_TEMPLATE,
+  buildEditPrompt,
   buildFinalPrompt,
   resolveProvider,
 } from "./prompt.js";
@@ -39,6 +40,22 @@ describe("buildFinalPrompt", () => {
     expect(out).not.toContain("Layout guidance");
     expect(out).not.toContain("Avoid:");
     expect(out).not.toContain("Preferred color palette");
+  });
+});
+
+describe("buildEditPrompt", () => {
+  it("wraps the change in a minimal-edit directive", () => {
+    const out = buildEditPrompt("change the offer text to 30% off");
+    expect(out).toContain(
+      "Edit the provided image. Apply only this change: change the offer text to 30% off",
+    );
+    expect(out).not.toContain("source material");
+  });
+
+  it("marks trailing images as source material when extra refs are sent", () => {
+    const out = buildEditPrompt("swap in the attached biryani", true);
+    expect(out).toContain("first image is the one being edited");
+    expect(out).toContain("source material");
   });
 });
 

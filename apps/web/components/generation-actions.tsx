@@ -6,6 +6,7 @@ import {
   Copy,
   Download,
   FileDown,
+  ImagePlus,
   Link2,
   Loader2,
   Pencil,
@@ -37,6 +38,7 @@ import {
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
 import { useStudio } from "@/lib/store";
 import { apiFetch, apiFetchBlob } from "@/lib/api";
+import { MAX_UPLOAD_MB } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import { detectSpeakLanguage } from "@/lib/voice";
 import { Button } from "@/components/ui/button";
@@ -560,6 +562,10 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
   );
 }
 
+/** Cap on user-supplied source images in a describe-edit — base + these must
+ * stay well under the provider's 10-image ceiling. */
+const MAX_EDIT_REFS = 4;
+
 function DescribeEditDialog({
   generation,
   open,
@@ -579,19 +585,75 @@ function DescribeEditDialog({
   const [editText, setEditText] = useState("");
   const [recreateText, setRecreateText] = useState(generation.prompt);
   const [quality, setQuality] = useState<Quality>("medium");
-  const busy = regenerate.isPending || createGen.isPending;
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [refUrls, setRefUrls] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const busy = regenerate.isPending || createGen.isPending || uploading > 0;
   const error = regenerate.error ?? createGen.error;
+
+  // Same upload path as the composer: /uploads first, the stored URLs go with
+  // the regenerate request so the edit can draw on them.
+  const addRefFiles = async (files: FileList | File[]) => {
+    setUploadError(null);
+    const images = Array.from(files).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    if (images.length === 0) {
+      setUploadError("Only images can be attached to an edit.");
+      return;
+    }
+    const batch = images.slice(
+      0,
+      Math.max(MAX_EDIT_REFS - refUrls.length, 0),
+    );
+    if (batch.length === 0) return;
+    const oversized = batch.filter(
+      (f) => f.size > MAX_UPLOAD_MB * 1024 * 1024,
+    );
+    if (oversized.length) {
+      setUploadError(
+        `"${oversized[0]!.name}" exceeds the ${MAX_UPLOAD_MB} MB upload limit.`,
+      );
+      return;
+    }
+    setUploading((n) => n + batch.length);
+    await Promise.all(
+      batch.map(async (file) => {
+        try {
+          const res = await uploadImageBlob(file, file.name || "reference.png");
+          setRefUrls((prev) =>
+            prev.length < MAX_EDIT_REFS ? [...prev, res.url] : prev,
+          );
+        } catch (e) {
+          setUploadError(e instanceof Error ? e.message : "Upload failed");
+        } finally {
+          setUploading((n) => n - 1);
+        }
+      }),
+    );
+  };
 
   const submit = () => {
     if (mode === "edit") {
       const prompt = editText.trim();
       if (!prompt) return;
       regenerate.mutate(
-        { id: generation.id, prompt, operation: "edit", quality },
+        {
+          id: generation.id,
+          prompt,
+          operation: "edit",
+          quality,
+          ...(refUrls.length ? { referenceImageUrls: refUrls } : {}),
+        },
         {
           onSuccess: (res) => {
             onOpenChange(false);
             select(res.generationId);
+            // Attached refs belong to this edit only - never carry them into
+            // the next open of the dialog.
+            setRefUrls([]);
+            setEditText("");
           },
         },
       );
@@ -620,7 +682,36 @@ function DescribeEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        onPaste={(e) => {
+          // Paste anywhere in the dialog attaches a source image - the
+          // textarea bubble reaches here too.
+          if (mode !== "edit" || e.clipboardData.files.length === 0) return;
+          e.preventDefault();
+          void addRefFiles(e.clipboardData.files);
+        }}
+        onDragOver={(e) => {
+          if (mode === "edit" && e.dataTransfer.types.includes("Files")) {
+            e.preventDefault();
+          }
+        }}
+        onDrop={(e) => {
+          if (mode !== "edit" || e.dataTransfer.files.length === 0) return;
+          e.preventDefault();
+          void addRefFiles(e.dataTransfer.files);
+        }}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void addRefFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
         <DialogHeader>
           <DialogTitle>Describe edit</DialogTitle>
           <DialogDescription>
@@ -664,6 +755,51 @@ function DescribeEditDialog({
               : "Describe the new image from scratch"
           }
         />
+        {mode === "edit" && (
+          <div className="flex flex-wrap items-center gap-2">
+            {refUrls.map((u, i) => (
+              <span key={u} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={u}
+                  alt={`reference ${i + 1}`}
+                  className="h-12 w-12 rounded-md border object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRefUrls((prev) => prev.filter((x) => x !== u))
+                  }
+                  className="absolute -right-1.5 -top-1.5 rounded-full border bg-card p-0.5 text-muted-foreground hover:text-foreground"
+                  aria-label={`Remove reference ${i + 1}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            {refUrls.length < MAX_EDIT_REFS && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                className="flex h-12 w-12 items-center justify-center rounded-md border border-dashed text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+                aria-label="Attach a reference image"
+                title="Attach, paste or drop an image the edit should use"
+              >
+                {uploading > 0 ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ImagePlus className="h-4 w-4" />
+                )}
+              </button>
+            )}
+            <span className="text-[11px] text-muted-foreground">
+              {refUrls.length === 0
+                ? "Optional - attach, paste or drop an image to use"
+                : 'e.g. "replace the biryani with the attached photo"'}
+            </span>
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <div className="flex gap-1">
             {(["low", "medium", "high"] as Quality[]).map((q) => (
@@ -695,7 +831,11 @@ function DescribeEditDialog({
             {mode === "edit" ? "Apply edit" : "Recreate"}
           </Button>
         </div>
-        {error && <p className="text-xs text-destructive">{error.message}</p>}
+        {(error || uploadError) && (
+          <p className="text-xs text-destructive">
+            {uploadError ?? error?.message}
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   );

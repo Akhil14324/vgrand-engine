@@ -27,8 +27,15 @@ export const CAMPAIGN_CREATIVE_STYLE =
  * the model to re-compose, so everything the request doesn't mention survives
  * untouched. A complete redesign should be a fresh generation, not an edit.
  */
-export function buildEditPrompt(prompt: string): string {
-  return `Edit the provided image. Apply only this change: ${prompt.trim()}\nKeep everything else exactly as it is - subject, composition, colours, lighting, background, text and overall style. Do not redraw, replace, restyle or re-imagine any element the request does not mention; output the same image with only that change applied.`;
+export function buildEditPrompt(
+  prompt: string,
+  hasExtraRefs = false,
+): string {
+  return `Edit the provided image. Apply only this change: ${prompt.trim()}\n${
+    hasExtraRefs
+      ? "The first image is the one being edited; any images after it are source material for this change (e.g. the element to swap in) - use them for whatever the request refers to. "
+      : ""
+  }Keep everything else exactly as it is - subject, composition, colours, lighting, background, text and overall style. Do not redraw, replace, restyle or re-imagine any element the request does not mention; output the same image with only that change applied.`;
 }
 
 export function buildFinalPrompt(

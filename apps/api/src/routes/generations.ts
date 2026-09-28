@@ -623,6 +623,12 @@ export async function generationRoutes(app: FastifyInstance) {
     if (body.referenceImageUrl && !isTrustedImageUrl(body.referenceImageUrl)) {
       throw badRequest("edit base must be uploaded through the app");
     }
+    // Extra user uploads the edit should draw from (e.g. "swap the biryani
+    // for this photo") — same upload-only rule as every server-fetched ref.
+    const userRefUrls = body.referenceImageUrls ?? [];
+    if (!userRefUrls.every(isTrustedImageUrl)) {
+      throw badRequest("reference images must be uploaded through the app");
+    }
     if (body.maskImageUrl && !isTrustedImageUrl(body.maskImageUrl)) {
       throw badRequest("mask image must be uploaded through the app");
     }
@@ -652,7 +658,11 @@ export async function generationRoutes(app: FastifyInstance) {
             u !== referenceImageUrl,
         )
       : [];
-    const referenceImageUrls = [referenceImageUrl, ...extraRefs].slice(0, 10);
+    // The image being edited stays first; the user's fresh uploads follow it,
+    // then whatever extra references the original already carried.
+    const referenceImageUrls = [
+      ...new Set([referenceImageUrl, ...userRefUrls, ...extraRefs]),
+    ].slice(0, 10);
 
     const child = await prisma.generation.create({
       data: {
@@ -662,7 +672,7 @@ export async function generationRoutes(app: FastifyInstance) {
         conversationId: parent.conversationId,
         prompt,
         finalPrompt:
-          buildEditPrompt(prompt) +
+          buildEditPrompt(prompt, userRefUrls.length > 0) +
           (brand
             ? brandImageGuidance(
                 brand.name,
@@ -673,7 +683,10 @@ export async function generationRoutes(app: FastifyInstance) {
               )
             : ""),
         provider:
-          operation === "edit"
+          // Multi-image edits (user-supplied refs) are OpenAI-only — the
+          // flux/ideogram adapters send just the base image and would
+          // silently drop the extra uploads, so don't inherit them here.
+          operation === "edit" && userRefUrls.length === 0
             ? resolveProvider(theme, parent.provider)
             : "openai",
         parentId: parent.id,
