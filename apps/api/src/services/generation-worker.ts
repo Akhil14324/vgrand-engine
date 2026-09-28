@@ -36,11 +36,12 @@ import {
   stripRunPrefix,
   stripSearchPrefix,
   wantsCodeExecution,
+  wantsDocumentConvert,
   wantsDocumentEdit,
   wantsDocumentSummary,
   wantsWebSearch,
 } from "./chat.js";
-import { editDocument, type EditOutcome } from "./document-edit.js";
+import { convertDocument, editDocument, type EditOutcome } from "./document-edit.js";
 import { summarizeDocuments } from "./summarize.js";
 import type { WebSource } from "@catgpt/types";
 import {
@@ -400,7 +401,12 @@ export async function runGeneration(generationId: string): Promise<void> {
             wants_doc_edit: {
               type: "noul",
               instructions:
-                "The user wants a document or file (an attached or previously produced PDF/Word file) rewritten, edited, translated, reformatted or corrected, producing a new version of the document itself — not merely a summary, an answer about it, or help with code.",
+                "The user wants a document or file (an attached or previously produced PDF/Word file) rewritten, edited, translated, reformatted or corrected, producing a new version of the document itself — not merely a summary, an answer about it, a pure file-format conversion, or help with code.",
+            },
+            wants_doc_convert: {
+              type: "noul",
+              instructions:
+                "The user wants the document delivered in a different file format — converted, exported or downloaded as e.g. PDF or Word — with its content unchanged. Pure format delivery only: an edit, rewrite, translation or summary is not a conversion.",
             },
             wants_summary: {
               type: "noul",
@@ -498,10 +504,27 @@ export async function runGeneration(generationId: string): Promise<void> {
               ? null
               : (jev.wants_doc_edit.noul ?? 0) > 0.7,
         });
+      // A pure format ask ("give me in pdf") converts the document's own text —
+      // no model call, no rewrite. Edits win first: "change X and export as
+      // pdf" must apply the change, and the edit already returns a PDF.
+      const convertRun =
+        !editRun &&
+        !voice &&
+        !codeRun &&
+        editDoc !== undefined &&
+        !isCampaignPrompt(generation.prompt) &&
+        wantsDocumentConvert(generation.prompt, {
+          attachedNow: attachedScope.length > 0,
+          jevSays:
+            jev?.wants_doc_convert == null
+              ? null
+              : (jev.wants_doc_convert.noul ?? 0) > 0.6,
+        });
       const summaryRun =
         !voice &&
         !codeRun &&
         !editRun &&
+        !convertRun &&
         summaryDocs.length > 0 &&
         !isCampaignPrompt(generation.prompt) &&
         wantsDocumentSummary(
@@ -513,7 +536,7 @@ export async function runGeneration(generationId: string): Promise<void> {
 
       // RAG + learned memory run in parallel — both are best-effort context.
       const [context, memories] = await Promise.all([
-        scopeDocs.length && needsDocs && !summaryRun && !editRun
+        scopeDocs.length && needsDocs && !summaryRun && !editRun && !convertRun
           ? retrievePassages(
               generation.prompt,
               scopeDocs.map((d) => d.id),
@@ -546,6 +569,7 @@ export async function runGeneration(generationId: string): Promise<void> {
       let searched = false;
       let searchError: string | null = null;
       let editOutcome: EditOutcome | null = null;
+      let convertOutcome: EditOutcome | null = null;
       let campaign = false;
       let creativesRequested = 0;
       if (!codeRun && !voice && !summaryRun && !editRun) {
@@ -614,6 +638,16 @@ export async function runGeneration(generationId: string): Promise<void> {
           stripRunPrefix(generation.prompt) || generation.prompt,
           history,
         );
+      } else if (convertRun && editDoc) {
+        convertOutcome = await convertDocument({
+          userId: generation.userId,
+          conversationId: generation.conversationId,
+          workspaceId,
+          doc: editDoc,
+          skipped: Math.max(0, attachedScope.length - 1),
+          onProgress: onDelta,
+        });
+        text = convertOutcome.text;
       } else if (editRun && editDoc) {
         editOutcome = await editDocument({
           userId: generation.userId,
@@ -698,7 +732,9 @@ export async function runGeneration(generationId: string): Promise<void> {
             ? env.CODE_MODEL
             : campaign
               ? env.CAMPAIGN_MODEL
-              : env.CHAT_MODEL,
+              : convertRun
+                ? null
+                : env.CHAT_MODEL,
           metadata: {
             ...meta,
             ...(codeRun ? { codeRun: true } : {}),
@@ -708,6 +744,12 @@ export async function runGeneration(generationId: string): Promise<void> {
                   documentEdit: true,
                   // Spread: interfaces aren't assignable to Prisma's JSON type.
                   files: editOutcome.files.map((f) => ({ ...f })),
+                }
+              : {}),
+            ...(convertOutcome
+              ? {
+                  documentConvert: true,
+                  files: convertOutcome.files.map((f) => ({ ...f })),
                 }
               : {}),
             ...(campaign ? { campaign: true, creativesRequested } : {}),
@@ -728,6 +770,7 @@ export async function runGeneration(generationId: string): Promise<void> {
                     docs: jev.needs_docs?.noul ?? null,
                     summary: jev.wants_summary?.noul ?? null,
                     edit: jev.wants_doc_edit?.noul ?? null,
+                    convert: jev.wants_doc_convert?.noul ?? null,
                   },
                 }
               : {}),

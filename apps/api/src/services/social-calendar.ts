@@ -12,6 +12,10 @@ import type {
 import { env } from "../env.js";
 import { brandImageGuidance, brandReferenceUrls, findAccessibleBrand, loadBrandContext } from "../lib/brand.js";
 import { badRequest, HttpError } from "../lib/errors.js";
+import {
+  buildGenerationReferenceUrls,
+  requiresOpenAIForReferences,
+} from "../lib/generation-context.js";
 import { buildEditPrompt, buildFinalPrompt, CAMPAIGN_CREATIVE_STYLE, resolveProvider } from "../lib/prompt.js";
 import { getImageUsage, recordImageUsage, refundImageUsage } from "../lib/usage.js";
 import { planAutopilotPosts, safeTimezone } from "./campaign-autopilot.js";
@@ -112,7 +116,7 @@ async function startBrandImage(
   meta: Record<string, unknown>,
   opts: {
     /** Set for edits: the new image revises this generation (edit mode + edit model). */
-    parent?: { id: string; provider: string };
+    parent?: { id: string; provider: string; imageUrl: string };
     /** Runs after the row exists but BEFORE it is queued, so a fast worker can't finish unlinked. */
     onCreated?: (generationId: string) => Promise<void>;
   } = {},
@@ -139,14 +143,27 @@ async function startBrandImage(
           ? brandImageGuidance(brand.name, profile, brand.assets.some((a) => a.kind === "logo"), brand.mascot, brand.assets.some((a) => a.kind === "product")) +
             (opts.parent ? "" : CAMPAIGN_CREATIVE_STYLE)
           : ""),
-      provider: resolveProvider(null, opts.parent?.provider),
+      provider: opts.parent
+        ? resolveProvider(null, opts.parent.provider)
+        : requiresOpenAIForReferences(refs)
+          ? "openai"
+          : resolveProvider(null),
       parentId: opts.parent?.id ?? null,
       metadata: {
         ...(brand ? { brandId: brand.id } : {}),
         quality: env.CAMPAIGN_IMAGE_QUALITY,
         size: "1088x1360",
-        ...(refs.length ? { referenceImageUrl: refs[0], referenceImageUrls: refs } : {}),
         ...meta,
+        ...(opts.parent
+          ? {
+              referenceImageUrl: opts.parent.imageUrl,
+              referenceImageUrls: buildGenerationReferenceUrls({
+                parentImageUrl: opts.parent.imageUrl,
+              }),
+            }
+          : refs.length
+            ? { referenceImageUrl: refs[0], referenceImageUrls: refs }
+            : {}),
       },
     },
   });
@@ -377,21 +394,13 @@ Additional direction: ${comment}`;
     {
       campaignPostId: post.id,
       campaignDraft: true,
-      ...(currentImage
-        ? {
-            editOperation: "edit",
-            referenceImageUrl: currentImage,
-            referenceImageUrls: [
-              currentImage,
-              ...(Array.isArray(meta.referenceImageUrls)
-                ? (meta.referenceImageUrls as unknown[]).filter((u): u is string => typeof u === "string" && u !== currentImage)
-                : []),
-            ].slice(0, 10),
-          }
-        : {}),
+      ...(currentImage ? { editOperation: "edit" } : {}),
     },
     {
-      parent: current ? { id: current.id, provider: current.provider } : undefined,
+      parent:
+        current && currentImage
+          ? { id: current.id, provider: current.provider, imageUrl: currentImage }
+          : undefined,
       onCreated: async (generationId) => {
         await prisma.campaignPost.update({
           where: { id: post.id },

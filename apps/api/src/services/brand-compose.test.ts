@@ -7,6 +7,7 @@ import {
   computeLogoRect,
   DEFAULT_PLACEMENT,
   readableTextColor,
+  shouldAutoStampLogo,
   wrapText,
   type BrandKit,
 } from "./brand-compose.js";
@@ -75,6 +76,13 @@ const kit = (over: Partial<BrandKit> = {}): BrandKit => ({
   headingFontUrl: null,
   bodyFontUrl: null,
   ...over,
+});
+
+describe("shouldAutoStampLogo", () => {
+  it("stamps the uploaded logo even when overlayDefault is disabled", () => {
+    expect(shouldAutoStampLogo(kit({ profile: { overlayDefault: false }, logoUrl: "logo.png" }))).toBe(true);
+    expect(shouldAutoStampLogo(kit({ logoUrl: null }))).toBe(false);
+  });
 });
 
 describe("composeBrandKit", () => {

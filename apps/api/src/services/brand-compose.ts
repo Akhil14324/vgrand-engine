@@ -182,11 +182,15 @@ export async function loadBrandKit(brandId: string): Promise<BrandKit | null> {
   };
 }
 
-/** The kit when new generations should get the real logo automatically, else null. */
+/** The kit for generations that have a real brand logo to stamp. */
+export function shouldAutoStampLogo(kit: Pick<BrandKit, "logoUrl"> | null): boolean {
+  return Boolean(kit?.logoUrl);
+}
+
 export async function loadAutoStampKit(brandId: string | null | undefined): Promise<BrandKit | null> {
   if (!brandId) return null;
   const kit = await loadBrandKit(brandId);
-  return kit?.profile.overlayDefault && kit.logoUrl ? kit : null;
+  return shouldAutoStampLogo(kit) ? kit : null;
 }
 
 /* -------------------------------- rendering -------------------------------- */

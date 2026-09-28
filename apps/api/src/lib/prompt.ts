@@ -41,7 +41,7 @@ export function buildEditPrompt(
 ): string {
   return `Edit the provided image. Apply only this change: ${prompt.trim()}\n${
     hasExtraRefs
-      ? "The first image is the one being edited; any images after it are source material for this change (e.g. the element to swap in) - use them for whatever the request refers to. "
+      ? "The first image is the one being edited; images after it are user-supplied source assets. When the request refers to an attached asset, use that actual asset as the replacement, not merely as inspiration. For logos and brand marks, preserve the supplied artwork, lettering, colours, shape and proportions exactly; do not redraw or approximate it, and replace any conflicting old logo with the supplied one. "
       : ""
   }Keep everything else exactly as it is - subject, composition, colours, lighting, background, text and overall style. Do not redraw, replace, restyle or re-imagine any element the request does not mention; output the same image with only that change applied.`;
 }

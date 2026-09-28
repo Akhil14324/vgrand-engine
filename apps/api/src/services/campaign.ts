@@ -11,6 +11,7 @@ import {
   recordImageUsage,
   refundImageUsage,
 } from "../lib/usage.js";
+import { requiresOpenAIForReferences } from "../lib/generation-context.js";
 import { publishGenerationEvent } from "./events.js";
 import {
   brandImageGuidance,
@@ -625,7 +626,9 @@ export async function spawnCreatives(params: {
           buildFinalPrompt(null, brief.prompt) +
           guidance +
           CAMPAIGN_CREATIVE_STYLE,
-        provider: resolveProvider(null),
+        provider: requiresOpenAIForReferences(brandRefs)
+          ? "openai"
+          : resolveProvider(null),
         metadata: {
           quality: env.CAMPAIGN_IMAGE_QUALITY,
           size: "1088x1360",

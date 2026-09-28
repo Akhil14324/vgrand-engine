@@ -52,10 +52,12 @@ describe("buildEditPrompt", () => {
     expect(out).not.toContain("source material");
   });
 
-  it("marks trailing images as source material when extra refs are sent", () => {
-    const out = buildEditPrompt("swap in the attached biryani", true);
+  it("marks trailing images as exact source assets when extra refs are sent", () => {
+    const out = buildEditPrompt("replace the old logo with the attached logo", true);
     expect(out).toContain("first image is the one being edited");
-    expect(out).toContain("source material");
+    expect(out).toContain("user-supplied source assets");
+    expect(out).toContain("preserve the supplied artwork, lettering, colours, shape and proportions exactly");
+    expect(out).toContain("replace any conflicting old logo with the supplied one");
   });
 });
 

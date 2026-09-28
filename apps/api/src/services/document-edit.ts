@@ -205,24 +205,64 @@ export async function editDocument(input: {
 
   const base = doc.filename.replace(/\.(pdf|docx)$/i, "");
   const title = `${base} (edited)`;
+  const { files, editedDocumentId, pdfUrl } = await deliverFiles({
+    userId: input.userId,
+    conversationId: input.conversationId,
+    workspaceId: input.workspaceId,
+    title,
+    markdown,
+  });
+
+  const text = [
+    `${summary} Download the new version below${pdfUrl ? " as Word or PDF" : " as a Word file"}.`,
+    pdfUrl
+      ? null
+      : `A PDF copy isn't offered because the text uses characters the PDF writer can't render — the Word file has everything.`,
+    input.skipped
+      ? `You attached more than one file, so I only edited the first one — ask me again for the others.`
+      : null,
+    `Ask for further changes any time and I'll continue from this edited version. Layout, fonts and images from the original aren't carried over — the text and structure are.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return { text, files, editedDocumentId };
+}
+
+/**
+ * Render a Markdown document to Word (+PDF when the text is Latin-safe), store
+ * both under the user's exports prefix, and re-ingest the Word copy so later
+ * turns can read/summarize/edit it. Shared by editDocument and convertDocument.
+ */
+async function deliverFiles(input: {
+  userId: string;
+  conversationId: string | null;
+  workspaceId: string | null;
+  title: string;
+  markdown: string;
+}): Promise<{
+  files: EditedFile[];
+  editedDocumentId: string | null;
+  pdfUrl: string | null;
+}> {
   // The PDF writer only has built-in Latin fonts; other scripts would come out
   // as garbage, so those documents get the Word file only (Word handles any script).
-  const pdfOk = PDF_SAFE_TEXT.test(markdown);
+  const pdfOk = PDF_SAFE_TEXT.test(input.markdown);
   const keyPrefix = `exports/${input.userId}`;
   const [docxUrl, pdfUrl] = await Promise.all([
-    renderMarkdownDocx(title, markdown).then((buffer) =>
+    renderMarkdownDocx(input.title, input.markdown).then((buffer) =>
       storeFile({ buffer, mimeType: DOCX_MIME, keyPrefix }),
     ),
     pdfOk
-      ? renderMarkdownPdf(title, markdown, { bare: true }).then((buffer) =>
+      ? renderMarkdownPdf(input.title, input.markdown, { bare: true }).then((buffer) =>
           storeFile({ buffer, mimeType: "application/pdf", keyPrefix }),
         )
       : Promise.resolve(null),
   ]);
   const files: EditedFile[] = [
-    { url: docxUrl, filename: `${title}.docx`, mimeType: DOCX_MIME },
+    { url: docxUrl, filename: `${input.title}.docx`, mimeType: DOCX_MIME },
     ...(pdfUrl
-      ? [{ url: pdfUrl, filename: `${title}.pdf`, mimeType: "application/pdf" }]
+      ? [{ url: pdfUrl, filename: `${input.title}.pdf`, mimeType: "application/pdf" }]
       : []),
   ];
 
@@ -235,7 +275,7 @@ export async function editDocument(input: {
           userId: input.userId,
           conversationId: input.conversationId,
           workspaceId: input.workspaceId,
-          filename: `${title}.docx`,
+          filename: `${input.title}.docx`,
           storageUrl: docxUrl,
         },
       });
@@ -246,16 +286,50 @@ export async function editDocument(input: {
       console.error("[document-edit] re-ingest failed:", err);
     }
   }
+  return { files, editedDocumentId, pdfUrl };
+}
+
+/**
+ * "Give me this as a PDF" — the document's own text rendered to files with NO
+ * model pass: the content is carried over verbatim instead of rewritten, so a
+ * conversion is fast and free where an edit would spend tokens. Same Latin-
+ * only PDF and layout/images caveats as editDocument — those documents still
+ * get the Word file.
+ */
+export async function convertDocument(input: {
+  userId: string;
+  conversationId: string | null;
+  workspaceId: string | null;
+  doc: EditSourceDoc;
+  /** Number of extra attached documents that were skipped. */
+  skipped?: number;
+  /** Live progress lines for the streaming reply. */
+  onProgress?: (line: string) => void;
+}): Promise<EditOutcome> {
+  const { doc } = input;
+  input.onProgress?.(`Reading **${doc.filename}**…\n\n`);
+  const source = await loadSource(doc);
+  const markdown = source.plain.trim();
+  if (!markdown) throw new Error("no readable text was found in that document");
+
+  const base = doc.filename.replace(/\.(pdf|docx)$/i, "");
+  const { files, editedDocumentId, pdfUrl } = await deliverFiles({
+    userId: input.userId,
+    conversationId: input.conversationId,
+    workspaceId: input.workspaceId,
+    title: `${base} (converted)`,
+    markdown,
+  });
 
   const text = [
-    `${summary} Download the new version below${pdfUrl ? " as Word or PDF" : " as a Word file"}.`,
+    `Converted **${doc.filename}** — download the new version below${pdfUrl ? " as Word or PDF" : " as a Word file"}.`,
     pdfUrl
       ? null
       : `A PDF copy isn't offered because the text uses characters the PDF writer can't render — the Word file has everything.`,
     input.skipped
-      ? `You attached more than one file, so I only edited the first one — ask me again for the others.`
+      ? `You attached more than one file, so I only converted the first one — ask me again for the others.`
       : null,
-    `Ask for further changes any time and I'll continue from this edited version. Layout, fonts and images from the original aren't carried over — the text and structure are.`,
+    `Fonts, images and the exact layout of the original aren't carried over — the text and structure are.`,
   ]
     .filter(Boolean)
     .join("\n\n");

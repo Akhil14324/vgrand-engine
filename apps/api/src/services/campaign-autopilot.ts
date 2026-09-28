@@ -1,6 +1,7 @@
 import { prisma } from "@catgpt/db";
 import type { BrandProfile, CampaignPlanDto, CampaignPostDto } from "@catgpt/types";
 import { env } from "../env.js";
+import { requiresOpenAIForReferences } from "../lib/generation-context.js";
 import { brandImageGuidance, brandReferenceUrls, loadBrandContext } from "../lib/brand.js";
 import {
   buildFinalPrompt,
@@ -242,7 +243,9 @@ async function processDueCampaignPosts(): Promise<void> {
               brand.mascot,
             ) +
             CAMPAIGN_CREATIVE_STYLE,
-          provider: resolveProvider(null),
+          provider: requiresOpenAIForReferences(refs)
+            ? "openai"
+            : resolveProvider(null),
           metadata: {
             brandId: brand.id,
             campaignPostId: post.id,

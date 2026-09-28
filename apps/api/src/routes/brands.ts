@@ -10,6 +10,7 @@ import {
 } from "@catgpt/types";
 import { HttpError, badRequest, notFound, parseBody } from "../lib/errors.js";
 import { findWorkspaceForUser, workspaceAccess } from "../lib/workspace-access.js";
+import { requiresOpenAIForReferences } from "../lib/generation-context.js";
 import { deleteStoredFiles } from "../services/storage.js";
 import {
   BRAND_INCLUDE,
@@ -294,8 +295,11 @@ export async function brandRoutes(app: FastifyInstance) {
             brand.assets.some((a) => a.kind === "logo"),
             brand.mascot,
             brand.assets.some((a) => a.kind === "product"),
+            false,
           ),
-        provider: resolveProvider(null),
+        provider: requiresOpenAIForReferences(refs)
+          ? "openai"
+          : resolveProvider(null),
         metadata: {
           brandId: brand.id,
           mascotCandidate: true,

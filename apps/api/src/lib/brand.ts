@@ -282,7 +282,7 @@ export async function loadBrandContext(brandId: string, userId?: string) {
   return brand;
 }
 
-/** Logo first, then the brand's own product photos, mascot, references — capped so references stay light. Products outrank the mascot: the real product must reach the model before a decorative character does. */
+/** The brand's own product photos, mascot, references — capped so references stay light. Products outrank the mascot: the real product must reach the model before a decorative character does. The exact logo never goes to the model: it is composited onto the image after generation, so a redrawn approximation can never sneak in. */
 export function brandReferenceUrls(
   assets: { kind: string; url: string }[],
   mascotUrl?: string | null,
@@ -290,12 +290,10 @@ export function brandReferenceUrls(
   const mascotUrls = mascotUrl
     ? [mascotUrl]
     : assets.filter((a) => a.kind === "mascot").map((a) => a.url).slice(0, 2);
-  const logos = assets.filter((a) => a.kind === "logo");
   const products = assets.filter((a) => a.kind === "product");
   const references = assets.filter((a) => a.kind === "reference");
   return [
     ...new Set([
-      ...logos.slice(0, 1).map((a) => a.url),
       ...products.map((a) => a.url),
       ...mascotUrls,
       ...references.map((a) => a.url),
@@ -303,13 +301,14 @@ export function brandReferenceUrls(
   ].slice(0, MAX_BRAND_REFERENCES);
 }
 
-/** Style guidance appended to image prompts in brand mode. */
+/** Style guidance appended to image prompts in brand mode. `includeMarketingPurpose` stays on for marketing visuals; pass false when generating a raw brand asset (e.g. a mascot candidate) that has no marketing job of its own. */
 export function brandImageGuidance(
   name: string,
   profile: BrandProfile,
   hasLogo: boolean,
   mascot?: { name: string; description: string; status: string } | null,
   hasProducts?: boolean,
+  includeMarketingPurpose = true,
 ): string {
   const parts = [`\nBrand: ${name}. Keep the creative on-brand.`];
   if (profile.overlayDefault && profile.logoPlacement) {
@@ -345,7 +344,7 @@ export function brandImageGuidance(
   }
   if (hasLogo) {
     parts.push(
-      "The logo reference image is the brand logo - reproduce it faithfully where a logo belongs, without altering it.",
+      "The exact uploaded brand logo is composited onto the image after generation - it is not a model input. Do not draw, recreate, alter, or add another logo, watermark or brand lettering anywhere in the creative.",
     );
   }
   if (hasProducts) {
@@ -353,8 +352,10 @@ export function brandImageGuidance(
       "Product-photo references are this brand's real products - show the actual product faithfully (shape, colours, packaging, labels); never substitute a generic look-alike.",
     );
   }
-  parts.push(
-    "The image must have a clear marketing job tied to this brand's offer and audience - a merely attractive but purposeless image is a failure.",
-  );
+  if (includeMarketingPurpose) {
+    parts.push(
+      "The image must have a clear marketing job tied to this brand's offer and audience - a merely attractive but purposeless image is a failure.",
+    );
+  }
   return parts.join(" ");
 }

@@ -141,6 +141,73 @@ CHAT: questions, explanations, coding help, document requests, conversation, or 
  * a chat completion. Without TYPESAFE_API_KEY (or if Jev errors) the OpenAI
  * classifier below runs unchanged.
  */
+export type ImageAction = "edit" | "new" | "text" | "unknown";
+
+export function parseImageAction(value: unknown): ImageAction {
+  if (typeof value !== "string") return "unknown";
+  const normalized = value.trim().toLowerCase().replace(/[.!?]+$/, "");
+  if (normalized === "edit" || normalized === "new") return normalized;
+  if (normalized === "chat" || normalized === "text") return "text";
+  return "unknown";
+}
+
+export async function classifyImageAction(
+  prompt: string,
+  history: HistoryTurn[],
+): Promise<ImageAction> {
+  const recentHistory = history.slice(-8);
+  if (jevConfigured()) {
+    try {
+      const state = [
+        ...recentHistory.flatMap((t) => [
+          `User: ${t.prompt.slice(0, 500)}`,
+          `Assistant: ${assistantText(t).slice(0, 500)}`,
+        ]),
+        `LATEST USER REQUEST: ${prompt.slice(0, 2000)}`,
+      ];
+      const answers = await evaluate(state, {
+        action: {
+          type: "choice",
+          instructions:
+            "Classify the latest user request, not the conversation as a whole. Return edit only when the user explicitly asks to modify or continue a previously generated image. Return new for a new image, new concept, different design, or standalone image brief, even if it uses the same brand or subject as earlier turns. Return chat when no image is requested. Older images or prompts must never turn a new concept into an edit.",
+          criteria: {
+            edit: "The latest request explicitly modifies or continues a specific previously generated image, for example asking to add, remove, change, replace, or restyle something in that image.",
+            new: "The latest request asks for a new image or concept, a distinct design, or gives a standalone image brief. Treat a new request about the same brand or subject as new unless it explicitly asks to edit the previous image.",
+            chat: "The latest request does not ask to create or edit an image.",
+          },
+        },
+      });
+      const action = parseImageAction(answers.action?.choice);
+      if (action !== "unknown") return action;
+    } catch (err) {
+      console.warn(
+        "[jev] image action classification failed, using chat model:",
+        (err as Error).message,
+      );
+    }
+  }
+  try {
+    const res = await getClient().chat.completions.create({
+      model: env.CHAT_MODEL,
+      temperature: 0,
+      max_tokens: 4,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Classify only the LATEST user request in this CatGPT image studio conversation. Reply with exactly one word: EDIT, NEW, or CHAT. EDIT only when the latest request explicitly changes or continues a specific previously generated image. NEW when it asks for a new image, concept, or distinct design, including the same brand or subject in a new design. CHAT when it does not request an image. Older images and prompts must not override the latest request. When uncertain between EDIT and NEW, choose NEW.",
+        },
+        ...toMessages(recentHistory),
+        { role: "user", content: `LATEST USER REQUEST:\n${prompt}` },
+      ],
+    });
+    const verdict = res.choices[0]?.message.content;
+    return parseImageAction(verdict);
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function classifyIntent(
   prompt: string,
   history: HistoryTurn[],
@@ -395,8 +462,12 @@ export function wantsDocumentSummary(
 
 /* ----------------------------- document edits ----------------------------- */
 
+// Formal edit verbs plus the verbs people actually use to DESCRIBE an edit
+// ("change the price", "remove page 2", "add a section"). The caller's gate
+// (attachedNow / a document noun / Jev) is what keeps "add a theme" or
+// "change the wallpaper" from hijacking doc-less chat.
 const EDIT_VERB =
-  /\b(edit|rewrite|re-?write|rephrase|reword|paraphrase|proofread|revise|redraft|reformat|shorten|condense|translate|polish|tweak)\b/i;
+  /\b(edit|rewrite|re-?write|rephrase|reword|paraphrase|proofread|revise|redraft|reformat|shorten|condense|translate|polish|tweak|add|remove|delete|insert|change|update|modify|replace|fix|correct|rename|move|swap|reorder|merge|split|expand|reduce|increase)\b/i;
 const EDIT_OBJECT =
   /\b(document|doc|docx|pdf|file|resume|cv|letter|report|contract|paper|essay|article|proposal|attachment|attached|uploaded)\b/i;
 
@@ -411,6 +482,30 @@ export function wantsDocumentEdit(
   opts: { attachedNow: boolean; jevSays: boolean | null },
 ): boolean {
   if (!EDIT_VERB.test(prompt)) return opts.jevSays === true;
+  return opts.attachedNow || EDIT_OBJECT.test(prompt) || opts.jevSays === true;
+}
+
+/* ---------------------------- document conversion --------------------------- */
+
+// A FORMAT ask, not an edit: a delivery verb + in/as/to/into + a format noun
+// ("give me in pdf", "export as pdf", "convert this to word"), or a bare
+// "pdf version/copy/file" — or "create/make a pdf". The required preposition
+// keeps "feedback on this pdf" and "summarize this pdf" out.
+const CONVERT_TARGET =
+  /\b(?:convert|export|download|save|turn|make|give|send|share|render|provide|deliver|put|get)\b[^.?!;\n]{0,60}?\b(?:in|as|to|into)\s+(?:a|an|the)?\s*(?:pdf|docx|word)\b|\b(?:pdf|docx|word)\s+(?:version|copy|format|file)\b|\b(?:create|generate|produce|make|build)\s+(?:a|an|the)?\s*(?:pdf|docx|word)\b/i;
+
+/**
+ * Does this turn ask for the attached/previous document in a different file
+ * format, content unchanged? Cheaper than an edit — no model call. Checked
+ * AFTER wantsDocumentEdit: an edit instruction always wins ("change the
+ * price, give it as pdf" must apply the change — the edit returns a PDF
+ * anyway). Caller still requires a document in scope.
+ */
+export function wantsDocumentConvert(
+  prompt: string,
+  opts: { attachedNow: boolean; jevSays: boolean | null },
+): boolean {
+  if (!CONVERT_TARGET.test(prompt)) return opts.jevSays === true;
   return opts.attachedNow || EDIT_OBJECT.test(prompt) || opts.jevSays === true;
 }
 

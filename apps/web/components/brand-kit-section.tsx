@@ -43,7 +43,6 @@ export function BrandKitSection({ brand }: { brand: BrandDto }) {
   const [placement, setPlacement] = useState(saved.logoPlacement ?? DEFAULT_PLACEMENT);
   const [heading, setHeading] = useState(saved.fonts?.heading ?? "");
   const [body, setBody] = useState(saved.fonts?.body ?? "");
-  const [auto, setAuto] = useState(!!saved.overlayDefault);
 
   // A removed font can no longer be selected.
   const has = (id: string) => fonts.some((f) => f.id === id);
@@ -56,8 +55,7 @@ export function BrandKitSection({ brand }: { brand: BrandDto }) {
   const dirty =
     JSON.stringify(placement) !== JSON.stringify(saved.logoPlacement ?? DEFAULT_PLACEMENT) ||
     heading !== (saved.fonts?.heading ?? "") ||
-    body !== (saved.fonts?.body ?? "") ||
-    auto !== !!saved.overlayDefault;
+    body !== (saved.fonts?.body ?? "");
 
   const save = () =>
     update.mutate(
@@ -67,7 +65,6 @@ export function BrandKitSection({ brand }: { brand: BrandDto }) {
           ...saved,
           logoPlacement: placement,
           fonts: { heading: heading || undefined, body: body || undefined },
-          overlayDefault: auto && !!logo,
         },
       },
       {
@@ -100,8 +97,8 @@ export function BrandKitSection({ brand }: { brand: BrandDto }) {
       <div>
         <h2 className="text-sm font-semibold">Brand kit</h2>
         <p className="text-xs text-muted-foreground">
-          Your real logo file and fonts are placed on images after they are generated, so the logo is never
-          redrawn or distorted by AI.
+          Your exact logo file is stamped onto branded images after generation. Uploaded fonts are used when
+          you apply headline or CTA text with the brand kit.
         </p>
       </div>
 
@@ -173,14 +170,13 @@ export function BrandKitSection({ brand }: { brand: BrandDto }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">Stamp the logo on every new brand image</p>
-          <p className="text-xs text-muted-foreground">
-            Applies to fresh generations and campaign creatives. Edits of an existing image are left alone.
-          </p>
-        </div>
-        <Switch checked={auto && !!logo} onCheckedChange={setAuto} disabled={!logo} aria-label="Auto-stamp logo" />
+      <div className="rounded-lg border p-3">
+        <p className="text-sm font-medium">Exact logo placement is automatic</p>
+        <p className="text-xs text-muted-foreground">
+          {logo
+            ? "The uploaded logo is stamped onto brand creatives and edits; mascot concept images remain logo-free."
+            : "Add a logo to enable automatic placement on branded images."}
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">
