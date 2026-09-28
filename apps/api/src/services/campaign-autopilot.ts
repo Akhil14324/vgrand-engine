@@ -6,6 +6,7 @@ import {
   buildFinalPrompt,
   CAMPAIGN_CREATIVE_STYLE,
   resolveProvider,
+  SOCIAL_CAPTION_STYLE,
 } from "../lib/prompt.js";
 import {
   getImageUsage,
@@ -163,7 +164,7 @@ export async function planAutopilotPosts(params: {
       {
         role: "system",
         content:
-          "You plan practical social campaign drafts. Return JSON only with this shape: {\"posts\":[{\"date\":\"YYYY-MM-DD\",\"platform\":\"Instagram\",\"prompt\":\"standalone image brief\",\"caption\":\"ready-to-post caption\"}]}. Produce exactly one item for each requested date, in order. When a date lists a verified event that is relevant to the brand's audience, theme that day's image brief and caption around it — use symbolic, festive imagery and never depict real people or public figures. When no event is listed, create a normal on-brand post; never force a festival onto an ordinary day. If the brand has a mascot, treat it as a supporting cameo only — briefs may include it small or in a corner, never as the main subject. Image prompts must be complete and stand alone. Never invent events, prices, claims, discounts, awards, testimonials, or event dates beyond the list supplied. Captions must not include image-generation instructions.",
+          "You plan practical social campaign drafts. Return JSON only with this shape: {\"posts\":[{\"date\":\"YYYY-MM-DD\",\"platform\":\"Instagram\",\"prompt\":\"standalone image brief\",\"caption\":\"ready-to-post caption\"}]}. Produce exactly one item for each requested date, in order. When a date lists a verified event that is relevant to the brand's audience, theme that day's image brief and caption around it — use symbolic, festive imagery and never depict real people or public figures. When no event is listed, create a normal on-brand post; never force a festival onto an ordinary day. If the brand has a mascot, treat it as a supporting cameo only — briefs may include it small or in a corner, never as the main subject. Image prompts must be complete and stand alone. Never invent events, prices, claims, discounts, awards, testimonials, or event dates beyond the list supplied. Captions must not include image-generation instructions. " + SOCIAL_CAPTION_STYLE,
       },
       {
         role: "user",

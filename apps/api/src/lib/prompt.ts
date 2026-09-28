@@ -22,6 +22,14 @@ export const CAMPAIGN_CREATIVE_STYLE =
   "\nHard style rules: bright, even lighting and a light, clean background; no dark panels, gradients, smoke, vignettes or scrims anywhere; every on-image word sits on a light, uncluttered area with strong contrast and is spelled exactly as written.";
 
 /**
+ * Voice for every auto-written social caption — the Share preview, campaign
+ * post copy and autopilot plans all append this so captions stay consistent:
+ * a short, warm brand line rather than a paragraph of promotional copy.
+ */
+export const SOCIAL_CAPTION_STYLE =
+  "Caption style: at most 2 short lines, plain and natural, specific to this post; warm and energetic but never aggressive or salesy; no explanations, filler or hype - it should read like a real brand wrote it, not an AI.";
+
+/**
  * Wraps a described change to an already-generated image. The reference image
  * is the base to modify — unlike the creation template, nothing here invites
  * the model to re-compose, so everything the request doesn't mention survives

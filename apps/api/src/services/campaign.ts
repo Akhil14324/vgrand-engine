@@ -4,6 +4,7 @@ import {
   buildFinalPrompt,
   CAMPAIGN_CREATIVE_STYLE,
   resolveProvider,
+  SOCIAL_CAPTION_STYLE,
 } from "../lib/prompt.js";
 import {
   getImageUsage,
@@ -515,7 +516,7 @@ export async function generateCampaignPostCopy(
   }
 
   return streamChat(
-    `Analyze the attached generated campaign image itself, then write a ready-to-post social caption and 5–8 relevant hashtags based on the visible image, the campaign context, and these live trend notes. Keep the caption in the language used by the campaign user (use natural Telugu for a Telugu request unless another language was requested). Do not invent prices, offers, features, or claims. Do not put the caption or hashtags in the image; return them only as text in exactly this format:\nCaption: <caption>\n\nHashtags: #tag1 #tag2 ...\n\nCampaign context:\n${campaignContext}\n\nCreative brief:\n${creativePrompt.slice(0, 1200)}\n\nLive trend notes:\n${trendNotes}`,
+    `Analyze the attached generated campaign image itself, then write a ready-to-post social caption and 5–8 relevant hashtags based on the visible image, the campaign context, and these live trend notes. ${SOCIAL_CAPTION_STYLE} Keep the caption in the language used by the campaign user (use natural Telugu for a Telugu request unless another language was requested). Do not invent prices, offers, features, or claims. Do not put the caption or hashtags in the image; return them only as text in exactly this format:\nCaption: <caption>\n\nHashtags: #tag1 #tag2 ...\n\nCampaign context:\n${campaignContext}\n\nCreative brief:\n${creativePrompt.slice(0, 1200)}\n\nLive trend notes:\n${trendNotes}`,
     [],
     [],
     [],

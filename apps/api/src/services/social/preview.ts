@@ -7,6 +7,7 @@ import {
 import { env } from "../../env.js";
 import { HttpError } from "../../lib/errors.js";
 import { loadBrandContext } from "../../lib/brand.js";
+import { SOCIAL_CAPTION_STYLE } from "../../lib/prompt.js";
 import { getClient } from "../chat.js";
 
 interface PreviewSource {
@@ -21,9 +22,9 @@ const clip = (s: string, n: number) => s.replace(/\s+/g, " ").trim().slice(0, n)
 /** Per-platform shape the model must fill - only requested platforms are asked for. */
 const SHAPES: Record<SocialPlatform, string> = {
   instagram:
-    `"instagram": { "caption": string (engaging, max 2000 chars, no hashtags inside), "hashtags": string[] (5-12 relevant tags, without the # symbol) }`,
-  facebook: `"facebook": { "caption": string (friendly, conversational, max 600 chars) }`,
-  x: `"x": { "caption": string (punchy, STRICTLY under ${X_MAX_CHARS} characters, at most 2 hashtags) }`,
+    `"instagram": { "caption": string (1-2 short natural lines, no hashtags inside), "hashtags": string[] (5-12 relevant tags, without the # symbol) }`,
+  facebook: `"facebook": { "caption": string (1-2 short natural lines, warm and conversational) }`,
+  x: `"x": { "caption": string (1 short punchy line, STRICTLY under ${X_MAX_CHARS} characters, at most 2 hashtags) }`,
   youtube:
     `"youtube": { "title": string (max 90 chars), "description": string (2-4 sentences), "tags": string[] (up to 10, no # symbol) }`,
 };
@@ -68,7 +69,8 @@ export async function generateSocialPreviews(
     `Reply with ONE JSON object containing exactly these keys and nothing else:\n` +
     `{ ${wanted.map((p) => SHAPES[p]).join(", ")} }\n` +
     `Rules: write in the language of the image idea; match the brand's voice when brand context is given; ` +
-    `only state facts, offers or prices that appear in the context - never invent any; no emoji spam.`;
+    `only state facts, offers or prices that appear in the context - never invent any; no emoji spam. ` +
+    SOCIAL_CAPTION_STYLE;
 
   let raw: string;
   try {
