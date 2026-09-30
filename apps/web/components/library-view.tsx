@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Download,
   ImageIcon,
   Link2,
   Loader2,
@@ -201,6 +202,24 @@ function LibraryTile({
   const share = useShareGeneration();
   const { select, selectedId } = useStudio();
   const [shareOpen, setShareOpen] = useState(false);
+
+  const download = async () => {
+    const url = generation.imageUrls[0]!;
+    try {
+      const blob = await (await fetch(url)).blob();
+      const ext = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `catgpt-${generation.id}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      toast.error("Download failed");
+    }
+  };
+
   return (
     <div className="group relative overflow-hidden rounded-xl border bg-muted">
       <SocialShareDialog generation={generation} open={shareOpen} onOpenChange={setShareOpen} />
@@ -224,6 +243,14 @@ function LibraryTile({
         )}
       </div>
       <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
+        <button
+          aria-label="Download image"
+          title="Download image"
+          onClick={() => void download()}
+          className="rounded-md bg-black/50 p-1 text-white hover:bg-black/70"
+        >
+          <Download className="h-4 w-4" />
+        </button>
         <button
           aria-label="Share to social media"
           title="Share to social media"
