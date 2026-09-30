@@ -1,25 +1,30 @@
 "use client";
 
 import { RequireAuth } from "@/components/require-auth";
-import { useEffect, useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ImageIcon,
+  Link2,
   Loader2,
   MoreHorizontal,
   Share2,
   Trash2,
+  Upload,
 } from "lucide-react";
 import type { GenerationDto } from "@catgpt/types";
-import { useAuth } from "@/lib/auth";
+import { apiFetch } from "@/lib/api";
 import {
   useDeleteGeneration,
   useGenerations,
   useShareGeneration,
   useThemes,
 } from "@/lib/hooks";
+import { SocialShareDialog } from "@/components/social-share";
+import { toast } from "@/components/ui/toaster";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -69,6 +74,7 @@ function LibraryContent() {
         <h1 className="font-display text-lg font-semibold tracking-tight">
           Library
         </h1>
+        <UploadButton />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
@@ -100,7 +106,7 @@ function LibraryContent() {
           ) : images.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-24 text-center text-muted-foreground">
               <ImageIcon className="h-8 w-8" />
-              <p className="text-sm">No generated images yet.</p>
+              <p className="text-sm">No images yet - generate one or upload your own.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -111,6 +117,51 @@ function LibraryContent() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Adds the user's own pictures to the Library so they can be posted from there. */
+function UploadButton() {
+  const qc = useQueryClient();
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const upload = async (files: FileList) => {
+    setBusy(true);
+    let done = 0;
+    for (const file of Array.from(files)) {
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        await apiFetch("/library/uploads", { method: "POST", body: form });
+        done++;
+      } catch (e) {
+        toast.error(`${file.name}: ${e instanceof Error ? e.message : "upload failed"}`);
+      }
+    }
+    setBusy(false);
+    if (input.current) input.current.value = "";
+    if (done) {
+      await qc.invalidateQueries({ queryKey: ["generations"] });
+      toast.success(done === 1 ? "Image added to your library" : `${done} images added to your library`);
+    }
+  };
+
+  return (
+    <div className="ml-auto">
+      <input
+        ref={input}
+        type="file"
+        multiple
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => e.target.files?.length && void upload(e.target.files)}
+      />
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => input.current?.click()}>
+        {busy ? <Loader2 className="animate-spin" /> : <Upload />}
+        Upload
+      </Button>
     </div>
   );
 }
@@ -149,8 +200,10 @@ function LibraryTile({
   const del = useDeleteGeneration();
   const share = useShareGeneration();
   const { select, selectedId } = useStudio();
+  const [shareOpen, setShareOpen] = useState(false);
   return (
     <div className="group relative overflow-hidden rounded-xl border bg-muted">
+      <SocialShareDialog generation={generation} open={shareOpen} onOpenChange={setShareOpen} />
       <button
         onClick={onOpen}
         className="block aspect-square w-full"
@@ -170,7 +223,15 @@ function LibraryTile({
           <p className="text-[10px] text-white/70">/{generation.theme.slug}</p>
         )}
       </div>
-      <div className="absolute right-1.5 top-1.5 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
+      <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
+        <button
+          aria-label="Share to social media"
+          title="Share to social media"
+          onClick={() => setShareOpen(true)}
+          className="rounded-md bg-black/50 p-1 text-white hover:bg-black/70"
+        >
+          <Share2 className="h-4 w-4" />
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -180,17 +241,24 @@ function LibraryTile({
               <MoreHorizontal className="h-4 w-4" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={() => setShareOpen(true)}>
+              <Share2 className="mr-2 h-3.5 w-3.5" />
+              Share to social media
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() =>
                 share.mutate(generation.id, {
-                  onSuccess: (link) =>
-                    void navigator.clipboard.writeText(link.url),
+                  onSuccess: (link) => {
+                    void navigator.clipboard.writeText(link.url);
+                    toast.success("Link copied");
+                  },
+                  onError: (e) => toast.error(e.message),
                 })
               }
             >
-              <Share2 className="mr-2 h-3.5 w-3.5" />
-              Share
+              <Link2 className="mr-2 h-3.5 w-3.5" />
+              Copy link
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
