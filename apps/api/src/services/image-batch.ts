@@ -9,7 +9,8 @@ import {
 import { recordImageUsage, refundImageUsage } from "../lib/usage.js";
 import { enqueueGeneration } from "./queue.js";
 import { publishGenerationEvent } from "./events.js";
-import { getClient, toMessages, type HistoryTurn } from "./chat.js";
+import { getClient, toMessages, userContent, type HistoryTurn } from "./chat.js";
+import { composeSlidePrompt } from "./carousel-logic.js";
 
 /**
  * A single message can describe several distinct images — "make the Day 10
@@ -70,6 +71,89 @@ export async function splitImageBatch(
   }
 }
 
+const CAROUSEL_SYSTEM = (count: number) => `You plan a social media carousel of exactly ${count} slides from the user's request. Return JSON only: {"style":"...","slides":[{"label":"...","prompt":"..."}]}.
+
+Use the ENTIRE conversation so far (every earlier message, and any attached pictures) as source material - the topic, facts, names, offers, tone and language the user established - not only the latest message. The latest message says what to make; the earlier turns say what it is about.
+
+"style" is ONE shared visual direction reused on every slide so the set looks like one series: palette, illustration/photo style, typography feel, layout and background treatment (2-3 sentences). Honour any style the user asked for.
+
+"slides" has exactly ${count} entries in reading order: slide 1 is a scroll-stopping cover with a short hook, the middle slides each carry one distinct point, and the last slide is a clear call to action. Each "prompt" is stand-alone (the image model sees nothing else): describe the slide's layout and imagery, and spell out any on-image text in quotes, short and letter-perfect, in the language the user used. Keep on-image text to a headline plus at most one short line. "label" is a 2-5 word tag (e.g. "Cover", "Tip 2"). Never invent facts, prices or claims the user did not give.`;
+
+/** Pictures the user attached to the carousel request that the planner can see. */
+const MAX_PLANNER_IMAGES = 4;
+/** Per-turn and total caps so a long chat cannot blow the planner's context. */
+const CONTEXT_TURN_CHARS = 1500;
+const CONTEXT_TOTAL_CHARS = 24_000;
+
+/**
+ * The whole conversation as planner context (not just the last few turns), so
+ * "make a carousel from everything we discussed" draws on all of it. Each turn
+ * is trimmed, and if the total is still too large the OLDEST turns are dropped
+ * first - the recent ones matter most.
+ */
+function carouselContext(history: HistoryTurn[]) {
+  const trim = (s: string) =>
+    s.length > CONTEXT_TURN_CHARS ? `${s.slice(0, CONTEXT_TURN_CHARS)}...` : s;
+  const msgs = toMessages(history).map((m) => ({ ...m, content: trim(m.content) }));
+  let total = 0;
+  let start = msgs.length;
+  while (start > 0 && total + msgs[start - 1]!.content.length <= CONTEXT_TOTAL_CHARS) {
+    start--;
+    total += msgs[start]!.content.length;
+  }
+  // Keep user/assistant pairs aligned: the slice must open on a user turn.
+  if (start % 2 === 1) start++;
+  return msgs.slice(start);
+}
+
+/**
+ * Plans a carousel: one chat-model call writes a shared style plus one brief
+ * per slide. Returns the briefs with the style already folded into each, so
+ * they drop straight into the normal batch path. Falls back to a single brief
+ * (the original prompt) on any failure - callers only treat >1 as a batch.
+ */
+export async function planCarousel(
+  prompt: string,
+  history: HistoryTurn[],
+  count: number,
+  attachedImages: string[] = [],
+): Promise<ImageBrief[]> {
+  try {
+    const res = await getClient().chat.completions.create({
+      model: env.CHAT_MODEL,
+      temperature: 0.4,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: CAROUSEL_SYSTEM(count) },
+        ...carouselContext(history),
+        {
+          role: "user",
+          content: userContent(prompt, attachedImages.slice(0, MAX_PLANNER_IMAGES)),
+        },
+      ],
+    });
+    const parsed = JSON.parse(res.choices[0]?.message.content ?? "{}") as {
+      style?: string;
+      slides?: Partial<ImageBrief>[];
+    };
+    const slides = (parsed.slides ?? [])
+      .filter((s): s is ImageBrief => Boolean(s.prompt?.trim()))
+      .slice(0, count);
+    if (slides.length < 2) return [{ label: "", prompt }];
+    const style = parsed.style?.trim() || "clean, consistent, on-brand";
+    return slides.map((s, i) => ({
+      label: s.label?.trim() || (i === 0 ? "Cover" : `Slide ${i + 1}`),
+      prompt: composeSlidePrompt(style, s, i, slides.length),
+    }));
+  } catch (err) {
+    console.warn(
+      "[image-batch] carousel plan failed, treating as a single image:",
+      (err as Error).message,
+    );
+    return [{ label: "", prompt }];
+  }
+}
+
 /**
  * Turns the briefs BEYOND the first (the caller already made that one the
  * normal, returned generation) into real image generations in the same chat.
@@ -88,6 +172,8 @@ export async function spawnImageBatch(params: {
   productImage?: { id: string; label: string; url: string };
   quality: string;
   size: string;
+  /** Set for a carousel: tags each slide so the set can be grouped later. The first slide (index 0) is the caller's own generation. */
+  carouselSetId?: string;
 }): Promise<void> {
   const { userId, conversationId, briefs } = params;
   if (briefs.length === 0) return;
@@ -104,7 +190,7 @@ export async function spawnImageBatch(params: {
       )
     : "";
 
-  for (const brief of briefs) {
+  for (const [i, brief] of briefs.entries()) {
     const generation = await prisma.generation.create({
       data: {
         userId,
@@ -129,6 +215,9 @@ export async function spawnImageBatch(params: {
             ? { selectedProductAssetId: params.productImage.id }
             : {}),
           imageBatch: { label: brief.label },
+          ...(params.carouselSetId
+            ? { carousel: { setId: params.carouselSetId, index: i + 1, total: briefs.length + 1 } }
+            : {}),
         },
       },
     });

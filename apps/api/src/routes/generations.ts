@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { prisma } from "@catgpt/db";
 import {
@@ -35,7 +36,8 @@ import {
   refundImageUsage,
 } from "../lib/usage.js";
 import { isCampaignConversation, isCampaignPrompt, prepareCampaignCalendar } from "../services/campaign.js";
-import { spawnImageBatch, splitImageBatch } from "../services/image-batch.js";
+import { planCarousel, spawnImageBatch, splitImageBatch } from "../services/image-batch.js";
+import { carouselSlideCount, isCarouselRequest } from "../services/carousel-logic.js";
 import {
   brandImageGuidance,
   brandReferenceUrls,
@@ -216,6 +218,10 @@ export async function generationRoutes(app: FastifyInstance) {
     // The classifier only runs in this narrow branch, not on every message.
     let effectiveParentId: string | null = body.parentId ?? null;
     let inferredParentImageUrl: string | null = null;
+    // "Generate a carousel" asks for a fresh set of slides, never an edit of
+    // the last image - so it skips the follow-up-edit inference below.
+    const wantsCarousel =
+      !body.voice && isCarouselRequest(body.prompt) && !isCampaignPrompt(body.prompt);
     // Campaign chats never take this path: "make 5 more images" there means
     // new campaign creatives, not an edit of the last image. Likewise an
     // explicit "recreate it completely" (or a UI recreate flag) is a fresh
@@ -227,6 +233,7 @@ export async function generationRoutes(app: FastifyInstance) {
       !body.recreate &&
       !hasProductImageReference &&
       userRefs.length === 0 &&
+      !wantsCarousel &&
       !IMAGE_TRIGGER.test(body.prompt) &&
       !RECREATE_IMAGE.test(body.prompt) &&
       !isCampaignPrompt(body.prompt)
@@ -283,6 +290,8 @@ export async function generationRoutes(app: FastifyInstance) {
     // every plain prompt (plus recent history) and decide for itself. Jev is
     // a cheap typed-choice call, not a full chat completion, so this is
     // worth paying on every turn that isn't already resolved above.
+    const carouselRequested =
+      wantsCarousel && !visionOnly && !effectiveParentId && !(await inCampaignChat());
     let inferredImage = requestsImageFromProductImage(
       body.prompt,
       productImageResolution,
@@ -291,6 +300,7 @@ export async function generationRoutes(app: FastifyInstance) {
       !inferredImage &&
       !body.voice &&
       !visionOnly &&
+      !carouselRequested &&
       userRefs.length === 0 &&
       !effectiveParentId &&
       !IMAGE_TRIGGER.test(body.prompt) &&
@@ -339,13 +349,23 @@ export async function generationRoutes(app: FastifyInstance) {
     // cannot actually call the image tool more than once, so it used to
     // narrate the request back with sample code instead of ever producing
     // one. Only worth checking once we already know this is an image ask.
-    const batchBriefs = inferredImage
-      ? await splitImageBatch(
-          calendarNote ? `${body.prompt}\n\n${calendarNote}` : body.prompt,
-          [],
+    // A carousel is planned instead of split: the message rarely lists the
+    // slides, so the model writes them (shared style + one brief per slide).
+    const batchBriefs = carouselRequested
+      ? await planCarousel(
+          body.prompt,
+          conversationId ? await loadChatHistory(conversationId, undefined, 60) : [],
+          carouselSlideCount(body.prompt),
+          userRefs,
         )
-      : [];
+      : inferredImage
+        ? await splitImageBatch(
+            calendarNote ? `${body.prompt}\n\n${calendarNote}` : body.prompt,
+            [],
+          )
+        : [];
     const isBatch = batchBriefs.length > 1;
+    const carouselSetId = carouselRequested && isBatch ? randomUUID() : undefined;
 
     // Strict gate: an image only on explicit request — "create an image" in
     // the prompt, attached references, or a regenerate/edit chain (explicit
@@ -356,6 +376,7 @@ export async function generationRoutes(app: FastifyInstance) {
       !visionOnly &&
       (userRefs.length > 0 ||
         effectiveParentId ||
+        carouselRequested ||
         IMAGE_TRIGGER.test(body.prompt) ||
         inferredImage)
         ? ("image" as const)
@@ -391,7 +412,11 @@ export async function generationRoutes(app: FastifyInstance) {
         ? Math.min(Math.max(body.imageCount ?? 1, 1), SOCIAL_MAX_CAROUSEL_IMAGES)
         : 1;
 
-    if (kind === "image") await assertImageQuota(req.userId, imageCount);
+    // A carousel is only useful whole, so check the full set up front rather
+    // than generating a few slides and running out of quota mid-set.
+    if (kind === "image") {
+      await assertImageQuota(req.userId, carouselSetId ? batchBriefs.length : imageCount);
+    }
 
     const parentImageUrl = effectiveParentId
       ? parent?.id === effectiveParentId
@@ -508,6 +533,12 @@ export async function generationRoutes(app: FastifyInstance) {
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
             ...(imageCount > 1 ? { imageCount } : {}),
             ...(calendarNote ? { calendarNote } : {}),
+            ...(carouselSetId
+              ? {
+                  imageBatch: { label: batchBriefs[0]!.label },
+                  carousel: { setId: carouselSetId, index: 0, total: batchBriefs.length },
+                }
+              : {}),
           },
         },
         }),
@@ -583,6 +614,7 @@ export async function generationRoutes(app: FastifyInstance) {
           : {}),
         quality: body.quality ?? "low",
         size: body.size ?? "auto",
+        carouselSetId,
       }).catch((err) =>
         console.error("[generations] image batch spawn failed:", err),
       );
