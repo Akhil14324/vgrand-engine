@@ -80,6 +80,135 @@ async function publishCarousel(
   return { postId: json.id };
 }
 
+const REEL_POLL_INTERVAL_MS = 4_000;
+const REEL_POLL_MAX_MS = 5 * 60_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function graphJson(res: Response): Promise<Record<string, any>> {
+  const json = await readJson(res);
+  if (!res.ok) throw graphError(res.status, json);
+  return json;
+}
+
+/**
+ * Page Reel via the 3-phase Reels API: start (returns video_id + upload_url),
+ * upload the bytes to that URL, then finish with PUBLISHED. Each irreversible
+ * step is saved so a retry resumes (re-uploading only if the bytes never
+ * landed) instead of creating a second Reel. Uses the Page permissions the
+ * app already requests (pages_manage_posts) - no extra review needed.
+ */
+async function publishReel(
+  pageId: string,
+  token: string,
+  media: PublishInput["media"],
+  message: string | undefined,
+  providerState: ProviderState,
+  saveState: PublishInput["saveState"],
+): Promise<PublishResult> {
+  let videoId = typeof providerState.fbReelId === "string" ? providerState.fbReelId : null;
+  let uploadUrl = typeof providerState.fbReelUploadUrl === "string" ? providerState.fbReelUploadUrl : null;
+  let uploaded = providerState.fbReelUploaded === true;
+  let finished = providerState.fbReelFinished === true;
+
+  const post = async (path: string, params: Record<string, string>) => {
+    try {
+      return await graphJson(
+        await socialFetch(`${graphBase()}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ ...params, access_token: token }).toString(),
+        }),
+      );
+    } catch (err) {
+      if (err instanceof SocialPublishError) throw err;
+      throw new SocialPublishError("PROVIDER_ERROR", "Could not reach Facebook");
+    }
+  };
+
+  if (!videoId || !uploadUrl) {
+    const started = await post(`/${pageId}/video_reels`, { upload_phase: "start" });
+    if (typeof started.video_id !== "string" || typeof started.upload_url !== "string") {
+      throw new SocialPublishError("PROVIDER_ERROR", "Facebook returned no Reel upload session");
+    }
+    videoId = started.video_id;
+    uploadUrl = started.upload_url;
+    uploaded = false;
+    finished = false;
+    await saveState({ fbReelId: videoId, fbReelUploadUrl: uploadUrl, fbReelUploaded: false, fbReelFinished: false });
+  }
+
+  if (!uploaded) {
+    const bytes = await media.video();
+    let res: Response;
+    try {
+      res = await socialFetch(
+        uploadUrl,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `OAuth ${token}`,
+            offset: "0",
+            file_size: String(bytes.byteLength),
+            "Content-Type": "application/octet-stream",
+          },
+          body: new Uint8Array(bytes),
+        },
+        10 * 60_000,
+      );
+    } catch {
+      throw new SocialPublishError("PROVIDER_ERROR", "Facebook Reel upload was interrupted");
+    }
+    const json = await graphJson(res);
+    if (json.success === false) throw new SocialPublishError("PROVIDER_ERROR", "Facebook rejected the Reel upload");
+    uploaded = true;
+    await saveState({ fbReelUploaded: true });
+  }
+
+  if (!finished) {
+    const done = await post(`/${pageId}/video_reels`, {
+      upload_phase: "finish",
+      video_id: videoId,
+      video_state: "PUBLISHED",
+      ...(message ? { description: message } : {}),
+    });
+    if (done.success === false) throw new SocialPublishError("PROVIDER_ERROR", "Facebook could not publish the Reel");
+    await saveState({ fbReelFinished: true });
+  }
+
+  // Facebook processes the video asynchronously; wait for it to go live (or fail).
+  const deadline = Date.now() + REEL_POLL_MAX_MS;
+  let permalink: string | null = null;
+  for (;;) {
+    let info: Record<string, any> = {};
+    try {
+      const url = new URL(`${graphBase()}/${videoId}`);
+      url.searchParams.set("fields", "status,permalink_url");
+      url.searchParams.set("access_token", token);
+      info = await graphJson(await socialFetch(url.toString()));
+    } catch (err) {
+      if (err instanceof SocialPublishError && err.code !== "PROVIDER_ERROR") throw err;
+      // transient read failure - keep polling until the deadline
+    }
+    const status = (info.status ?? {}) as {
+      video_status?: string;
+      publishing_phase?: { status?: string };
+      processing_phase?: { status?: string };
+    };
+    if (typeof info.permalink_url === "string") permalink = `https://www.facebook.com${info.permalink_url}`;
+    if (status.video_status === "error" || status.publishing_phase?.status === "error" || status.processing_phase?.status === "error") {
+      // Session is dead; a retry must start a new one.
+      await saveState({ fbReelId: null, fbReelUploadUrl: null, fbReelUploaded: false, fbReelFinished: false });
+      throw new SocialPublishError("INVALID_MEDIA", "Facebook could not process this video as a Reel");
+    }
+    if (status.publishing_phase?.status === "complete" || status.video_status === "ready") break;
+    if (Date.now() > deadline) {
+      throw new SocialPublishError("PROVIDER_ERROR", "Facebook is still processing the Reel");
+    }
+    await sleep(REEL_POLL_INTERVAL_MS);
+  }
+  return { remoteId: videoId, remoteUrl: permalink ?? `https://www.facebook.com/reel/${videoId}` };
+}
+
 /**
  * Page photo/feed publish. A single image is a plain photo post
  * (`POST /{page-id}/photos`); 2+ images become a multi-photo post (see
@@ -94,6 +223,10 @@ export const facebookAdapter: SocialAdapter = {
     const pageId = account.externalAccountId;
     const token = decryptedTokens.accessToken;
     const message = content.caption?.trim() || undefined;
+
+    if (media.kind === "video") {
+      return publishReel(pageId, token, media, message, providerState, saveState);
+    }
 
     if (media.items.length > 1) {
       const { postId } = await publishCarousel(pageId, token, media.items, message, providerState, saveState);

@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Loader2,
   PartyPopper,
+  Play,
   Plus,
   RotateCw,
   Send,
@@ -565,8 +566,12 @@ function CalendarContent() {
                             STATUS_CLASS[e.s.status],
                           )}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={e.s.mediaUrl} alt="" className="size-4 shrink-0 rounded-sm object-cover" />
+                          {e.s.mediaType === "video" ? (
+                            <Play className="size-4 shrink-0 rounded-sm bg-muted p-0.5" />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={e.s.mediaUrl} alt="" className="size-4 shrink-0 rounded-sm object-cover" />
+                          )}
                           <span className="truncate">
                             {timeOf(socialWhen(e.s))} {PLATFORM_LABEL[e.s.platform]}
                           </span>

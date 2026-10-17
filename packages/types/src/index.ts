@@ -29,7 +29,8 @@ export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
 export const MEMORY_TYPES = ["preference", "fact", "style", "learned"] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
-export const GENERATION_KINDS = ["image", "text"] as const;
+/** "video" = a user-uploaded MP4/MOV in the Library (imageUrls[0] is the video file). */
+export const GENERATION_KINDS = ["image", "text", "video"] as const;
 export type GenerationKind = (typeof GENERATION_KINDS)[number];
 
 export const DOCUMENT_STATUSES = ["processing", "ready", "failed"] as const;
@@ -851,6 +852,16 @@ export const RETRYABLE_SOCIAL_FAILURES: readonly SocialFailureCode[] = [
 
 export const X_MAX_CHARS = 280;
 
+/** Video (Reels) limits: Instagram Reels run 3s-15min; keep uploads to a size every host accepts. */
+export const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"] as const;
+export const VIDEO_MIN_SECONDS = 3;
+export const VIDEO_MAX_SECONDS = 15 * 60;
+/** Platforms that can publish a video (X video needs chunked upload - not supported yet). */
+export const SOCIAL_VIDEO_PLATFORMS: readonly SocialPlatform[] = ["instagram", "facebook", "youtube"];
+
+/** Social posts keep no media-type column: a video is recognised by its file extension. */
+export const isVideoUrl = (url: string): boolean => /\.(mp4|mov)(\?.*)?$/i.test(url);
+
 /** Which connectors are configured server-side (true = credentials present). */
 export type SocialPlatformsDto = Record<SocialConnector, boolean>;
 
@@ -938,8 +949,9 @@ export type SocialPostCreateRequest = z.infer<typeof socialPostCreateRequestSche
 export interface SocialPostDto {
   id: string;
   generationId: string;
-  /** All images in this post, in order (1 for a normal post, 2-10 for a carousel). */
+  /** All images in this post, in order (1 for a normal post, 2-10 for a carousel). A video post has one entry. */
   mediaUrls: string[];
+  mediaType: "image" | "video";
   accountId: string;
   platform: SocialPlatform;
   accountHandle: string | null;

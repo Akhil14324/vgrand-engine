@@ -59,6 +59,8 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/jpg": "jpg",
   "image/webp": "webp",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     "docx",

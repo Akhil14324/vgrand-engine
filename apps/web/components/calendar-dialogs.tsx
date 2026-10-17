@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { CalendarDays, Check, ImageIcon, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
-import type { BrandDto } from "@catgpt/types";
+import { isVideoUrl, type BrandDto } from "@catgpt/types";
+import { MediaThumb } from "@/components/media-thumb";
 import {
   useBrands,
   useCreateDayPost,
@@ -123,8 +124,7 @@ export function ImageThumb({
       aria-label="View full image"
       className={cn("group relative shrink-0 overflow-hidden rounded-lg", className)}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="" className="size-full object-cover transition group-hover:scale-105" />
+      <MediaThumb src={src} className="size-full object-cover transition group-hover:scale-105" />
       <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] font-medium text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
         View
       </span>
@@ -179,7 +179,13 @@ export function ImageViewer({
         </DialogHeader>
         <div className={cn("grid gap-5", onRegenerate && "lg:grid-cols-[minmax(0,1fr)_320px]")}>
           <div className="relative flex items-center justify-center rounded-xl bg-muted/40">
-            {imageUrl ? (
+            {imageUrl && isVideoUrl(imageUrl) ? (
+              <MediaThumb
+                src={imageUrl}
+                controls
+                className={cn("max-h-[72dvh] w-full rounded-xl object-contain transition", busy && "opacity-40")}
+              />
+            ) : imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={imageUrl}
@@ -452,10 +458,9 @@ export function LibraryPickerDialog({
                   onPick(g.id);
                   onClose();
                 }}
-                className="group overflow-hidden rounded-lg border border-border transition hover:ring-2 hover:ring-primary"
+                className="group relative overflow-hidden rounded-lg border border-border transition hover:ring-2 hover:ring-primary"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={g.imageUrls[0]} alt={g.prompt} className="aspect-square w-full object-cover" />
+                <MediaThumb src={g.imageUrls[0]!} alt={g.prompt} className="aspect-square w-full object-cover" />
               </button>
             ))}
           </div>

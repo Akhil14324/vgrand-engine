@@ -16,7 +16,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import type { GenerationDto } from "@catgpt/types";
+import { isVideoUrl, type GenerationDto } from "@catgpt/types";
 import { apiFetch } from "@/lib/api";
 import {
   useDeleteGeneration,
@@ -25,6 +25,7 @@ import {
   useThemes,
 } from "@/lib/hooks";
 import { SocialShareDialog } from "@/components/social-share";
+import { MediaThumb } from "@/components/media-thumb";
 import { toast } from "@/components/ui/toaster";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -107,7 +108,7 @@ function LibraryContent() {
           ) : images.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-24 text-center text-muted-foreground">
               <ImageIcon className="h-8 w-8" />
-              <p className="text-sm">No images yet - generate one or upload your own.</p>
+              <p className="text-sm">Nothing here yet - generate an image or upload your own images and Reels.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -145,7 +146,7 @@ function UploadButton() {
     if (input.current) input.current.value = "";
     if (done) {
       await qc.invalidateQueries({ queryKey: ["generations"] });
-      toast.success(done === 1 ? "Image added to your library" : `${done} images added to your library`);
+      toast.success(done === 1 ? "Added to your library" : `${done} files added to your library`);
     }
   };
 
@@ -155,7 +156,7 @@ function UploadButton() {
         ref={input}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/webp,image/gif"
+        accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime"
         className="hidden"
         onChange={(e) => e.target.files?.length && void upload(e.target.files)}
       />
@@ -207,7 +208,7 @@ function LibraryTile({
     const url = generation.imageUrls[0]!;
     try {
       const blob = await (await fetch(url)).blob();
-      const ext = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+      const ext = blob.type.split("/")[1]?.replace("jpeg", "jpg").replace("quicktime", "mov") || "png";
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `catgpt-${generation.id}.${ext}`;
@@ -228,11 +229,9 @@ function LibraryTile({
         className="block aspect-square w-full"
         title={generation.prompt}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={generation.imageUrls[0]}
+        <MediaThumb
+          src={generation.imageUrls[0]!}
           alt={generation.prompt}
-          loading="lazy"
           className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
         />
       </button>
@@ -244,8 +243,8 @@ function LibraryTile({
       </div>
       <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
         <button
-          aria-label="Download image"
-          title="Download image"
+          aria-label={isVideoUrl(generation.imageUrls[0]!) ? "Download video" : "Download image"}
+          title={isVideoUrl(generation.imageUrls[0]!) ? "Download video" : "Download image"}
           onClick={() => void download()}
           className="rounded-md bg-black/50 p-1 text-white hover:bg-black/70"
         >

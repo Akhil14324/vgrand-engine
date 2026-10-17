@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  isVideoUrl,
   SOCIAL_MAX_CAROUSEL_IMAGES,
   X_MAX_CHARS,
   type GenerationDto,
@@ -46,6 +47,7 @@ import { toast } from "@/components/ui/toaster";
 import { useRewriteCaption } from "@/lib/brand-compliance-hooks";
 import { cn } from "@/lib/utils";
 import { useClickPulse } from "@/lib/use-click-pulse";
+import { MediaThumb } from "@/components/media-thumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -80,7 +82,7 @@ const FAILURE_LABEL: Record<SocialFailureCode, string> = {
   AUTH_EXPIRED: "Authorization expired",
   AUTH_REVOKED: "Authorization revoked",
   RATE_LIMITED: "Rate limited",
-  INVALID_MEDIA: "Invalid image",
+  INVALID_MEDIA: "Invalid media",
   INVALID_CONTENT: "Invalid content",
   PROVIDER_ERROR: "Provider error",
   UNKNOWN: "Something went wrong",
@@ -331,8 +333,7 @@ function PhotoStrip({
   return (
     <div className="flex flex-wrap gap-2">
       <div className="relative size-16 shrink-0 overflow-hidden rounded-md border border-border">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={primaryUrl} alt="" className="h-full w-full object-cover" />
+        <MediaThumb src={primaryUrl} className="h-full w-full object-cover" />
         <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">1</span>
       </div>
       {extras.map((img, i) => (
@@ -392,7 +393,11 @@ function AddPhotosDialog({
   const options = useMemo(
     () =>
       (data?.items ?? []).filter(
-        (g) => g.status === "completed" && g.imageUrls.length > 0 && !excludeIds.has(g.id),
+        (g) =>
+          g.status === "completed" &&
+          g.imageUrls.length > 0 &&
+          !isVideoUrl(g.imageUrls[0]!) &&
+          !excludeIds.has(g.id),
       ),
     [data, excludeIds],
   );
@@ -489,8 +494,11 @@ function SocialShareBody({
     () => [...new Set(selectedAccounts.map((a) => a.platform))],
     [selectedAccounts],
   );
+  // A library video is posted as a Reel: no carousel, and X can't take video yet.
+  const isVideo = isVideoUrl(generation.imageUrls[0] ?? "");
   // Only Instagram and Facebook turn extra images into a carousel / multi-photo post.
-  const carouselEligible = neededPlatforms.includes("instagram") || neededPlatforms.includes("facebook");
+  const carouselEligible =
+    !isVideo && (neededPlatforms.includes("instagram") || neededPlatforms.includes("facebook"));
   const extraImageIds = useMemo(
     () => new Set([generation.id, ...extraImages.map((i) => i.generationId)]),
     [generation.id, extraImages],
@@ -499,6 +507,7 @@ function SocialShareBody({
   const hasAllDrafts = neededPlatforms.length > 0 && missing.length === 0;
 
   const problems: string[] = [];
+  if (isVideo && neededPlatforms.includes("x")) problems.push("Video posts to X aren't supported yet - deselect X");
   if (drafts.instagram && neededPlatforms.includes("instagram") && !drafts.instagram.caption.trim())
     problems.push("Instagram needs a caption");
   if (drafts.facebook && neededPlatforms.includes("facebook") && !drafts.facebook.caption.trim())
@@ -655,7 +664,7 @@ function SocialShareBody({
                         type="checkbox"
                         className="size-4 accent-primary"
                         checked={selected.has(a.id)}
-                        disabled={needsReauth}
+                        disabled={needsReauth || (isVideo && a.platform === "x")}
                         onChange={() => toggle(a.id)}
                         aria-label={`Post to ${accountName(a)}`}
                       />
@@ -665,6 +674,7 @@ function SocialShareBody({
                         <div className="text-[11px] text-muted-foreground">
                           {label}
                           {a.workspaceId ? " · shared workspace account" : " · personal"}
+                          {isVideo && a.platform === "x" ? " · video not supported" : ""}
                           {a.platform === "youtube" && a.metadata?.visibility !== "public"
                             ? " · private uploads only"
                             : ""}
@@ -744,6 +754,19 @@ function SocialShareBody({
           YouTube posts will be <strong>private</strong> while this app&apos;s Google
           verification is pending - they won&apos;t be public.
         </p>
+      )}
+
+      {isVideo && (
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium">Video</h3>
+          <div className="relative w-28 overflow-hidden rounded-md border border-border">
+            <MediaThumb src={generation.imageUrls[0]!} className="aspect-[9/16] w-full object-cover" />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Posts as an Instagram Reel, a Facebook Reel and a YouTube video (vertical clips under 60s show as Shorts).
+            Vertical 9:16 works best.
+          </p>
+        </div>
       )}
 
       {carouselEligible && (
@@ -868,9 +891,11 @@ function SocialShareBody({
             placeholder="Add tag"
             onChange={(tags) => setDrafts((d) => ({ ...d, youtube: { ...d.youtube!, tags } }))}
           />
-          <p className="text-[11px] text-muted-foreground">
-            The image is turned into an 8-second video for YouTube.
-          </p>
+          {!isVideo && (
+            <p className="text-[11px] text-muted-foreground">
+              The image is turned into an 8-second video for YouTube.
+            </p>
+          )}
         </section>
       )}
 

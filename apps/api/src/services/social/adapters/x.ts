@@ -64,6 +64,9 @@ export const xAdapter: SocialAdapter = {
     if (text.length > X_MAX_CHARS) {
       throw new SocialPublishError("INVALID_CONTENT", `Post is longer than ${X_MAX_CHARS} characters`);
     }
+    if (media.kind === "video") {
+      throw new SocialPublishError("INVALID_MEDIA", "Video posts to X aren't supported yet");
+    }
     const token = decryptedTokens.accessToken;
 
     let mediaId = typeof providerState.xMediaId === "string" ? providerState.xMediaId : null;

@@ -15,6 +15,8 @@ interface PreviewSource {
   finalPrompt: string;
   metadata: unknown;
   theme: { label: string } | null;
+  /** "video" = an uploaded Reel; the copy then describes a short video, not an image. */
+  kind?: string;
 }
 
 const clip = (s: string, n: number) => s.replace(/\s+/g, " ").trim().slice(0, n);
@@ -53,9 +55,12 @@ export async function generateSocialPreviews(
   const brand =
     typeof meta.brandId === "string" ? await loadBrandContext(meta.brandId, userId) : null;
 
+  const isVideo = source.kind === "video";
   const context = [
-    `Image idea (the user's prompt): ${clip(source.prompt, 1200)}`,
-    source.finalPrompt && source.finalPrompt !== source.prompt
+    isVideo
+      ? `Video (a short Reel; all we know is its file name): ${clip(source.prompt, 300)}`
+      : `Image idea (the user's prompt): ${clip(source.prompt, 1200)}`,
+    !isVideo && source.finalPrompt && source.finalPrompt !== source.prompt
       ? `Full image brief: ${clip(source.finalPrompt, 1000)}`
       : null,
     source.theme ? `Visual theme: ${source.theme.label}` : null,
@@ -65,7 +70,9 @@ export async function generateSocialPreviews(
     .join("\n\n");
 
   const system =
-    `You write social media copy to accompany an AI-generated image. ` +
+    (isVideo
+      ? `You write social media copy to accompany a short video (Reel) the user uploaded. You cannot see it, so keep the copy general to the brand and file name and never describe specific footage. `
+      : `You write social media copy to accompany an AI-generated image. `) +
     `Reply with ONE JSON object containing exactly these keys and nothing else:\n` +
     `{ ${wanted.map((p) => SHAPES[p]).join(", ")} }\n` +
     `Rules: write in the language of the image idea; match the brand's voice when brand context is given; ` +

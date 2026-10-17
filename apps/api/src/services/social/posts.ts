@@ -1,6 +1,8 @@
 import { Prisma, prisma, type SocialAccount, type SocialPost } from "@catgpt/db";
 import {
+  isVideoUrl,
   SOCIAL_MAX_CAROUSEL_IMAGES,
+  SOCIAL_VIDEO_PLATFORMS,
   X_MAX_CHARS,
   type SocialAccountStatus,
   type SocialFailureCode,
@@ -109,6 +111,7 @@ export function toSocialPostDto(p: PostWithAccount): SocialPostDto {
     id: p.id,
     generationId: p.generationId,
     mediaUrls: p.mediaUrls,
+    mediaType: p.mediaUrls[0] && isVideoUrl(p.mediaUrls[0]) ? "video" : "image",
     accountId: p.accountId,
     platform: p.account.platform as SocialPlatform,
     accountHandle: p.account.handle,
@@ -298,6 +301,11 @@ export async function createSocialPosts(
   // generation entirely. Each referenced generation must be the caller's own
   // and completed; unknown generations are fetched once and cached.
   const additionalImages = body.additionalImages ?? [];
+  // A video (Reel) is always a post of its own - it can't be bundled with photos.
+  const isVideo = generation.kind === "video" || isVideoUrl(generation.imageUrls[0]!);
+  if (isVideo && additionalImages.length > 0) {
+    throw badRequest("A video post can't include extra photos");
+  }
   if (1 + additionalImages.length > SOCIAL_MAX_CAROUSEL_IMAGES) {
     throw badRequest(`A post can include at most ${SOCIAL_MAX_CAROUSEL_IMAGES} images`);
   }
@@ -313,6 +321,7 @@ export async function createSocialPosts(
       }
       const url = gen.imageUrls[img.index ?? 0] ?? gen.imageUrls[0];
       if (!url) throw badRequest("One of the selected images no longer exists");
+      if (isVideoUrl(url)) throw badRequest("Videos can't be added to a photo carousel");
       return url;
     }),
   );
@@ -334,6 +343,9 @@ export async function createSocialPosts(
     }
     if (account.status === "revoked" || account.status === "reauth_required") {
       throw new HttpError(409, `Reconnect ${account.displayName ?? account.platform} before posting`);
+    }
+    if (isVideo && !SOCIAL_VIDEO_PLATFORMS.includes(account.platform as SocialPlatform)) {
+      throw badRequest("Video posts are supported on Instagram, Facebook and YouTube only");
     }
     try {
       prepared.push({
@@ -365,7 +377,7 @@ export async function createSocialPosts(
   // Repurposing: Instagram needs each frame at 4:5 - 1.91:1, so it gets its own
   // fitted copies (one set per request, shared by every Instagram account);
   // other platforms keep the originals.
-  const instagramMediaUrls = prepared.some((p) => p.account.platform === "instagram")
+  const instagramMediaUrls = !isVideo && prepared.some((p) => p.account.platform === "instagram")
     ? await Promise.all(mediaUrls.map(async (url) => (await fitImageForInstagram(url, userId)) ?? url))
     : mediaUrls;
   const rows = await prisma.$transaction(

@@ -39,6 +39,8 @@ const envSchema = z.object({
   MAX_PDF_PAGES: z.coerce.number().int().positive().default(200),
   /** Multipart cap — applies to reference images and PDF uploads. */
   MAX_UPLOAD_MB: z.coerce.number().int().positive().default(25),
+  /** Library video (Reels) uploads. Supabase's free plan caps objects at 50 MB regardless. */
+  MAX_VIDEO_UPLOAD_MB: z.coerce.number().int().positive().default(100),
   RAG_TOP_K: z.coerce.number().int().positive().default(6),
   RAG_CHUNK_CHARS: z.coerce.number().int().positive().default(1200),
   RAG_CHUNK_OVERLAP: z.coerce.number().int().nonnegative().default(150),

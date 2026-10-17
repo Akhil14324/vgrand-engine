@@ -6,6 +6,7 @@ import type { ProviderState, PublishInput, PublishResult, SocialAdapter } from "
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_MAX_MS = 90_000;
+const VIDEO_POLL_MAX_MS = 6 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function graph(
@@ -46,15 +47,20 @@ function composeCaption(content: PublishInput["content"]): string {
  * saved state points at this container on ERROR/EXPIRED, so a retry recreates
  * only the broken container instead of the whole post.
  */
-async function waitUntilFinished(containerId: string, token: string, onFail: () => Promise<unknown>): Promise<void> {
-  const deadline = Date.now() + POLL_MAX_MS;
+async function waitUntilFinished(
+  containerId: string,
+  token: string,
+  onFail: () => Promise<unknown>,
+  maxMs = POLL_MAX_MS,
+): Promise<void> {
+  const deadline = Date.now() + maxMs;
   for (;;) {
     const status = await graph("GET", `/${containerId}`, token, { fields: "status_code" });
     const code = status.status_code as string | undefined;
     if (code === "FINISHED") return;
     if (code === "ERROR") {
       await onFail();
-      throw new SocialPublishError("INVALID_MEDIA", "Instagram could not process the image");
+      throw new SocialPublishError("INVALID_MEDIA", "Instagram could not process the media");
     }
     if (code === "EXPIRED") {
       // Containers expire after ~24h; a retry must start fresh.
@@ -63,7 +69,7 @@ async function waitUntilFinished(containerId: string, token: string, onFail: () 
     }
     if (Date.now() > deadline) {
       // Container id stays saved: the retry keeps polling the same one.
-      throw new SocialPublishError("PROVIDER_ERROR", "Instagram is still processing the image");
+      throw new SocialPublishError("PROVIDER_ERROR", "Instagram is still processing the media");
     }
     await sleep(POLL_INTERVAL_MS);
   }
@@ -92,13 +98,20 @@ export const instagramAdapter: SocialAdapter = {
     let containerId = typeof state.igContainerId === "string" ? state.igContainerId : null;
     if (!containerId) {
       containerId =
-        media.items.length > 1
-          ? await createCarouselContainer(igUserId, token, media.items, content, providerState, saveState)
-          : await createSingleContainer(igUserId, token, media.items[0]!, content);
+        media.kind === "video"
+          ? await createReelContainer(igUserId, token, media.items[0]!, content)
+          : media.items.length > 1
+            ? await createCarouselContainer(igUserId, token, media.items, content, providerState, saveState)
+            : await createSingleContainer(igUserId, token, media.items[0]!, content);
       state = await saveState({ igContainerId: containerId });
     }
 
-    await waitUntilFinished(containerId, token, () => saveState({ igContainerId: null }));
+    await waitUntilFinished(
+      containerId,
+      token,
+      () => saveState({ igContainerId: null }),
+      media.kind === "video" ? VIDEO_POLL_MAX_MS : POLL_MAX_MS,
+    );
 
     const published = await graph("POST", `/${igUserId}/media_publish`, token, {
       creation_id: containerId,
@@ -110,6 +123,26 @@ export const instagramAdapter: SocialAdapter = {
     return finish(igUserId, token, published.id, state);
   },
 };
+
+/** Reels: Instagram downloads `video_url` itself, then transcodes - hence the long poll. */
+async function createReelContainer(
+  igUserId: string,
+  token: string,
+  item: PublishInput["media"]["items"][number],
+  content: PublishInput["content"],
+): Promise<string> {
+  const videoUrl = await item.publicUrl();
+  const created = await graph("POST", `/${igUserId}/media`, token, {
+    media_type: "REELS",
+    video_url: videoUrl,
+    caption: composeCaption(content),
+    share_to_feed: "true",
+  });
+  if (typeof created.id !== "string") {
+    throw new SocialPublishError("PROVIDER_ERROR", "Instagram returned no container id");
+  }
+  return created.id;
+}
 
 async function createSingleContainer(
   igUserId: string,

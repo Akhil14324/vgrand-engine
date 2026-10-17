@@ -40,23 +40,23 @@ function isPrivateHost(hostname: string): boolean {
  * targets, then confirms the URL actually serves an image (a HEAD, falling
  * back to a 1-byte ranged GET) so we fail cleanly BEFORE any provider call.
  */
-export async function ensurePublicMediaUrl(raw: string): Promise<string> {
+export async function ensurePublicMediaUrl(raw: string, kind: "image" | "video" = "image"): Promise<string> {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new SocialPublishError("INVALID_MEDIA", "Image URL is not valid");
+    throw new SocialPublishError("INVALID_MEDIA", `${kind === "video" ? "Video" : "Image"} URL is not valid`);
   }
   if (url.protocol !== "https:") {
     throw new SocialPublishError(
       "INVALID_MEDIA",
-      "Instagram needs a public HTTPS image URL - configure Supabase storage or a public API_PUBLIC_URL",
+      `Instagram needs a public HTTPS ${kind} URL - configure Supabase storage or a public API_PUBLIC_URL`,
     );
   }
   if (url.username || url.password || isPrivateHost(url.hostname)) {
     throw new SocialPublishError(
       "INVALID_MEDIA",
-      "Image URL is local/private, so Instagram cannot fetch it",
+      `${kind === "video" ? "Video" : "Image"} URL is local/private, so Instagram cannot fetch it`,
     );
   }
 
@@ -75,8 +75,8 @@ export async function ensurePublicMediaUrl(raw: string): Promise<string> {
       `Image URL is not publicly accessible (${res.status})`,
     );
   }
-  if (!(res.headers.get("content-type") ?? "").toLowerCase().startsWith("image/")) {
-    throw new SocialPublishError("INVALID_MEDIA", "Image URL does not serve an image");
+  if (!(res.headers.get("content-type") ?? "").toLowerCase().startsWith(`${kind}/`)) {
+    throw new SocialPublishError("INVALID_MEDIA", `URL does not serve ${kind === "video" ? "a video" : "an image"}`);
   }
   return url.toString();
 }

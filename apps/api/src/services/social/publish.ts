@@ -1,32 +1,45 @@
 import { Prisma, prisma } from "@catgpt/db";
-import type { SocialFailureCode } from "@catgpt/types";
+import { isVideoUrl, type SocialFailureCode } from "@catgpt/types";
 import { SOCIAL_BACKOFF_MS, SOCIAL_MAX_ATTEMPTS, enqueueSocialPost } from "../queue.js";
 import { findUsableAccount } from "./accounts.js";
 import { getAdapter, type PreparedMedia, type PreparedMediaItem, type ProviderState } from "./adapters/index.js";
 import { isRetryableFailure, SocialPublishError } from "./errors.js";
 import { fetchImage } from "./media/fetch-image.js";
+import { fetchVideo } from "./media/fetch-video.js";
 import { ensurePublicMediaUrl } from "./media/public-url.js";
 import { imageToYoutubeVideo } from "./media/youtube-video.js";
 import { normalizeContent } from "./posts.js";
 import { ensureFreshToken } from "./tokens.js";
 
 function buildMediaItem(imageUrl: string): PreparedMediaItem {
+  const isVideo = isVideoUrl(imageUrl);
   let image: ReturnType<typeof fetchImage> | null = null;
   return {
     imageUrl,
-    publicUrl: () => ensurePublicMediaUrl(imageUrl),
-    image: () => (image ??= fetchImage(imageUrl)),
+    publicUrl: () => ensurePublicMediaUrl(imageUrl, isVideo ? "video" : "image"),
+    image: () => {
+      if (isVideo) {
+        return Promise.reject(new SocialPublishError("INVALID_MEDIA", "This is a video - it can't be posted as a photo"));
+      }
+      return (image ??= fetchImage(imageUrl));
+    },
   };
 }
 
 function buildMedia(imageUrls: string[]): PreparedMedia {
   const items = imageUrls.map(buildMediaItem);
   const primary = items[0]!;
+  const kind = isVideoUrl(imageUrls[0]!) ? "video" : "image";
   let video: Promise<Buffer> | null = null;
   return {
     ...primary,
     items,
-    video: () => (video ??= primary.image().then((i) => imageToYoutubeVideo(i.buffer))),
+    kind,
+    video: () =>
+      (video ??=
+        kind === "video"
+          ? fetchVideo(imageUrls[0]!)
+          : primary.image().then((i) => imageToYoutubeVideo(i.buffer))),
   };
 }
 

@@ -26,7 +26,12 @@ export interface PreparedMediaItem {
  */
 export interface PreparedMedia extends PreparedMediaItem {
   items: PreparedMediaItem[];
-  /** Image converted to an 8s 1080x1920 MP4 (YouTube). Built from items[0] only. */
+  /** "video" = items[0] is an uploaded MP4 (a Reel); image()/carousel logic doesn't apply. */
+  kind: "image" | "video";
+  /**
+   * MP4 bytes for YouTube/Facebook Reels. A video post returns the uploaded
+   * file; an image post converts items[0] to an 8s 1080x1920 MP4.
+   */
   video(): Promise<Buffer>;
 }
 
