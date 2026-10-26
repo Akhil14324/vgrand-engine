@@ -23,6 +23,7 @@ import { getVideoBudget } from "../lib/video-usage.js";
 import { isPlatformReady, looksLikeMp4, probeVideo, transcodeToMp4 } from "../services/social/media/video.js";
 import { deleteStoredFiles, storeImage } from "../services/storage.js";
 import { runScriptJob } from "../services/video-script.js";
+import { checkRenderPlan, runRenderJob } from "../services/video-render.js";
 import { scriptComplianceNotes } from "../services/video-script-logic.js";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -332,5 +333,33 @@ export async function videoStudioRoutes(app: FastifyInstance) {
     if (saved.count === 0) throw new HttpError(409, "This reel changed while saving. Reload and try again.", "INVALID_STATE");
     const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
     return reply.send(toProjectDto(fresh, profile));
+  });
+
+  /**
+   * Starts the render. Footage-only reels for now: the plan is checked here so
+   * problems come back at once, then the job runs in the background and ends in
+   * `review` or `failed`.
+   */
+  app.post<{ Params: { id: string } }>("/video/projects/:id/render", async (req, reply) => {
+    const { project, profile } = await loadProject(req.userId, req.params.id);
+    if (!canTransitionVideoProject(project.status, "editing") || !project.script) {
+      throw new HttpError(409, "Write and review the script before rendering", "INVALID_STATE");
+    }
+    const folder = project.folderId
+      ? await prisma.sourceFolder.findUnique({ where: { id: project.folderId }, include: { assets: true } })
+      : null;
+    const plan = checkRenderPlan(
+      project.script as unknown as ReelScript,
+      (folder?.assets ?? []).map((a) => ({ fileName: a.fileName, kind: a.kind, durationSec: a.durationSec })),
+    );
+    if (!plan.ok) throw badRequest(plan.problems.join(" "));
+    const claimed = await prisma.videoProject.updateMany({
+      where: { id: project.id, status: project.status },
+      data: { status: "editing", errorMessage: null },
+    });
+    if (claimed.count === 0) throw new HttpError(409, "This reel changed while starting. Try again.", "INVALID_STATE");
+    void runRenderJob(project.id);
+    const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
+    return reply.code(202).send(toProjectDto(fresh, profile));
   });
 }

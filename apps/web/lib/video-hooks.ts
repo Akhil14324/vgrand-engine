@@ -95,7 +95,8 @@ export function useVideoProject(id: string | null) {
     queryKey: ["video-project", id],
     queryFn: () => apiFetch<VideoProjectDto>(`/video/projects/${id}`),
     enabled: Boolean(id),
-    refetchInterval: (query) => (query.state.data?.status === "scripting" ? 2000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.status === "scripting" || query.state.data?.status === "editing" ? 2000 : false,
   });
 }
 
@@ -125,6 +126,18 @@ export function useSaveVideoScript() {
   return useMutation({
     mutationFn: ({ id, script }: { id: string; script: ReelScript }) =>
       apiFetch<VideoProjectDto>(`/video/projects/${id}/script`, { method: "PUT", json: script }),
+    onSuccess: (p) => {
+      qc.setQueryData(["video-project", p.id], p);
+      void qc.invalidateQueries({ queryKey: ["video-projects", p.brandId] });
+    },
+  });
+}
+
+export function useRenderVideoProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<VideoProjectDto>(`/video/projects/${id}/render`, { method: "POST" }),
     onSuccess: (p) => {
       qc.setQueryData(["video-project", p.id], p);
       void qc.invalidateQueries({ queryKey: ["video-projects", p.brandId] });

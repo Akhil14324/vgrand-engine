@@ -41,7 +41,7 @@ export function parseFfmpegInfo(stderr: string): Omit<VideoInfo, "isIsoBmff"> | 
   };
 }
 
-function run(bin: string, args: string[]): Promise<{ code: number | null; stderr: string }> {
+export function run(bin: string, args: string[]): Promise<{ code: number | null; stderr: string }> {
   return new Promise((resolve, reject) => {
     const proc = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";

@@ -18,6 +18,7 @@ import { ApiRequestError } from "@/lib/api";
 import {
   useCreateVideoProject,
   useDeleteVideoProject,
+  useRenderVideoProject,
   useSaveVideoScript,
   useVideoProject,
   useVideoProjects,
@@ -234,19 +235,30 @@ function NewReelForm({
 function ReelEditor({ id }: { id: string }) {
   const { data: project, isLoading } = useVideoProject(id);
   const write = useWriteVideoScript();
+  const render = useRenderVideoProject();
 
   if (isLoading || !project) {
     return <p className="text-sm text-muted-foreground">Loading reel…</p>;
   }
 
   const busy = project.status === "scripting" || write.isPending;
-  const canWrite = ["draft", "scripted", "failed"].includes(project.status) && !busy;
+  const rendering = project.status === "editing" || render.isPending;
+  const canWrite = ["draft", "scripted", "failed"].includes(project.status) && !busy && !rendering;
+  const canRender = project.status === "scripted" && !rendering;
 
   const onWrite = async () => {
     try {
       await write.mutateAsync(project.id);
     } catch (err) {
       toast.error(errorText(err, "Could not start the script"));
+    }
+  };
+
+  const onRender = async () => {
+    try {
+      await render.mutateAsync(project.id);
+    } catch (err) {
+      toast.error(errorText(err, "Could not start the render"));
     }
   };
 
@@ -262,7 +274,24 @@ function ReelEditor({ id }: { id: string }) {
           {busy ? <Loader2 className="animate-spin" /> : <Wand2 />}
           {project.script ? "Rewrite script" : "Write script"}
         </Button>
+        {project.status === "scripted" && (
+          <Button size="sm" onClick={() => void onRender()} disabled={!canRender}>
+            {rendering ? <Loader2 className="animate-spin" /> : null} Render reel
+          </Button>
+        )}
       </div>
+
+      {project.status === "editing" && (
+        <p className="text-sm text-muted-foreground">Rendering the reel. This can take a few minutes.</p>
+      )}
+      {project.outputUrl && (
+        <video
+          src={project.outputUrl}
+          controls
+          playsInline
+          className="mx-auto max-h-[520px] rounded-lg bg-black"
+        />
+      )}
 
       {project.status === "scripting" && (
         <p className="text-sm text-muted-foreground">Writing the shot list. This takes about a minute.</p>
