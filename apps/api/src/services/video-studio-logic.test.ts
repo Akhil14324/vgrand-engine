@@ -12,8 +12,10 @@ import {
 describe("video project transitions", () => {
   it.each([
     ["draft", "scripting"],
-    ["scripting", "generating"],
-    ["scripting", "editing"], // footage-only reels skip generation
+    ["scripting", "scripted"],
+    ["scripted", "scripting"], // regenerate the script
+    ["scripted", "generating"],
+    ["scripted", "editing"], // footage-only reels skip generation
     ["generating", "editing"],
     ["editing", "review"],
     ["review", "approved"],
@@ -29,6 +31,9 @@ describe("video project transitions", () => {
     ["approved", "draft"], // approved is terminal
     ["cancelled", "draft"],
     ["review", "generating"], // no going back into generation
+    ["draft", "scripted"], // a script can only come from a scripting run
+    ["scripting", "generating"], // the script must be reviewed first
+    ["scripting", "editing"],
     ["unknown", "draft"],
   ])("rejects %s -> %s", (from, to) => {
     expect(canTransitionVideoProject(from, to as never)).toBe(false);

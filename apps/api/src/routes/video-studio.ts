@@ -2,13 +2,19 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { Prisma, prisma } from "@catgpt/db";
 import {
+  canTransitionVideoProject,
   createSourceFolderSchema,
   createVideoProjectSchema,
   estimateReelCostMicroUsd,
+  reelScriptSchema,
   SOURCE_FOLDER_MAX_ASSETS,
+  validateReelScript,
   VIDEO_MAX_SECONDS,
   VIDEO_MIME_TYPES,
   VIDEO_PROJECT_BUSY_STATUSES,
+  type BrandProfile,
+  type ReelBrief,
+  type ReelScript,
 } from "@catgpt/types";
 import { env } from "../env.js";
 import { badRequest, notFound, parseBody, HttpError } from "../lib/errors.js";
@@ -16,12 +22,14 @@ import { findAccessibleBrand } from "../lib/brand.js";
 import { getVideoBudget } from "../lib/video-usage.js";
 import { isPlatformReady, looksLikeMp4, probeVideo, transcodeToMp4 } from "../services/social/media/video.js";
 import { deleteStoredFiles, storeImage } from "../services/storage.js";
+import { runScriptJob } from "../services/video-script.js";
+import { scriptComplianceNotes } from "../services/video-script-logic.js";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 const brandQuerySchema = z.object({ brandId: z.string().uuid() });
 
-/** Folder/project lookups go through the brand, so workspace members see what their workspace can see. */
+/** Folder lookups go through the brand, so workspace members see what their workspace can see. */
 async function loadFolder(userId: string, id: string) {
   const folder = await prisma.sourceFolder.findUnique({
     where: { id },
@@ -35,8 +43,8 @@ async function loadFolder(userId: string, id: string) {
 async function loadProject(userId: string, id: string) {
   const project = await prisma.videoProject.findUnique({ where: { id } });
   if (!project) throw notFound("Reel not found");
-  await findAccessibleBrand(userId, project.brandId);
-  return project;
+  const brand = await findAccessibleBrand(userId, project.brandId);
+  return { project, profile: (brand.profile as BrandProfile | null) ?? null };
 }
 
 type FolderRow = Prisma.SourceFolderGetPayload<{ include: { assets: true } }>;
@@ -66,19 +74,24 @@ const toFolderDto = (f: FolderRow) => ({
   createdAt: f.createdAt.toISOString(),
 });
 
-const toProjectDto = (p: ProjectRow) => ({
-  id: p.id,
-  brandId: p.brandId,
-  folderId: p.folderId,
-  title: p.title,
-  brief: p.brief,
-  status: p.status,
-  errorMessage: p.errorMessage,
-  outputUrl: p.outputUrl,
-  estimatedCostUsd: p.estimatedCostMicroUsd / 1_000_000,
-  createdAt: p.createdAt.toISOString(),
-  updatedAt: p.updatedAt.toISOString(),
-});
+const toProjectDto = (p: ProjectRow, profile: BrandProfile | null) => {
+  const script = (p.script as ReelScript | null) ?? null;
+  return {
+    id: p.id,
+    brandId: p.brandId,
+    folderId: p.folderId,
+    title: p.title,
+    brief: p.brief as ReelBrief,
+    script,
+    complianceNotes: scriptComplianceNotes(profile, script),
+    status: p.status,
+    errorMessage: p.errorMessage,
+    outputUrl: p.outputUrl,
+    estimatedCostUsd: p.estimatedCostMicroUsd / 1_000_000,
+    createdAt: p.createdAt.toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+  };
+};
 
 /** Videos go through the same probe/transcode checks as Library uploads, so the editor can always read them. */
 async function prepareSourceVideo(buffer: Buffer, mimeType: string) {
@@ -233,18 +246,19 @@ export async function videoStudioRoutes(app: FastifyInstance) {
 
   app.get("/video/projects", async (req) => {
     const { brandId } = parseBody(brandQuerySchema, req.query);
-    await findAccessibleBrand(req.userId, brandId);
+    const brand = await findAccessibleBrand(req.userId, brandId);
+    const profile = (brand.profile as BrandProfile | null) ?? null;
     const projects = await prisma.videoProject.findMany({
       where: { brandId },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
-    return projects.map(toProjectDto);
+    return projects.map((p) => toProjectDto(p, profile));
   });
 
   app.post("/video/projects", async (req, reply) => {
     const body = parseBody(createVideoProjectSchema, req.body);
-    await findAccessibleBrand(req.userId, body.brandId);
+    const brand = await findAccessibleBrand(req.userId, body.brandId);
     if (body.folderId) {
       const folder = await prisma.sourceFolder.findUnique({ where: { id: body.folderId } });
       if (!folder || folder.brandId !== body.brandId) {
@@ -262,19 +276,61 @@ export async function videoStudioRoutes(app: FastifyInstance) {
         estimatedCostMicroUsd: estimateReelCostMicroUsd(brief.videoModel, brief.resolution, brief.durationSec),
       },
     });
-    return reply.code(201).send(toProjectDto(project));
+    return reply.code(201).send(toProjectDto(project, (brand.profile as BrandProfile | null) ?? null));
   });
 
-  app.get<{ Params: { id: string } }>("/video/projects/:id", async (req) =>
-    toProjectDto(await loadProject(req.userId, req.params.id)),
-  );
+  app.get<{ Params: { id: string } }>("/video/projects/:id", async (req) => {
+    const { project, profile } = await loadProject(req.userId, req.params.id);
+    return toProjectDto(project, profile);
+  });
 
   app.delete<{ Params: { id: string } }>("/video/projects/:id", async (req, reply) => {
-    const project = await loadProject(req.userId, req.params.id);
+    const { project } = await loadProject(req.userId, req.params.id);
     if ((VIDEO_PROJECT_BUSY_STATUSES as readonly string[]).includes(project.status)) {
       throw new HttpError(409, "This reel is still rendering. Cancel it first.", "PROJECT_BUSY");
     }
     await prisma.videoProject.delete({ where: { id: project.id } });
     return reply.code(204).send();
+  });
+
+  /* ---------------------------------- script ------------------------------ */
+
+  /**
+   * Starts the script job and returns at once with status `scripting`; the
+   * page polls GET /video/projects/:id until it reads `scripted` or `failed`.
+   * Only draft, scripted or failed reels can be (re)scripted.
+   */
+  app.post<{ Params: { id: string } }>("/video/projects/:id/script", async (req, reply) => {
+    const { project, profile } = await loadProject(req.userId, req.params.id);
+    if (!canTransitionVideoProject(project.status, "scripting")) {
+      throw new HttpError(409, "This reel can't be scripted right now", "INVALID_STATE");
+    }
+    const claimed = await prisma.videoProject.updateMany({
+      where: { id: project.id, status: project.status },
+      data: { status: "scripting", errorMessage: null },
+    });
+    if (claimed.count === 0) throw new HttpError(409, "This reel changed while starting. Try again.", "INVALID_STATE");
+    void runScriptJob(project.id);
+    const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
+    return reply.code(202).send(toProjectDto(fresh, profile));
+  });
+
+  /** Manual edit of a scripted reel. The whole script is sent and checked again. */
+  app.put<{ Params: { id: string } }>("/video/projects/:id/script", async (req, reply) => {
+    const { project, profile } = await loadProject(req.userId, req.params.id);
+    if (project.status !== "scripted") {
+      throw new HttpError(409, "Only a scripted reel can be edited", "INVALID_STATE");
+    }
+    const script = parseBody(reelScriptSchema, req.body);
+    const brief = project.brief as ReelBrief;
+    const problems = validateReelScript(script, brief.durationSec);
+    if (problems.length) throw badRequest(problems.join(" "));
+    const saved = await prisma.videoProject.updateMany({
+      where: { id: project.id, status: "scripted" },
+      data: { script: script as unknown as Prisma.InputJsonValue },
+    });
+    if (saved.count === 0) throw new HttpError(409, "This reel changed while saving. Reload and try again.", "INVALID_STATE");
+    const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
+    return reply.send(toProjectDto(fresh, profile));
   });
 }

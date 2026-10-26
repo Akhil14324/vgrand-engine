@@ -906,6 +906,7 @@ model VideoProject {
   folder                SourceFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   title                 String
   brief                 Json
+  script                Json?
   status                String        @default("draft")
   errorMessage          String?       @db.Text
   outputUrl             String?

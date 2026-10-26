@@ -17,6 +17,7 @@ import {
   useVideoBudget,
 } from "@/lib/video-hooks";
 import { ApiRequestError } from "@/lib/api";
+import { ReelProjectsPanel } from "@/components/reel-projects";
 import { toast } from "@/components/ui/toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,6 +151,7 @@ function Reels() {
               onDeleteFolder={() => void onDeleteFolder(folderId, detail.name)}
             />
           )}
+          {activeBrandId && <ReelProjectsPanel brandId={activeBrandId} folderId={folderId} />}
         </section>
       </div>
     </div>

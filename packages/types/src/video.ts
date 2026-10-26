@@ -108,12 +108,15 @@ export const createVideoProjectSchema = z.object({
   title: z.string().trim().min(1).max(120),
   brief: reelBriefSchema,
 });
+/** What the client sends: brief defaults may be left out. */
+export type CreateVideoProjectRequest = z.input<typeof createVideoProjectSchema>;
 
 /* ----------------------------- project states ------------------------------ */
 
 export const VIDEO_PROJECT_STATUSES = [
   "draft",
   "scripting",
+  "scripted",
   "generating",
   "editing",
   "review",
@@ -123,11 +126,15 @@ export const VIDEO_PROJECT_STATUSES = [
 ] as const;
 export type VideoProjectStatus = (typeof VIDEO_PROJECT_STATUSES)[number];
 
-/** Forward-only pipeline. `review -> editing` is a requested change; `failed -> scripting` is a retry. */
+/**
+ * Forward-only pipeline. `scripted -> scripting` regenerates the script;
+ * `review -> editing` is a requested change; `failed -> scripting` is a retry.
+ */
 export const VIDEO_PROJECT_TRANSITIONS: Record<VideoProjectStatus, readonly VideoProjectStatus[]> = {
   draft: ["scripting", "cancelled"],
+  scripting: ["scripted", "failed", "cancelled"],
   // Footage-only reels skip generation and go straight to editing.
-  scripting: ["generating", "editing", "failed", "cancelled"],
+  scripted: ["scripting", "generating", "editing", "cancelled"],
   generating: ["editing", "failed", "cancelled"],
   editing: ["review", "failed", "cancelled"],
   review: ["approved", "editing", "cancelled"],
@@ -173,6 +180,83 @@ export function isOverVideoBudget(
   return spentMicroUsd + estimateMicroUsd > capUsd * MICRO_USD_PER_USD;
 }
 
+/* --------------------------------- script ---------------------------------- */
+
+/**
+ * footage: cut in a clip from the source folder. generate: sent to the video
+ * model. motion_graphic: titles, lower thirds and CTA cards rendered in Remotion.
+ */
+export const REEL_SHOT_KINDS = ["footage", "generate", "motion_graphic"] as const;
+export type ReelShotKind = (typeof REEL_SHOT_KINDS)[number];
+
+/**
+ * Clip lengths the generation models accept (Veo 3.1 takes 4–8s clips). Generated
+ * shots outside this range are rejected so the render never has to guess.
+ * Confirm against the vendor's current limits before phase 6.
+ */
+export const GENERATED_SHOT_MIN_SEC = 4;
+export const GENERATED_SHOT_MAX_SEC = 8;
+export const SCRIPT_MAX_SHOTS = 30;
+
+const shotTextSchema = (max: number) =>
+  z.string().trim().max(max).nullish().transform((v) => (v ? v : null));
+
+export const reelShotSchema = z.object({
+  id: z.string().trim().min(1).max(20),
+  startSec: z.number().min(0),
+  endSec: z.number().positive(),
+  kind: z.enum(REEL_SHOT_KINDS),
+  description: z.string().trim().min(3).max(400),
+  voiceover: shotTextSchema(300),
+  onScreenText: shotTextSchema(80),
+  /** Source file name for footage shots, or null. */
+  sourceFile: shotTextSchema(200),
+});
+export type ReelShot = z.infer<typeof reelShotSchema>;
+
+export const reelScriptSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  hook: z.string().trim().min(1).max(200),
+  cta: z.string().trim().min(1).max(200),
+  shots: z.array(reelShotSchema).min(1).max(SCRIPT_MAX_SHOTS),
+});
+export type ReelScript = z.infer<typeof reelScriptSchema>;
+
+/**
+ * Returns the problems that would stop the shots from making a reel of
+ * `durationSec`: gaps or overlaps, wrong total length, and generated clips
+ * outside the model's range. An empty list means the timing is usable.
+ */
+export function validateReelScript(script: ReelScript, durationSec: number): string[] {
+  const problems: string[] = [];
+  const shots = [...script.shots].sort((a, b) => a.startSec - b.startSec);
+  let cursor = 0;
+  for (const shot of shots) {
+    if (shot.endSec <= shot.startSec) {
+      problems.push(`Shot ${shot.id} ends before it starts.`);
+      continue;
+    }
+    if (Math.abs(shot.startSec - cursor) > 0.05) {
+      problems.push(
+        shot.startSec > cursor
+          ? `Gap of ${(shot.startSec - cursor).toFixed(1)}s before shot ${shot.id}.`
+          : `Shot ${shot.id} overlaps the previous shot.`,
+      );
+    }
+    const length = shot.endSec - shot.startSec;
+    if (shot.kind === "generate" && (length < GENERATED_SHOT_MIN_SEC || length > GENERATED_SHOT_MAX_SEC)) {
+      problems.push(
+        `Generated shot ${shot.id} is ${length.toFixed(1)}s; it must be ${GENERATED_SHOT_MIN_SEC}–${GENERATED_SHOT_MAX_SEC}s.`,
+      );
+    }
+    cursor = shot.endSec;
+  }
+  if (Math.abs(cursor - durationSec) > 0.05) {
+    problems.push(`Shots end at ${cursor.toFixed(1)}s but the reel is ${durationSec}s.`);
+  }
+  return problems;
+}
+
 /* ---------------------------------- DTOs ----------------------------------- */
 
 export interface SourceAssetDto {
@@ -208,6 +292,9 @@ export interface VideoProjectDto {
   folderId: string | null;
   title: string;
   brief: ReelBrief;
+  script: ReelScript | null;
+  /** Brand-rule problems found in the script text (forbidden words or claims). Empty when clean. */
+  complianceNotes: string[];
   status: VideoProjectStatus;
   errorMessage: string | null;
   outputUrl: string | null;
