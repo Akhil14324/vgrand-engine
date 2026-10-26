@@ -1,4 +1,4 @@
-import { ZodError, type ZodSchema } from "zod";
+import { ZodError, type ZodType, type ZodTypeDef } from "zod";
 
 export class HttpError extends Error {
   constructor(
@@ -18,7 +18,8 @@ export const unauthorized = (msg = "Unauthorized") => new HttpError(401, msg);
 export const forbidden = (msg = "Forbidden") => new HttpError(403, msg);
 export const notFound = (msg = "Not found") => new HttpError(404, msg);
 
-export function parseBody<T>(schema: ZodSchema<T>, body: unknown): T {
+/** Returns the schema's output type, so defaulted fields are never reported as optional. */
+export function parseBody<T>(schema: ZodType<T, ZodTypeDef, unknown>, body: unknown): T {
   try {
     return schema.parse(body);
   } catch (err) {

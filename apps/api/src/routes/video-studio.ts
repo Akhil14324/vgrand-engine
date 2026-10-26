@@ -1,0 +1,280 @@
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { Prisma, prisma } from "@catgpt/db";
+import {
+  createSourceFolderSchema,
+  createVideoProjectSchema,
+  estimateReelCostMicroUsd,
+  SOURCE_FOLDER_MAX_ASSETS,
+  VIDEO_MAX_SECONDS,
+  VIDEO_MIME_TYPES,
+  VIDEO_PROJECT_BUSY_STATUSES,
+} from "@catgpt/types";
+import { env } from "../env.js";
+import { badRequest, notFound, parseBody, HttpError } from "../lib/errors.js";
+import { findAccessibleBrand } from "../lib/brand.js";
+import { getVideoBudget } from "../lib/video-usage.js";
+import { isPlatformReady, looksLikeMp4, probeVideo, transcodeToMp4 } from "../services/social/media/video.js";
+import { deleteStoredFiles, storeImage } from "../services/storage.js";
+
+const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+const brandQuerySchema = z.object({ brandId: z.string().uuid() });
+
+/** Folder/project lookups go through the brand, so workspace members see what their workspace can see. */
+async function loadFolder(userId: string, id: string) {
+  const folder = await prisma.sourceFolder.findUnique({
+    where: { id },
+    include: { assets: { orderBy: { createdAt: "asc" } } },
+  });
+  if (!folder) throw notFound("Folder not found");
+  await findAccessibleBrand(userId, folder.brandId);
+  return folder;
+}
+
+async function loadProject(userId: string, id: string) {
+  const project = await prisma.videoProject.findUnique({ where: { id } });
+  if (!project) throw notFound("Reel not found");
+  await findAccessibleBrand(userId, project.brandId);
+  return project;
+}
+
+type FolderRow = Prisma.SourceFolderGetPayload<{ include: { assets: true } }>;
+type AssetRow = FolderRow["assets"][number];
+type ProjectRow = Prisma.VideoProjectGetPayload<object>;
+
+const toAssetDto = (a: AssetRow) => ({
+  id: a.id,
+  kind: a.kind,
+  fileName: a.fileName,
+  url: a.url,
+  mimeType: a.mimeType,
+  sizeBytes: a.sizeBytes,
+  durationSec: a.durationSec,
+  width: a.width,
+  height: a.height,
+  createdAt: a.createdAt.toISOString(),
+});
+
+const toFolderDto = (f: FolderRow) => ({
+  id: f.id,
+  brandId: f.brandId,
+  name: f.name,
+  assetCount: f.assets.length,
+  videoCount: f.assets.filter((a) => a.kind === "video").length,
+  imageCount: f.assets.filter((a) => a.kind === "image").length,
+  createdAt: f.createdAt.toISOString(),
+});
+
+const toProjectDto = (p: ProjectRow) => ({
+  id: p.id,
+  brandId: p.brandId,
+  folderId: p.folderId,
+  title: p.title,
+  brief: p.brief,
+  status: p.status,
+  errorMessage: p.errorMessage,
+  outputUrl: p.outputUrl,
+  estimatedCostUsd: p.estimatedCostMicroUsd / 1_000_000,
+  createdAt: p.createdAt.toISOString(),
+  updatedAt: p.updatedAt.toISOString(),
+});
+
+/** Videos go through the same probe/transcode checks as Library uploads, so the editor can always read them. */
+async function prepareSourceVideo(buffer: Buffer, mimeType: string) {
+  if (!looksLikeMp4(buffer)) throw badRequest("That file isn't a valid MP4/MOV video");
+  let info;
+  try {
+    info = await probeVideo(buffer);
+  } catch (err) {
+    throw badRequest(err instanceof Error ? err.message : "This file isn't a readable video");
+  }
+  if (info.durationSec > VIDEO_MAX_SECONDS) {
+    throw badRequest(`Videos can be at most ${VIDEO_MAX_SECONDS / 60} minutes long`);
+  }
+  let out = buffer;
+  let outMime = mimeType;
+  if (!isPlatformReady(info) || mimeType !== "video/mp4") {
+    try {
+      out = await transcodeToMp4(buffer);
+    } catch (err) {
+      throw badRequest(err instanceof Error ? err.message : "Could not convert this video to MP4");
+    }
+    outMime = "video/mp4";
+  }
+  return {
+    buffer: out,
+    mimeType: outMime,
+    durationSec: Math.round(info.durationSec * 10) / 10,
+    width: info.width,
+    height: info.height,
+  };
+}
+
+export async function videoStudioRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.authenticate);
+
+  /* -------------------------------- budget -------------------------------- */
+
+  app.get("/video/budget", async (req) => getVideoBudget(req.userId));
+
+  /* -------------------------------- folders ------------------------------- */
+
+  app.get("/video/folders", async (req) => {
+    const { brandId } = parseBody(brandQuerySchema, req.query);
+    await findAccessibleBrand(req.userId, brandId);
+    const folders = await prisma.sourceFolder.findMany({
+      where: { brandId },
+      include: { assets: true },
+      orderBy: { createdAt: "desc" },
+    });
+    return folders.map(toFolderDto);
+  });
+
+  app.post("/video/folders", async (req, reply) => {
+    const body = parseBody(createSourceFolderSchema, req.body);
+    await findAccessibleBrand(req.userId, body.brandId);
+    const folder = await prisma.sourceFolder.create({
+      data: { userId: req.userId, brandId: body.brandId, name: body.name },
+      include: { assets: true },
+    });
+    return reply.code(201).send(toFolderDto(folder));
+  });
+
+  app.get<{ Params: { id: string } }>("/video/folders/:id", async (req) => {
+    const folder = await loadFolder(req.userId, req.params.id);
+    return { ...toFolderDto(folder), assets: folder.assets.map(toAssetDto) };
+  });
+
+  app.delete<{ Params: { id: string } }>("/video/folders/:id", async (req, reply) => {
+    const folder = await loadFolder(req.userId, req.params.id);
+    const busy = await prisma.videoProject.count({
+      where: { folderId: folder.id, status: { in: [...VIDEO_PROJECT_BUSY_STATUSES] } },
+    });
+    if (busy > 0) throw new HttpError(409, "A reel using this folder is still rendering", "FOLDER_BUSY");
+    // Delete the stored files first; the rows go with the folder (cascade).
+    await deleteStoredFiles(folder.assets.map((a) => a.url));
+    await prisma.sourceFolder.delete({ where: { id: folder.id } });
+    return reply.code(204).send();
+  });
+
+  /**
+   * One file per request, so the browser can upload a whole folder with a
+   * progress bar and a failed file doesn't lose the rest.
+   */
+  app.post<{ Params: { id: string } }>("/video/folders/:id/assets", async (req, reply) => {
+    const folder = await loadFolder(req.userId, req.params.id);
+    if (folder.assets.length >= SOURCE_FOLDER_MAX_ASSETS) {
+      throw badRequest(`A folder can hold at most ${SOURCE_FOLDER_MAX_ASSETS} files`);
+    }
+
+    const file = await req.file({ limits: { fileSize: env.MAX_VIDEO_UPLOAD_MB * 1024 * 1024 } });
+    if (!file) throw badRequest("multipart field 'file' is required");
+    const isVideo = (VIDEO_MIME_TYPES as readonly string[]).includes(file.mimetype);
+    if (!isVideo && !ALLOWED_IMAGE_TYPES.has(file.mimetype)) {
+      throw badRequest("Only PNG, JPEG or WebP images, or MP4/MOV videos, can be added to a folder");
+    }
+    const raw = await file.toBuffer();
+    if (file.file.truncated) {
+      throw badRequest(`File is larger than ${isVideo ? env.MAX_VIDEO_UPLOAD_MB : env.MAX_UPLOAD_MB} MB`);
+    }
+    const fileName = file.filename.slice(0, 200) || (isVideo ? "video" : "image");
+
+    let buffer = raw;
+    let mimeType = file.mimetype;
+    let durationSec: number | null = null;
+    let width: number | null = null;
+    let height: number | null = null;
+    if (isVideo) {
+      const prepared = await prepareSourceVideo(raw, file.mimetype);
+      buffer = prepared.buffer;
+      mimeType = prepared.mimeType;
+      durationSec = prepared.durationSec;
+      width = prepared.width;
+      height = prepared.height;
+    } else if (raw.byteLength > env.MAX_UPLOAD_MB * 1024 * 1024) {
+      throw badRequest(`Images must be under ${env.MAX_UPLOAD_MB} MB`);
+    }
+
+    const url = await storeImage({
+      buffer,
+      mimeType,
+      keyPrefix: `video-sources/${req.userId}`,
+    });
+    const asset = await prisma.sourceAsset.create({
+      data: {
+        folderId: folder.id,
+        kind: isVideo ? "video" : "image",
+        fileName,
+        url,
+        mimeType,
+        sizeBytes: buffer.byteLength,
+        durationSec,
+        width,
+        height,
+      },
+    });
+    return reply.code(201).send(toAssetDto(asset));
+  });
+
+  app.delete<{ Params: { id: string; assetId: string } }>(
+    "/video/folders/:id/assets/:assetId",
+    async (req, reply) => {
+      const folder = await loadFolder(req.userId, req.params.id);
+      const asset = folder.assets.find((a) => a.id === req.params.assetId);
+      if (!asset) throw notFound("File not found");
+      await deleteStoredFiles([asset.url]);
+      await prisma.sourceAsset.delete({ where: { id: asset.id } });
+      return reply.code(204).send();
+    },
+  );
+
+  /* -------------------------------- projects ------------------------------ */
+
+  app.get("/video/projects", async (req) => {
+    const { brandId } = parseBody(brandQuerySchema, req.query);
+    await findAccessibleBrand(req.userId, brandId);
+    const projects = await prisma.videoProject.findMany({
+      where: { brandId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return projects.map(toProjectDto);
+  });
+
+  app.post("/video/projects", async (req, reply) => {
+    const body = parseBody(createVideoProjectSchema, req.body);
+    await findAccessibleBrand(req.userId, body.brandId);
+    if (body.folderId) {
+      const folder = await prisma.sourceFolder.findUnique({ where: { id: body.folderId } });
+      if (!folder || folder.brandId !== body.brandId) {
+        throw badRequest("The folder must belong to the same brand");
+      }
+    }
+    const { brief } = body;
+    const project = await prisma.videoProject.create({
+      data: {
+        userId: req.userId,
+        brandId: body.brandId,
+        folderId: body.folderId ?? null,
+        title: body.title,
+        brief: brief as Prisma.InputJsonValue,
+        estimatedCostMicroUsd: estimateReelCostMicroUsd(brief.videoModel, brief.resolution, brief.durationSec),
+      },
+    });
+    return reply.code(201).send(toProjectDto(project));
+  });
+
+  app.get<{ Params: { id: string } }>("/video/projects/:id", async (req) =>
+    toProjectDto(await loadProject(req.userId, req.params.id)),
+  );
+
+  app.delete<{ Params: { id: string } }>("/video/projects/:id", async (req, reply) => {
+    const project = await loadProject(req.userId, req.params.id);
+    if ((VIDEO_PROJECT_BUSY_STATUSES as readonly string[]).includes(project.status)) {
+      throw new HttpError(409, "This reel is still rendering. Cancel it first.", "PROJECT_BUSY");
+    }
+    await prisma.videoProject.delete({ where: { id: project.id } });
+    return reply.code(204).send();
+  });
+}

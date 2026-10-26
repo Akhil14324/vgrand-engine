@@ -85,6 +85,8 @@ const envSchema = z.object({
 
   /** Max image generations per user per UTC day. Chat is unlimited. */
   IMAGE_DAILY_LIMIT: z.coerce.number().int().positive().default(100),
+  /** Reel studio: monthly spend cap per user in USD. Unset = recorded but not enforced. */
+  VIDEO_MONTHLY_CAP_USD: opt(z.coerce.number().positive()),
   WORKER_INLINE: bool,
   /** Parallel generation jobs per worker process (chat turns and images). */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),

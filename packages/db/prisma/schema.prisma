@@ -29,50 +29,55 @@ model User {
   socialPosts       SocialPost[]
   voiceAttestations BrandVoice[]
   campaignPlans     CampaignPlan[]
+  sourceFolders     SourceFolder[]
+  videoProjects     VideoProject[]
+  videoUsage        VideoUsage[]
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
 // injected into prompts, plus uploaded assets and documents. A user can own
 // multiple personal brands; a workspace can hold many separately managed brands.
 model Brand {
-  id          String       @id @default(uuid())
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspaceId String?
-  workspace   Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  name        String
-  category    String?
-  profile     Json         @default("{}")
-  summary     String       @default("") @db.Text // compact digest used in prompts
-  assets      BrandAsset[]
-  mascot      BrandMascot?
-  voice       BrandVoice?
-  documents   Document[]
-  campaignPlans CampaignPlan[]
-  generations Generation[]
-  guavaProfile   GuavaProfile?
-  guavaDiagnoses GuavaDiagnosis[]
-  guidelines  BrandGuidelines?
-  strategies  Strategy[]
-  learnings   CampaignLearning[]
+  id                  String               @id @default(uuid())
+  userId              String
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId         String?
+  workspace           Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                String
+  category            String?
+  profile             Json                 @default("{}")
+  summary             String               @default("") @db.Text // compact digest used in prompts
+  assets              BrandAsset[]
+  mascot              BrandMascot?
+  voice               BrandVoice?
+  documents           Document[]
+  campaignPlans       CampaignPlan[]
+  generations         Generation[]
+  guavaProfile        GuavaProfile?
+  guavaDiagnoses      GuavaDiagnosis[]
+  guidelines          BrandGuidelines?
+  strategies          Strategy[]
+  learnings           CampaignLearning[]
   suggestionDecisions SuggestionDecision[]
-  complianceChecks ComplianceCheck[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  complianceChecks    ComplianceCheck[]
+  sourceFolders       SourceFolder[]
+  videoProjects       VideoProject[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@index([userId])
   @@index([workspaceId])
 }
 
 model BrandAsset {
-  id        String   @id @default(uuid())
+  id        String       @id @default(uuid())
   brandId   String
-  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brand     Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
   kind      String // logo | product | mascot | reference
   url       String
   label     String?
   mascot    BrandMascot?
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
 
   @@index([brandId])
 }
@@ -83,26 +88,26 @@ model BrandAsset {
 // DTOs. Deleting the Brand removes this row only; the stored audio object is
 // cleaned up separately by the API.
 model BrandVoice {
-  id              String    @id @default(uuid())
-  brandId         String    @unique
-  brand           Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  storageKey      String // private object key for the reference audio
+  id                   String    @id @default(uuid())
+  brandId              String    @unique
+  brand                Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  storageKey           String // private object key for the reference audio
   // Language the sample was recorded in — the code reported by the selected
   // model adapter (e.g. "te"), not a hard-coded app-level list.
-  sampleLanguage  String
-  scriptText      String    @db.Text // exact transcript the speaker read
-  consentType     String // own_voice | authorized_voice
-  consentedAt     DateTime
-  attestedById    String?
-  attestedBy      User?     @relation(fields: [attestedById], references: [id], onDelete: SetNull)
-  status          String    @default("enrolling") // enrolling | ready | failed
-  enrolledAt      DateTime? // set when the sample finished enrolling
+  sampleLanguage       String
+  scriptText           String    @db.Text // exact transcript the speaker read
+  consentType          String // own_voice | authorized_voice
+  consentedAt          DateTime
+  attestedById         String?
+  attestedBy           User?     @relation(fields: [attestedById], references: [id], onDelete: SetNull)
+  status               String    @default("enrolling") // enrolling | ready | failed
+  enrolledAt           DateTime? // set when the sample finished enrolling
   // Sanitized diagnostic for Brand settings only — a transient synthesis
   // failure is recorded here and must not flip a still-valid sample to failed.
   lastSynthesisError   String?   @db.Text
   lastSynthesisErrorAt DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@index([attestedById])
 }
@@ -167,23 +172,23 @@ model ConsentRecord {
 // A "chat" — groups generations into a conversation you can revisit and
 // continue, like Claude/ChatGPT history.
 model Conversation {
-  id          String              @id @default(uuid())
-  userId      String
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title       String // auto-derived from the first prompt
-  pinned      Boolean             @default(false)
-  archived    Boolean             @default(false)
+  id            String              @id @default(uuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String // auto-derived from the first prompt
+  pinned        Boolean             @default(false)
+  archived      Boolean             @default(false)
   /// Set once a turn was routed through campaign mode — avoids scanning
   /// Generation prompts on every later message to detect the mode.
-  campaign    Boolean             @default(false)
-  generations Generation[]
-  documents   Document[]
-  shares      ConversationShare[]
+  campaign      Boolean             @default(false)
+  generations   Generation[]
+  documents     Document[]
+  shares        ConversationShare[]
   campaignPlans CampaignPlan[]
-  workspaceId String?
-  workspace   Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  workspaceId   String?
+  workspace     Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([workspaceId])
@@ -203,35 +208,35 @@ model Theme {
 }
 
 model Generation {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   userId         String
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   themeId        String?
-  theme          Theme?        @relation(fields: [themeId], references: [id])
-  kind           String        @default("image") // "image" | "text" — text = chat reply, no image
-  prompt         String        @db.Text // raw user idea
-  finalPrompt    String        @db.Text // template + user idea, what was actually sent
-  textResponse   String?       @db.Text // assistant reply for kind="text"
+  theme          Theme?         @relation(fields: [themeId], references: [id])
+  kind           String         @default("image") // "image" | "text" — text = chat reply, no image
+  prompt         String         @db.Text // raw user idea
+  finalPrompt    String         @db.Text // template + user idea, what was actually sent
+  textResponse   String?        @db.Text // assistant reply for kind="text"
   provider       String // "openai" | "flux" | "ideogram"
   model          String? // "gpt-image-2.5-flare" etc.
   imageUrls      String[] // storage URLs (1+ per generation)
-  status         String        @default("pending") // pending | processing | completed | failed | cancelled
+  status         String         @default("pending") // pending | processing | completed | failed | cancelled
   error          String?
   metadata       Json? // size, quality, seed, cost, latency
   parentId       String? // for "regenerate/edit" chains
-  parent         Generation?   @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
-  children       Generation[]  @relation("GenerationChain")
+  parent         Generation?    @relation("GenerationChain", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Generation[]   @relation("GenerationChain")
   conversationId String? // chat this generation belongs to
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation   Conversation?  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   // Brand this was made for (mirrors metadata.brandId so reports can query it).
   brandId        String?
-  brand          Brand?        @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  brand          Brand?         @relation(fields: [brandId], references: [id], onDelete: SetNull)
   shareLinks     ShareLink[]
   approvalLinks  ApprovalLink[]
   campaignPost   CampaignPost?
   memories       Memory[]
   socialPosts    SocialPost[]
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime       @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([themeId])
@@ -457,20 +462,20 @@ model BrandGuidelines {
 // One row per compliance check. Rule findings are objective; AI findings are
 // opinion and kept apart. status: pass | attention | blocked.
 model ComplianceCheck {
-  id           String   @id @default(uuid())
-  brandId      String
-  brand        Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  userId       String
-  generationId String?
-  imageUrl     String?
-  caption      String?  @db.Text
-  status       String
-  ruleFindings Json
-  aiFindings   Json?
+  id              String   @id @default(uuid())
+  brandId         String
+  brand           Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId          String
+  generationId    String?
+  imageUrl        String?
+  caption         String?  @db.Text
+  status          String
+  ruleFindings    Json
+  aiFindings      Json?
   aiSkippedReason String?
   // True when the user posted despite a failed rule (server-recorded).
-  overridden   Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  overridden      Boolean  @default(false)
+  createdAt       DateTime @default(now())
 
   @@index([brandId, createdAt(sort: Desc)])
   @@index([generationId])
@@ -516,20 +521,20 @@ model ApprovalLink {
 // An internal autopilot plan. Posts generate drafts on schedule; publishing is
 // deliberately outside this model and always requires approval first.
 model CampaignPlan {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   userId         String
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Null for the per-user "Calendar drafts" plan (Papaya / chat images awaiting scheduling).
   brandId        String?
-  brand          Brand?        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brand          Brand?         @relation(fields: [brandId], references: [id], onDelete: Cascade)
   conversationId String?
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversation   Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   title          String
-  status         String        @default("active") // active | paused | completed
-  timezone       String        @default("Asia/Kolkata")
+  status         String         @default("active") // active | paused | completed
+  timezone       String         @default("Asia/Kolkata")
   posts          CampaignPost[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([brandId])
@@ -626,17 +631,17 @@ model GuavaMessage {
 // current version; every save also snapshots a StrategyVersion. Approving or
 // converting never publishes or spends anything.
 model Strategy {
-  id           String            @id @default(uuid())
+  id           String             @id @default(uuid())
   brandId      String
-  brand        Brand             @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brand        Brand              @relation(fields: [brandId], references: [id], onDelete: Cascade)
   userId       String
   title        String
-  status       String            @default("draft") // draft | active | completed | archived
-  source       String            @default("goal") // goal | guava | idea | seasonal | custom
+  status       String             @default("draft") // draft | active | completed | archived
+  source       String             @default("goal") // goal | guava | idea | seasonal | custom
   sourceRef    Json?
-  sourceText   String?           @db.Text
+  sourceText   String?            @db.Text
   plan         Json
-  version      Int               @default(1)
+  version      Int                @default(1)
   startsAt     DateTime?
   approvedAt   DateTime?
   approvedById String?
@@ -651,8 +656,8 @@ model Strategy {
   results      CampaignResult[]
   revisions    StrategyRevision[]
   learning     CampaignLearning?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
   @@index([brandId, status])
 }
@@ -803,20 +808,20 @@ model CampaignResult {
 // A proposed change to an approved plan. Nothing changes until an owner approves:
 // approving saves a new StrategyVersion; existing work is then synced item by item.
 model StrategyRevision {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   strategyId   String
-  strategy     Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  strategy     Strategy  @relation(fields: [strategyId], references: [id], onDelete: Cascade)
   baseVersion  Int
   proposedPlan Json
-  rationale    String   @default("") @db.Text
+  rationale    String    @default("") @db.Text
   changes      Json
   focus        String[]
-  status       String   @default("pending") // pending | approved | rejected | superseded
+  status       String    @default("pending") // pending | approved | rejected | superseded
   createdById  String
   decidedById  String?
   decidedAt    DateTime?
-  decisionNote String?  @db.Text
-  createdAt    DateTime @default(now())
+  decisionNote String?   @db.Text
+  createdAt    DateTime  @default(now())
 
   @@index([strategyId, status])
 }
@@ -852,4 +857,75 @@ model SuggestionDecision {
   decidedAt   DateTime  @default(now())
 
   @@unique([brandId, key])
+}
+
+// Reel studio: a folder of brand footage and photos the reel pipeline draws from.
+// Files are stored like other uploads; `kind` is "image" | "video".
+model SourceFolder {
+  id        String         @id @default(uuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandId   String
+  brand     Brand          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  name      String
+  assets    SourceAsset[]
+  projects  VideoProject[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([brandId])
+}
+
+model SourceAsset {
+  id          String       @id @default(uuid())
+  folderId    String
+  folder      SourceFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  kind        String // "image" | "video"
+  fileName    String
+  url         String
+  mimeType    String
+  sizeBytes   Int
+  durationSec Float?
+  width       Int?
+  height      Int?
+  createdAt   DateTime     @default(now())
+
+  @@index([folderId])
+}
+
+// One reel from brief to approval. `status` moves only along VIDEO_PROJECT_TRANSITIONS
+// (packages/types/src/video.ts). `brief` holds the validated ReelBrief.
+model VideoProject {
+  id                    String        @id @default(uuid())
+  userId                String
+  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandId               String
+  brand                 Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  folderId              String?
+  folder                SourceFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  title                 String
+  brief                 Json
+  status                String        @default("draft")
+  errorMessage          String?       @db.Text
+  outputUrl             String?
+  estimatedCostMicroUsd Int           @default(0)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([brandId])
+}
+
+// Spend ledger for the monthly video budget. Rows outlive projects, so no FK to VideoProject.
+model VideoUsage {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId    String?
+  costMicroUsd Int
+  seconds      Float
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
