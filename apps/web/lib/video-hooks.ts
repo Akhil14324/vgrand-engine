@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  CreateReelPlanRequest,
   CreateVideoProjectRequest,
+  ReelPlanItemDto,
   ReelScript,
   SourceFolderDetailDto,
   SourceFolderDto,
@@ -163,5 +165,56 @@ export function useDeleteVideoProject() {
   return useMutation({
     mutationFn: (p: VideoProjectDto) => apiFetch<void>(`/video/projects/${p.id}`, { method: "DELETE" }),
     onSuccess: (_, p) => qc.invalidateQueries({ queryKey: ["video-projects", p.brandId] }),
+  });
+}
+
+export function useReelPlan(brandId: string | null) {
+  return useQuery({
+    queryKey: ["video-plan", brandId],
+    queryFn: () => apiFetch<ReelPlanItemDto[]>(`/video/plan?brandId=${brandId}`),
+    enabled: Boolean(brandId),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useCreateReelPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateReelPlanRequest) =>
+      apiFetch<{ items: ReelPlanItemDto[] }>("/video/plan", { method: "POST", json: body }),
+    onSuccess: (_, body) => qc.invalidateQueries({ queryKey: ["video-plan", body.brandId] }),
+  });
+}
+
+export function useRemovePlanItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (item: ReelPlanItemDto) => apiFetch<void>(`/video/plan/${item.id}`, { method: "DELETE" }),
+    onSuccess: (_, item) => qc.invalidateQueries({ queryKey: ["video-plan", item.brandId] }),
+  });
+}
+
+export function useSkipPlanItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (item: ReelPlanItemDto) =>
+      apiFetch<ReelPlanItemDto>(`/video/plan/${item.id}/skip`, { method: "POST" }),
+    onSuccess: (_, item) => qc.invalidateQueries({ queryKey: ["video-plan", item.brandId] }),
+  });
+}
+
+export function useApproveBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (projectIds: string[]) =>
+      apiFetch<{ results: { projectId: string; ok: boolean; error: string | null; postQueued: boolean }[] }>(
+        "/video/projects/approve-batch",
+        { method: "POST", json: { projectIds } },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["video-projects"] });
+      void qc.invalidateQueries({ queryKey: ["video-plan"] });
+      void qc.invalidateQueries({ queryKey: ["generations"] });
+    },
   });
 }

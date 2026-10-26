@@ -32,6 +32,7 @@ model User {
   sourceFolders     SourceFolder[]
   videoProjects     VideoProject[]
   videoUsage        VideoUsage[]
+  reelPlanItems     ReelPlanItem[]
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
@@ -64,6 +65,7 @@ model Brand {
   videoProjects       VideoProject[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+  reelPlanItems       ReelPlanItem[]
 
   @@index([userId])
   @@index([workspaceId])
@@ -930,4 +932,31 @@ model VideoUsage {
   createdAt    DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// A reel planned ahead for posting. The autopilot produces it before `postAt`
+// and stops at review; it's queued for posting only after a person approves it.
+// `brief` holds the validated ReelBrief.
+model ReelPlanItem {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandId      String
+  brand        Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  folderId     String?
+  title        String
+  brief        Json
+  postAt       DateTime
+  accountIds   String[]
+  caption      String?  @db.Text
+  status       String   @default("planned")
+  projectId    String?
+  generationId String?
+  error        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, postAt])
+  @@index([userId, postAt])
+  @@index([brandId])
 }

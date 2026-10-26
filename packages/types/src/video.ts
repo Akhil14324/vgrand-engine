@@ -348,3 +348,62 @@ export interface VideoBudgetDto {
   remainingUsd: number | null;
   resetsAt: string;
 }
+
+/* ------------------------------- reel plan ---------------------------------- */
+
+/**
+ * A planned reel: the brief, when it should go out, and which connected accounts
+ * get it. The autopilot produces it ahead of time and stops at review; a person
+ * approves it, and only then is it queued for posting.
+ */
+export const REEL_PLAN_STATUSES = [
+  "planned",
+  "producing",
+  "ready",
+  "approved",
+  "posted",
+  "failed",
+  "skipped",
+] as const;
+export type ReelPlanStatus = (typeof REEL_PLAN_STATUSES)[number];
+
+/** Production starts this long before the post time, so there's time to review. */
+export const REEL_PLAN_LEAD_MS = 36 * 60 * 60 * 1000;
+export const REEL_PLAN_MAX_ITEMS = 31;
+export const REEL_PLAN_MAX_ACCOUNTS = 5;
+
+export const reelPlanItemSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  folderId: z.string().uuid().nullish().transform((v) => v ?? null),
+  brief: reelBriefSchema,
+  postAt: z.string().datetime(),
+  accountIds: z.array(z.string().uuid()).min(1).max(REEL_PLAN_MAX_ACCOUNTS),
+  caption: z.string().trim().max(2200).nullish().transform((v) => (v ? v : null)),
+});
+export type ReelPlanItemRequest = z.infer<typeof reelPlanItemSchema>;
+
+export const createReelPlanSchema = z.object({
+  brandId: z.string().uuid(),
+  items: z.array(reelPlanItemSchema).min(1).max(REEL_PLAN_MAX_ITEMS),
+});
+export type CreateReelPlanRequest = z.input<typeof createReelPlanSchema>;
+
+export const approveReelBatchSchema = z.object({
+  projectIds: z.array(z.string().uuid()).min(1).max(20),
+});
+
+export interface ReelPlanItemDto {
+  id: string;
+  brandId: string;
+  folderId: string | null;
+  title: string;
+  brief: ReelBrief;
+  postAt: string;
+  accountIds: string[];
+  caption: string | null;
+  status: ReelPlanStatus;
+  projectId: string | null;
+  generationId: string | null;
+  error: string | null;
+  createdAt: string;
+}

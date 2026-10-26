@@ -6,6 +6,7 @@ import {
   createSourceFolderSchema,
   createVideoProjectSchema,
   estimateReelCostMicroUsd,
+  approveReelBatchSchema,
   reelScriptSchema,
   SOURCE_FOLDER_MAX_ASSETS,
   validateReelScript,
@@ -25,6 +26,7 @@ import { isPlatformReady, looksLikeMp4, probeVideo, transcodeToMp4 } from "../se
 import { deleteStoredFiles, storeImage } from "../services/storage.js";
 import { runScriptJob } from "../services/video-script.js";
 import { checkRenderPlan, runRenderJob } from "../services/video-render.js";
+import { approveReel } from "../services/reel-approval.js";
 import { scriptComplianceNotes } from "../services/video-script-logic.js";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -372,42 +374,34 @@ export async function videoStudioRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Approves a reviewed reel. It is added to the Library as a completed video, so
-   * the existing share and social flow can post it. Nothing is posted here.
+   * Approves a reviewed reel. The reel goes into the Library and, if it was
+   * planned, its post is queued for the planned time. Nothing posts without this.
    */
   app.post<{ Params: { id: string } }>("/video/projects/:id/approve", async (req, reply) => {
     const { project, profile } = await loadProject(req.userId, req.params.id);
-    if (project.status !== "review" || !project.outputUrl) {
-      throw new HttpError(409, "Only a rendered reel that is ready for review can be approved", "INVALID_STATE");
-    }
-    const claimed = await prisma.videoProject.updateMany({
-      where: { id: project.id, status: "review" },
-      data: { status: "approved" },
-    });
-    if (claimed.count === 0) throw new HttpError(409, "This reel changed while approving. Reload and try again.", "INVALID_STATE");
-    const brief = project.brief as ReelBrief;
-    const generation = await prisma.generation.create({
-      data: {
-        userId: req.userId,
-        brandId: project.brandId,
-        kind: "video",
-        prompt: project.title,
-        finalPrompt: project.title,
-        provider: "reel-studio",
-        model: brief.videoModel,
-        imageUrls: [project.outputUrl],
-        status: "completed",
-        metadata: {
-          mediaType: "video",
-          source: "reel-studio",
-          reelProjectId: project.id,
-          durationSec: brief.durationSec,
-          aspectRatio: brief.aspectRatio,
-        },
-      },
-      select: { id: true },
-    });
+    const result = await approveReel(project);
     const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
-    return reply.code(200).send({ ...toProjectDto(fresh, profile), generationId: generation.id });
+    return reply.code(200).send({ ...toProjectDto(fresh, profile), ...result });
+  });
+
+  /** Approves several reviewed reels at once. Each one is checked and reported on its own. */
+  app.post("/video/projects/approve-batch", async (req) => {
+    const { projectIds } = parseBody(approveReelBatchSchema, req.body);
+    const results: { projectId: string; ok: boolean; error: string | null; postQueued: boolean }[] = [];
+    for (const projectId of projectIds) {
+      try {
+        const { project } = await loadProject(req.userId, projectId);
+        const result = await approveReel(project);
+        results.push({ projectId, ok: true, error: result.postError, postQueued: result.postQueued });
+      } catch (err) {
+        results.push({
+          projectId,
+          ok: false,
+          error: err instanceof Error ? err.message : "Could not approve this reel",
+          postQueued: false,
+        });
+      }
+    }
+    return { results };
   });
 }

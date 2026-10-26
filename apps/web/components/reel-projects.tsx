@@ -17,6 +17,7 @@ import {
 import { ApiRequestError } from "@/lib/api";
 import {
   useCreateVideoProject,
+  useApproveBatch,
   useApproveVideoProject,
   useDeleteVideoProject,
   useRenderVideoProject,
@@ -51,6 +52,20 @@ export function ReelProjectsPanel({ brandId, folderId }: { brandId: string; fold
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const deleteProject = useDeleteVideoProject();
+  const approveBatch = useApproveBatch();
+  const readyIds = projects.data?.filter((p) => p.status === "review").map((p) => p.id) ?? [];
+
+  const onApproveReady = async () => {
+    if (!window.confirm(`Approve ${readyIds.length} reel${readyIds.length === 1 ? "" : "s"}? Planned ones will be queued to post at their set time.`)) return;
+    try {
+      const { results } = await approveBatch.mutateAsync(readyIds);
+      const failed = results.filter((r) => !r.ok || r.error).length;
+      if (failed) toast.error(`${results.length - failed} approved, ${failed} need attention. Check the plan.`);
+      else toast.success(`${results.length} approved`);
+    } catch (err) {
+      toast.error(errorText(err, "Could not approve these reels"));
+    }
+  };
 
   const onDelete = async (p: VideoProjectDto) => {
     if (!window.confirm(`Delete the reel "${p.title}"?`)) return;
@@ -67,7 +82,13 @@ export function ReelProjectsPanel({ brandId, folderId }: { brandId: string; fold
     <div className="space-y-4 border-t pt-4">
       <div className="flex items-center gap-2">
         <h3 className="font-display text-sm font-semibold">Reels</h3>
-        <Button size="sm" variant="outline" className="ml-auto" onClick={() => setCreating((v) => !v)}>
+        {readyIds.length > 0 && (
+          <Button size="sm" variant="outline" className="ml-auto" onClick={() => void onApproveReady()} disabled={approveBatch.isPending}>
+            {approveBatch.isPending ? <Loader2 className="animate-spin" /> : null}
+            Approve {readyIds.length} ready
+          </Button>
+        )}
+        <Button size="sm" variant="outline" className={cn(readyIds.length === 0 && "ml-auto")} onClick={() => setCreating((v) => !v)}>
           <Plus /> New reel
         </Button>
       </div>
