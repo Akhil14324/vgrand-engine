@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { prisma } from "@catgpt/db";
+import { Prisma, prisma } from "@catgpt/db";
 import { MOTION_FPS, type MotionClipProps } from "@catgpt/motion";
 import { renderMotionClip } from "@catgpt/motion/render";
 import { reelBriefSchema, type BrandProfile, type ReelBrief, type ReelScript } from "@catgpt/types";
@@ -10,6 +10,7 @@ import { parseFfmpegInfo, probeVideo, run } from "./social/media/video.js";
 import { ffmpegPath } from "./social/media/youtube-video.js";
 import { HttpError } from "../lib/errors.js";
 import { storeImage } from "./storage.js";
+import { buildQaReport } from "./video-qa.js";
 import { ClipGenerationError, generateClip } from "./video-generate.js";
 import { parseAudioDuration, synthesizeLine, VoiceConfigError } from "./voice-tts.js";
 import {
@@ -68,7 +69,7 @@ export async function runRenderJob(projectId: string): Promise<void> {
       where: { id: projectId },
       include: {
         folder: { include: { assets: true } },
-        brand: { select: { profile: true } },
+        brand: { select: { name: true, summary: true, profile: true } },
       },
     });
     if (!project || !project.script) throw new Error("render started without a script");
@@ -149,6 +150,12 @@ export async function runRenderJob(projectId: string): Promise<void> {
       throw new Error(`rendered ${info.durationSec}s, expected ${brief.durationSec}s`);
     }
 
+    const qaReport = await buildQaReport(
+      outPath,
+      { durationSec: brief.durationSec, width: size.w, height: size.h },
+      { summary: project.brand.summary || project.brand.name, profile: (project.brand.profile as BrandProfile | null) ?? null },
+    );
+
     const buffer = await readFile(outPath);
     const outputUrl = await storeImage({
       buffer,
@@ -157,7 +164,12 @@ export async function runRenderJob(projectId: string): Promise<void> {
     });
     await prisma.videoProject.updateMany({
       where: { id: projectId, status: { in: ["generating", "editing"] } },
-      data: { status: "review", outputUrl, errorMessage: null },
+      data: {
+        status: "review",
+        outputUrl,
+        errorMessage: null,
+        qaReport: qaReport as unknown as Prisma.InputJsonValue,
+      },
     });
   } catch (err) {
     console.error("[video-render] failed", projectId, err);

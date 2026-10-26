@@ -17,6 +17,7 @@ import {
 import { ApiRequestError } from "@/lib/api";
 import {
   useCreateVideoProject,
+  useApproveVideoProject,
   useDeleteVideoProject,
   useRenderVideoProject,
   useSaveVideoScript,
@@ -250,9 +251,9 @@ function ReelEditor({ id }: { id: string }) {
   }
 
   const busy = project.status === "scripting" || write.isPending;
-  const rendering = project.status === "editing" || render.isPending;
+  const rendering = project.status === "editing" || project.status === "generating" || render.isPending;
   const canWrite = ["draft", "scripted", "failed"].includes(project.status) && !busy && !rendering;
-  const canRender = project.status === "scripted" && !rendering;
+  const canRender = ["scripted", "review", "failed"].includes(project.status) && !rendering && Boolean(project.script);
 
   const onWrite = async () => {
     try {
@@ -282,15 +283,20 @@ function ReelEditor({ id }: { id: string }) {
           {busy ? <Loader2 className="animate-spin" /> : <Wand2 />}
           {project.script ? "Rewrite script" : "Write script"}
         </Button>
-        {project.status === "scripted" && (
+        {project.script && ["scripted", "review", "failed"].includes(project.status) && (
           <Button size="sm" onClick={() => void onRender()} disabled={!canRender}>
-            {rendering ? <Loader2 className="animate-spin" /> : null} Render reel
+            {rendering ? <Loader2 className="animate-spin" /> : null}
+            {project.status === "scripted" ? "Render reel" : "Re-render"}
           </Button>
         )}
       </div>
 
-      {project.status === "editing" && (
-        <p className="text-sm text-muted-foreground">Rendering the reel. This can take a few minutes.</p>
+      {(project.status === "generating" || project.status === "editing") && (
+        <p className="text-sm text-muted-foreground">
+          {project.status === "generating"
+            ? "Generating the video clips. This can take several minutes."
+            : "Rendering the reel. This can take a few minutes."}
+        </p>
       )}
       {project.outputUrl && (
         <video
@@ -317,6 +323,8 @@ function ReelEditor({ id }: { id: string }) {
           </ul>
         </div>
       )}
+
+      {(project.status === "review" || project.status === "approved") && <ReviewPanel project={project} />}
 
       {project.script && project.status === "scripted" && (
         <ScriptEditor key={`${project.id}-${project.updatedAt}`} project={project} />
@@ -422,3 +430,75 @@ function ScriptEditor({ project }: { project: VideoProjectDto }) {
     </div>
   );
 }
+
+function ReviewPanel({ project }: { project: VideoProjectDto }) {
+  const approve = useApproveVideoProject();
+  const qa = project.qaReport;
+
+  const onApprove = async () => {
+    try {
+      await approve.mutateAsync(project.id);
+      toast.success("Approved. It is in your Library, ready to share.");
+    } catch (err) {
+      toast.error(errorText(err, "Could not approve the reel"));
+    }
+  };
+
+  if (project.status === "approved") {
+    return (
+      <p className="rounded-md border p-2 text-sm">
+        Approved. Find it in your Library to share it to Instagram, Facebook or YouTube.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      {qa ? (
+        <>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium">Checks</span>
+            <span className={cn("rounded-full px-2 py-0.5 text-xs", QA_TONE[qa.status])}>{QA_LABEL[qa.status]}</span>
+          </div>
+          <ul className="space-y-1 text-sm">
+            {qa.checks.map((c) => (
+              <li key={c.id} className="flex items-start gap-2">
+                <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", QA_DOT[c.status])} aria-hidden />
+                <span>
+                  <span className="font-medium">{c.label}:</span> {c.detail}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {qa.review.status === "ok" && qa.review.notes.length > 0 && (
+            <div className="text-sm">
+              <p className="font-medium">Frame review</p>
+              <ul className="list-disc pl-5">
+                {qa.review.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {qa.review.status === "ok" && qa.review.notes.length === 0 && (
+            <p className="text-sm text-muted-foreground">Frame review found nothing to fix.</p>
+          )}
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">Checks were not recorded for this render.</p>
+      )}
+      <Button onClick={() => void onApprove()} disabled={approve.isPending} className="w-full">
+        {approve.isPending ? <Loader2 className="animate-spin" /> : null} Approve reel
+      </Button>
+      <p className="text-xs text-muted-foreground">Approving adds it to your Library. Nothing is posted until you share it.</p>
+    </div>
+  );
+}
+
+const QA_LABEL = { pass: "All clear", warn: "Check before posting", fail: "Needs fixing" } as const;
+const QA_TONE = {
+  pass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  warn: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  fail: "bg-destructive/15 text-destructive",
+} as const;
+const QA_DOT = { pass: "bg-emerald-500", warn: "bg-amber-500", fail: "bg-destructive" } as const;

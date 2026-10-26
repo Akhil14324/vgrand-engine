@@ -907,6 +907,7 @@ model VideoProject {
   title                 String
   brief                 Json
   script                Json?
+  qaReport              Json?
   status                String        @default("draft")
   errorMessage          String?       @db.Text
   outputUrl             String?

@@ -14,6 +14,7 @@ import {
   VIDEO_PROJECT_BUSY_STATUSES,
   type BrandProfile,
   type ReelBrief,
+  type ReelQaReport,
   type ReelScript,
 } from "@catgpt/types";
 import { env } from "../env.js";
@@ -85,6 +86,7 @@ const toProjectDto = (p: ProjectRow, profile: BrandProfile | null) => {
     brief: p.brief as ReelBrief,
     script,
     complianceNotes: scriptComplianceNotes(profile, script),
+    qaReport: (p.qaReport as ReelQaReport | null) ?? null,
     status: p.status,
     errorMessage: p.errorMessage,
     outputUrl: p.outputUrl,
@@ -367,5 +369,45 @@ export async function videoStudioRoutes(app: FastifyInstance) {
     void runRenderJob(project.id);
     const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
     return reply.code(202).send(toProjectDto(fresh, profile));
+  });
+
+  /**
+   * Approves a reviewed reel. It is added to the Library as a completed video, so
+   * the existing share and social flow can post it. Nothing is posted here.
+   */
+  app.post<{ Params: { id: string } }>("/video/projects/:id/approve", async (req, reply) => {
+    const { project, profile } = await loadProject(req.userId, req.params.id);
+    if (project.status !== "review" || !project.outputUrl) {
+      throw new HttpError(409, "Only a rendered reel that is ready for review can be approved", "INVALID_STATE");
+    }
+    const claimed = await prisma.videoProject.updateMany({
+      where: { id: project.id, status: "review" },
+      data: { status: "approved" },
+    });
+    if (claimed.count === 0) throw new HttpError(409, "This reel changed while approving. Reload and try again.", "INVALID_STATE");
+    const brief = project.brief as ReelBrief;
+    const generation = await prisma.generation.create({
+      data: {
+        userId: req.userId,
+        brandId: project.brandId,
+        kind: "video",
+        prompt: project.title,
+        finalPrompt: project.title,
+        provider: "reel-studio",
+        model: brief.videoModel,
+        imageUrls: [project.outputUrl],
+        status: "completed",
+        metadata: {
+          mediaType: "video",
+          source: "reel-studio",
+          reelProjectId: project.id,
+          durationSec: brief.durationSec,
+          aspectRatio: brief.aspectRatio,
+        },
+      },
+      select: { id: true },
+    });
+    const fresh = await prisma.videoProject.findUniqueOrThrow({ where: { id: project.id } });
+    return reply.code(200).send({ ...toProjectDto(fresh, profile), generationId: generation.id });
   });
 }

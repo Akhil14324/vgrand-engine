@@ -156,9 +156,9 @@ export const VIDEO_PROJECT_TRANSITIONS: Record<VideoProjectStatus, readonly Vide
   scripted: ["scripting", "generating", "editing", "cancelled"],
   generating: ["editing", "failed", "cancelled"],
   editing: ["review", "failed", "cancelled"],
-  review: ["approved", "editing", "cancelled"],
+  review: ["approved", "editing", "generating", "cancelled"],
   approved: [],
-  failed: ["scripting"],
+  failed: ["scripting", "editing", "generating"],
   cancelled: [],
 };
 
@@ -276,6 +276,24 @@ export function validateReelScript(script: ReelScript, durationSec: number): str
   return problems;
 }
 
+/* ----------------------------------- QA ------------------------------------ */
+
+export type ReelQaStatus = "pass" | "warn" | "fail";
+
+export interface ReelQaCheck {
+  id: string;
+  label: string;
+  status: ReelQaStatus;
+  detail: string;
+}
+
+export interface ReelQaReport {
+  runAt: string;
+  status: ReelQaStatus;
+  checks: ReelQaCheck[];
+  review: { status: "ok" | "skipped" | "failed"; notes: string[] };
+}
+
 /* ---------------------------------- DTOs ----------------------------------- */
 
 export interface SourceAssetDto {
@@ -314,6 +332,8 @@ export interface VideoProjectDto {
   script: ReelScript | null;
   /** Brand-rule problems found in the script text (forbidden words or claims). Empty when clean. */
   complianceNotes: string[];
+  /** Checks on the rendered file, set when the reel reaches review. */
+  qaReport: ReelQaReport | null;
   status: VideoProjectStatus;
   errorMessage: string | null;
   outputUrl: string | null;

@@ -21,7 +21,9 @@ describe("video project transitions", () => {
     ["editing", "review"],
     ["review", "approved"],
     ["review", "editing"], // requested change
+    ["review", "generating"], // re-render with new clips
     ["failed", "scripting"], // retry
+    ["failed", "editing"], // re-render without re-writing the script
   ])("allows %s -> %s", (from, to) => {
     expect(canTransitionVideoProject(from, to as never)).toBe(true);
   });
@@ -31,7 +33,6 @@ describe("video project transitions", () => {
     ["editing", "approved"],
     ["approved", "draft"], // approved is terminal
     ["cancelled", "draft"],
-    ["review", "generating"], // no going back into generation
     ["draft", "scripted"], // a script can only come from a scripting run
     ["scripting", "generating"], // the script must be reviewed first
     ["scripting", "editing"],
