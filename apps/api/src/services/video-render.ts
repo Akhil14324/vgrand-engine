@@ -4,10 +4,11 @@ import path from "node:path";
 import { prisma } from "@catgpt/db";
 import { reelBriefSchema, type ReelScript } from "@catgpt/types";
 import { fetchVideo } from "./social/media/fetch-video.js";
+import { parseAudioDuration, synthesizeLine, VoiceConfigError } from "./voice-tts.js";
 import { run, parseFfmpegInfo, probeVideo } from "./social/media/video.js";
 import { ffmpegPath } from "./social/media/youtube-video.js";
 import { storeImage } from "./storage.js";
-import { buildRenderArgs, planFootageSegments, RENDER_SIZES, type RenderInput } from "./video-render-logic.js";
+import { buildRenderArgs, planFootageSegments, RENDER_SIZES, type RenderInput, type VoiceClip } from "./video-render-logic.js";
 
 /** Accept the rendered length if it's within this many seconds of the brief (frame rounding). */
 const DURATION_TOLERANCE_SEC = 1;
@@ -66,7 +67,33 @@ export async function runRenderJob(projectId: string): Promise<void> {
     const size = RENDER_SIZES[brief.aspectRatio]![brief.resolution];
     const outPath = path.join(workDir, "reel.mp4");
     const bin = await ffmpegPath();
-    const { code, stderr } = await run(bin, buildRenderArgs(inputs, size!, outPath));
+
+    // Voiceover: one line per shot, placed at the shot start. Each line must fit its shot.
+    const voices: VoiceClip[] = [];
+    if (brief.voiceProvider !== "none") {
+      for (const shot of [...script.shots].sort((a, b) => a.startSec - b.startSec)) {
+        if (!shot.voiceover) continue;
+        const audio = await synthesizeLine({
+          provider: brief.voiceProvider,
+          text: shot.voiceover,
+          voiceId: brief.voiceId,
+        });
+        const voicePath = path.join(workDir, `vo-${shot.id}.mp3`);
+        await writeFile(voicePath, audio);
+        const { stderr: probe } = await run(bin, ["-hide_banner", "-i", voicePath]);
+        const durationSec = parseAudioDuration(probe);
+        if (durationSec === null) throw new RenderPlanError(`The voiceover for shot ${shot.id} could not be read.`);
+        const shotLength = shot.endSec - shot.startSec;
+        if (durationSec > shotLength + 0.25) {
+          throw new RenderPlanError(
+            `The voiceover for shot ${shot.id} runs ${durationSec.toFixed(1)}s, longer than its ${shotLength.toFixed(1)}s shot. Shorten the line.`,
+          );
+        }
+        voices.push({ path: voicePath, startSec: shot.startSec, durationSec });
+      }
+    }
+
+    const { code, stderr } = await run(bin, buildRenderArgs(inputs, size!, outPath, voices));
     if (code !== 0) {
       throw new Error(`ffmpeg exited ${code}: ${stderr.slice(-1500)}`);
     }
@@ -88,8 +115,8 @@ export async function runRenderJob(projectId: string): Promise<void> {
     });
   } catch (err) {
     console.error("[video-render] failed", projectId, err);
-    const message =
-      err instanceof RenderPlanError ? err.message : "The reel could not be rendered. Try again.";
+    const userFacing = err instanceof RenderPlanError || err instanceof VoiceConfigError;
+    const message = userFacing ? err.message : "The reel could not be rendered. Try again.";
     await prisma.videoProject.updateMany({
       where: { id: projectId, status: "editing" },
       data: { status: "failed", errorMessage: message },

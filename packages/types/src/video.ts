@@ -94,6 +94,8 @@ export const reelBriefSchema = z.object({
   resolution: z.enum(VIDEO_RESOLUTIONS).default("720p"),
   videoModel: z.enum(VIDEO_MODEL_IDS).default(DEFAULT_VIDEO_MODEL),
   voiceProvider: z.enum(VOICE_PROVIDERS).default("none"),
+  /** Provider voice id (ElevenLabs voice or Fish Audio reference id). Null uses the server default for the provider. */
+  voiceId: z.string().trim().max(100).nullish().transform((v) => (v ? v : null)),
 });
 export type ReelBrief = z.infer<typeof reelBriefSchema>;
 

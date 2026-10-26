@@ -114,4 +114,17 @@ describe("buildRenderArgs", () => {
     expect(graph).toMatch(/anullsrc=channel_layout=stereo:sample_rate=44100:duration=2\.000\[a1\]/);
     expect(args.join(" ")).toMatch(/-loop 1/);
   });
+
+  it("places each voice clip at its shot start and mixes it over the program audio", () => {
+    const args = buildRenderArgs(inputs, { w: 720, h: 1280 }, "/tmp/out.mp4", [
+      { path: "/tmp/vo-1.mp3", startSec: 0, durationSec: 2 },
+      { path: "/tmp/vo-2.mp3", startSec: 3, durationSec: 1.5 },
+    ]);
+    expect(args.filter((a) => a === "-i")).toHaveLength(4);
+    const graph = args[args.indexOf("-filter_complex") + 1]!;
+    expect(graph).toMatch(/\[2:a\]adelay=0\|0,/);
+    expect(graph).toMatch(/\[3:a\]adelay=3000\|3000,/);
+    expect(graph).toMatch(/\[ac\]volume=0\.3\[bg\]/);
+    expect(graph).toMatch(/\[bg\]\[vo0\]\[vo1\]amix=inputs=3:duration=first:normalize=0/);
+  });
 });

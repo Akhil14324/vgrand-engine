@@ -85,6 +85,16 @@ export function planFootageSegments(script: ReelScript, sources: SourceInfo[]): 
   return { ok: true, segments };
 }
 
+/** A voiceover line placed at its shot start on the reel timeline. */
+export interface VoiceClip {
+  path: string;
+  startSec: number;
+  durationSec: number;
+}
+
+/** Program audio sits under the voiceover at this level. */
+const PROGRAM_VOLUME_WITH_VOICE = 0.3;
+
 /** A planned segment once its file is on disk and probed for an audio track. */
 export interface RenderInput extends PlannedSegment {
   path: string;
@@ -97,7 +107,12 @@ export interface RenderInput extends PlannedSegment {
  * itself (no cropping of landscape footage), trimmed, and joined. Audio is
  * joined and loudness-normalised to a platform target.
  */
-export function buildRenderArgs(inputs: RenderInput[], size: { w: number; h: number }, outPath: string): string[] {
+export function buildRenderArgs(
+  inputs: RenderInput[],
+  size: { w: number; h: number },
+  outPath: string,
+  voices: VoiceClip[] = [],
+): string[] {
   const { w, h } = size;
   const args: string[] = ["-y", "-hide_banner"];
   const parts: string[] = [];
@@ -129,7 +144,24 @@ export function buildRenderArgs(inputs: RenderInput[], size: { w: number; h: num
 
   const n = inputs.length;
   parts.push(`${concatPairs.join("")}concat=n=${n}:v=1:a=1[vc][ac]`);
-  parts.push("[ac]loudnorm=I=-16:TP=-1.5:LRA=11[aout]");
+
+  const loud = "loudnorm=I=-16:TP=-1.5:LRA=11";
+  if (voices.length === 0) {
+    parts.push(`[ac]${loud}[aout]`);
+  } else {
+    voices.forEach((v, k) => {
+      args.push("-i", v.path);
+      const ms = Math.round(v.startSec * 1000);
+      parts.push(
+        `[${n + k}:a]adelay=${ms}|${ms},aformat=sample_rates=44100:channel_layouts=stereo[vo${k}]`,
+      );
+    });
+    const mixIns = voices.map((_, k) => `[vo${k}]`).join("");
+    parts.push(`[ac]volume=${PROGRAM_VOLUME_WITH_VOICE}[bg]`);
+    parts.push(
+      `[bg]${mixIns}amix=inputs=${voices.length + 1}:duration=first:normalize=0,${loud}[aout]`,
+    );
+  }
 
   args.push(
     "-filter_complex",

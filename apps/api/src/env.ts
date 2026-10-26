@@ -85,6 +85,12 @@ const envSchema = z.object({
 
   /** Max image generations per user per UTC day. Chat is unlimited. */
   IMAGE_DAILY_LIMIT: z.coerce.number().int().positive().default(100),
+  /** Reel studio voiceover (phase 4). Stock voices only; cloning needs the consent flow. */
+  ELEVENLABS_API_KEY: opt(z.string().min(1)),
+  ELEVENLABS_DEFAULT_VOICE_ID: opt(z.string().min(1)),
+  ELEVENLABS_TTS_MODEL: z.string().default("eleven_multilingual_v2"),
+  FISH_API_KEY: opt(z.string().min(1)),
+  FISH_DEFAULT_VOICE_ID: opt(z.string().min(1)),
   /** Reel studio: monthly spend cap per user in USD. Unset = recorded but not enforced. */
   VIDEO_MONTHLY_CAP_USD: opt(z.coerce.number().positive()),
   WORKER_INLINE: bool,

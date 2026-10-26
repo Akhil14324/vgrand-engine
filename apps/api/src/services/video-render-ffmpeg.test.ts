@@ -54,4 +54,28 @@ describe("render with the bundled ffmpeg", () => {
     expect(info!.audioCodec).toBe("aac");
     expect((await readFile(out)).byteLength).toBeGreaterThan(1000);
   }, 120_000);
+
+  it("mixes a voiceover clip into the timeline at its shot start", async () => {
+    const landscape = path.join(dir, "voice-src.mp4");
+    const voice = path.join(dir, "line.mp3");
+    const out = path.join(dir, "voiced.mp4");
+    const src = await run(bin, [
+      "-y", "-hide_banner", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30:duration=4",
+      "-f", "lavfi", "-i", "sine=frequency=220:duration=4", "-shortest",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", landscape,
+    ]);
+    expect(src.code).toBe(0);
+    const line = await run(bin, ["-y", "-hide_banner", "-f", "lavfi", "-i", "sine=frequency=660:duration=1.5", "-c:a", "libmp3lame", voice]);
+    expect(line.code).toBe(0);
+
+    const inputs = [
+      { shotId: "1", fileName: "voice-src.mp4", kind: "video" as const, sourceStartSec: 0, lengthSec: 4, path: landscape, hasAudio: true },
+    ];
+    const render = await run(bin, buildRenderArgs(inputs, { w: 720, h: 1280 }, out, [{ path: voice, startSec: 1, durationSec: 1.5 }]));
+    expect(render.code, render.stderr.slice(-800)).toBe(0);
+    const info = parseFfmpegInfo((await run(bin, ["-hide_banner", "-i", out])).stderr);
+    expect(info).not.toBeNull();
+    expect(Math.abs(info!.durationSec - 4)).toBeLessThan(0.5);
+    expect(info!.audioCodec).toBe("aac");
+  }, 120_000);
 });

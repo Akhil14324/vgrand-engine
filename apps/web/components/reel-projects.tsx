@@ -129,6 +129,7 @@ function NewReelForm({
   const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
   const [videoModel, setVideoModel] = useState<string>("veo-3.1-lite");
   const [voiceProvider, setVoiceProvider] = useState<(typeof VOICE_PROVIDERS)[number]>("none");
+  const [voiceId, setVoiceId] = useState("");
 
   const canSave = title.trim().length > 0 && goal.trim().length >= 3 && !create.isPending;
 
@@ -145,6 +146,7 @@ function NewReelForm({
           resolution,
           videoModel: videoModel as never,
           voiceProvider,
+          voiceId: voiceId.trim() || null,
         },
       });
       toast.success("Reel created. Write its script next.");
@@ -224,6 +226,12 @@ function NewReelForm({
             <option value="fish">Fish Audio</option>
           </select>
         </label>
+        {voiceProvider !== "none" && (
+          <label className="col-span-2 space-y-1">
+            <span className="text-xs text-muted-foreground">Voice ID (optional, uses the server default)</span>
+            <Input value={voiceId} onChange={(e) => setVoiceId(e.target.value)} maxLength={100} />
+          </label>
+        )}
       </div>
       <Button onClick={() => void submit()} disabled={!canSave} className="w-full">
         {create.isPending ? <Loader2 className="animate-spin" /> : null} Create reel

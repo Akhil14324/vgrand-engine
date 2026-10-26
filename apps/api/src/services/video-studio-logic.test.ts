@@ -89,6 +89,7 @@ describe("reel brief schema", () => {
       resolution: "720p",
       videoModel: "veo-3.1-lite",
       voiceProvider: "none",
+      voiceId: null,
     });
   });
 
