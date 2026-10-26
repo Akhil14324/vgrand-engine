@@ -95,10 +95,6 @@ const envSchema = z.object({
   GOOGLE_AI_API_KEY: opt(z.string().min(1)),
   RUNWAY_API_KEY: opt(z.string().min(1)),
   KLING_API_KEY: opt(z.string().min(1)),
-  /** Reel autopilot produces planned reels ahead of their post time. Needs VIDEO_MONTHLY_CAP_USD set too. */
-  REEL_AUTOPILOT_ENABLED: bool,
-  /** Reel studio: monthly spend cap per user in USD. Unset = recorded but not enforced. */
-  VIDEO_MONTHLY_CAP_USD: opt(z.coerce.number().positive()),
   WORKER_INLINE: bool,
   /** Parallel generation jobs per worker process (chat turns and images). */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),

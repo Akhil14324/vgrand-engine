@@ -407,3 +407,27 @@ export interface ReelPlanItemDto {
   error: string | null;
   createdAt: string;
 }
+
+/* -------------------------------- settings ---------------------------------- */
+
+/** Largest monthly cap a user can set. Above this is almost certainly a typo. */
+export const VIDEO_MAX_MONTHLY_CAP_USD = 10_000;
+
+export const videoSettingsSchema = z
+  .object({
+    monthlyCapUsd: z.number().positive().max(VIDEO_MAX_MONTHLY_CAP_USD).nullable(),
+    autopilotEnabled: z.boolean(),
+  })
+  .refine((s) => !s.autopilotEnabled || s.monthlyCapUsd !== null, {
+    message: "Set a monthly cap before turning the autopilot on",
+    path: ["autopilotEnabled"],
+  });
+export type VideoSettingsRequest = z.infer<typeof videoSettingsSchema>;
+
+export interface VideoSettingsDto {
+  monthlyCapUsd: number | null;
+  autopilotEnabled: boolean;
+}
+
+/** The autopilot may produce reels for a user only with a cap in place. */
+export const canRunAutopilot = (s: VideoSettingsDto): boolean => s.autopilotEnabled && s.monthlyCapUsd !== null;

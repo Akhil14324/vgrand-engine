@@ -7,6 +7,7 @@ import {
   createVideoProjectSchema,
   estimateReelCostMicroUsd,
   approveReelBatchSchema,
+  videoSettingsSchema,
   reelScriptSchema,
   SOURCE_FOLDER_MAX_ASSETS,
   validateReelScript,
@@ -22,6 +23,7 @@ import { env } from "../env.js";
 import { badRequest, notFound, parseBody, HttpError } from "../lib/errors.js";
 import { findAccessibleBrand } from "../lib/brand.js";
 import { getVideoBudget } from "../lib/video-usage.js";
+import { getVideoSettings, saveVideoSettings } from "../lib/video-settings.js";
 import { isPlatformReady, looksLikeMp4, probeVideo, transcodeToMp4 } from "../services/social/media/video.js";
 import { deleteStoredFiles, storeImage } from "../services/storage.js";
 import { runScriptJob } from "../services/video-script.js";
@@ -135,6 +137,14 @@ export async function videoStudioRoutes(app: FastifyInstance) {
   /* -------------------------------- budget -------------------------------- */
 
   app.get("/video/budget", async (req) => getVideoBudget(req.userId));
+
+  /** Monthly cap and autopilot switch, set by the user in the app. */
+  app.get("/video/settings", async (req) => getVideoSettings(req.userId));
+
+  app.put("/video/settings", async (req) => {
+    const body = parseBody(videoSettingsSchema, req.body);
+    return saveVideoSettings(req.userId, body);
+  });
 
   /* -------------------------------- folders ------------------------------- */
 

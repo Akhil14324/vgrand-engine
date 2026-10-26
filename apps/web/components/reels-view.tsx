@@ -19,6 +19,7 @@ import {
 import { ApiRequestError } from "@/lib/api";
 import { ReelProjectsPanel } from "@/components/reel-projects";
 import { ReelPlanPanel } from "@/components/reel-plan";
+import { ReelSettingsPanel } from "@/components/reel-settings";
 import { toast } from "@/components/ui/toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,6 +141,7 @@ function Reels() {
               </li>
             ))}
           </ul>
+          <ReelSettingsPanel />
         </aside>
 
         <section className="min-h-0 overflow-y-auto">

@@ -10,6 +10,8 @@ import type {
   SourceFolderDto,
   VideoBudgetDto,
   VideoProjectDto,
+  VideoSettingsDto,
+  VideoSettingsRequest,
 } from "@catgpt/types";
 import { apiFetch } from "./api";
 
@@ -215,6 +217,25 @@ export function useApproveBatch() {
       void qc.invalidateQueries({ queryKey: ["video-projects"] });
       void qc.invalidateQueries({ queryKey: ["video-plan"] });
       void qc.invalidateQueries({ queryKey: ["generations"] });
+    },
+  });
+}
+
+export function useVideoSettings() {
+  return useQuery({
+    queryKey: ["video-settings"],
+    queryFn: () => apiFetch<VideoSettingsDto>("/video/settings"),
+  });
+}
+
+export function useSaveVideoSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: VideoSettingsRequest) =>
+      apiFetch<VideoSettingsDto>("/video/settings", { method: "PUT", json: body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["video-settings"] });
+      void qc.invalidateQueries({ queryKey: ["video-budget"] });
     },
   });
 }

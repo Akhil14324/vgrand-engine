@@ -33,6 +33,7 @@ model User {
   videoProjects     VideoProject[]
   videoUsage        VideoUsage[]
   reelPlanItems     ReelPlanItem[]
+  videoSettings     VideoSettings?
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
@@ -959,4 +960,14 @@ model ReelPlanItem {
   @@index([status, postAt])
   @@index([userId, postAt])
   @@index([brandId])
+}
+
+// Per-user video settings, set in the app: the monthly spend cap (null = none)
+// and whether the reel autopilot may produce planned reels unattended.
+model VideoSettings {
+  userId           String   @id
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  monthlyCapUsd    Float?
+  autopilotEnabled Boolean  @default(false)
+  updatedAt        DateTime @updatedAt
 }

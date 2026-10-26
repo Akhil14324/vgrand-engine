@@ -8,7 +8,6 @@ import {
   type ReelPlanStatus,
   type ReelScript,
 } from "@catgpt/types";
-import { env } from "../env.js";
 import { badRequest, HttpError } from "../lib/errors.js";
 import { findAccessibleBrand } from "../lib/brand.js";
 import { runRenderJob } from "./video-render.js";
@@ -124,8 +123,18 @@ async function failItem(itemId: string, message: string) {
 
 /** Produces the next planned reel whose post time is inside the lead window. */
 async function produceNext(): Promise<void> {
+  // Only users who switched the autopilot on in settings, and set a cap, have reels produced unattended.
+  const enabled = await prisma.videoSettings.findMany({
+    where: { autopilotEnabled: true, monthlyCapUsd: { not: null } },
+    select: { userId: true },
+  });
+  if (enabled.length === 0) return;
   const next = await prisma.reelPlanItem.findFirst({
-    where: { status: "planned", postAt: { lte: new Date(Date.now() + REEL_PLAN_LEAD_MS) } },
+    where: {
+      status: "planned",
+      userId: { in: enabled.map((e) => e.userId) },
+      postAt: { lte: new Date(Date.now() + REEL_PLAN_LEAD_MS) },
+    },
     orderBy: { postAt: "asc" },
   });
   if (!next) return;
@@ -156,18 +165,12 @@ async function tick(): Promise<void> {
 }
 
 /**
- * Starts the autopilot. It stays off unless REEL_AUTOPILOT_ENABLED is set, and
- * it also needs VIDEO_MONTHLY_CAP_USD: production spends money without you
- * pressing anything, so it must not run without a budget.
+ * Starts the autopilot loop. It does nothing for a user until that user turns it
+ * on in settings with a monthly cap set (see produceNext).
  */
 let started = false;
 export function startReelAutopilot(): void {
   if (started) return;
-  if (!env.REEL_AUTOPILOT_ENABLED) return;
-  if (env.VIDEO_MONTHLY_CAP_USD === undefined) {
-    console.warn("[reel-autopilot] disabled: set VIDEO_MONTHLY_CAP_USD before enabling it");
-    return;
-  }
   started = true;
   // Anything left in `producing` when the process restarted can't be resumed safely.
   void prisma.reelPlanItem

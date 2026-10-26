@@ -1,7 +1,7 @@
 import { prisma } from "@catgpt/db";
 import { isOverVideoBudget } from "@catgpt/types";
 import { HttpError } from "./errors.js";
-import { env } from "../env.js";
+import { getVideoSettings } from "./video-settings.js";
 
 /** Start of the current UTC month — the window the video budget resets on. */
 function startOfUtcMonth(now = new Date()): Date {
@@ -17,24 +17,28 @@ export async function getVideoSpendThisMonth(userId: string): Promise<number> {
   return sum._sum.costMicroUsd ?? 0;
 }
 
+/** The user's cap comes from their settings. No cap set = spend is recorded but never blocked. */
 export async function getVideoBudget(userId: string) {
-  const spentMicroUsd = await getVideoSpendThisMonth(userId);
-  const capUsd = env.VIDEO_MONTHLY_CAP_USD;
+  const [spentMicroUsd, settings] = await Promise.all([getVideoSpendThisMonth(userId), getVideoSettings(userId)]);
+  const capUsd = settings.monthlyCapUsd;
+  const spentUsd = spentMicroUsd / 1_000_000;
+  const now = new Date();
   return {
-    spentUsd: spentMicroUsd / 1_000_000,
-    capUsd: capUsd ?? null,
-    remainingUsd: capUsd === undefined ? null : Math.max(0, capUsd - spentMicroUsd / 1_000_000),
-    resetsAt: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString(),
+    spentUsd,
+    capUsd,
+    remainingUsd: capUsd === null ? null : Math.max(0, capUsd - spentUsd),
+    resetsAt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString(),
   };
 }
 
-/** Throws 429 when `estimateMicroUsd` would take the user past the monthly cap. */
+/** Throws 429 when `estimateMicroUsd` would take the user past their monthly cap. */
 export async function assertVideoBudget(userId: string, estimateMicroUsd: number): Promise<void> {
-  const spent = await getVideoSpendThisMonth(userId);
-  if (isOverVideoBudget(spent, estimateMicroUsd, env.VIDEO_MONTHLY_CAP_USD)) {
+  const [spent, settings] = await Promise.all([getVideoSpendThisMonth(userId), getVideoSettings(userId)]);
+  const capUsd = settings.monthlyCapUsd ?? undefined;
+  if (isOverVideoBudget(spent, estimateMicroUsd, capUsd)) {
     throw new HttpError(
       429,
-      `Monthly video budget reached ($${env.VIDEO_MONTHLY_CAP_USD}). It resets on the 1st (UTC).`,
+      `Monthly video budget reached ($${capUsd}). It resets on the 1st (UTC).`,
       "VIDEO_BUDGET",
     );
   }
