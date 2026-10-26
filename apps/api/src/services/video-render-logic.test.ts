@@ -32,8 +32,8 @@ describe("planFootageSegments", () => {
     expect(plan).toEqual({
       ok: true,
       segments: [
-        { shotId: "1", fileName: "a.mp4", kind: "video", sourceStartSec: 0, lengthSec: 3, caption: null, motionText: null },
-        { shotId: "2", fileName: "a.mp4", kind: "video", sourceStartSec: 3, lengthSec: 4, caption: null, motionText: null },
+        { shotId: "1", fileName: "a.mp4", kind: "video", sourceStartSec: 0, lengthSec: 3, caption: null, motionText: null, prompt: null },
+        { shotId: "2", fileName: "a.mp4", kind: "video", sourceStartSec: 3, lengthSec: 4, caption: null, motionText: null, prompt: null },
       ],
     });
   });
@@ -66,6 +66,7 @@ describe("planFootageSegments", () => {
       lengthSec: 3,
       caption: null,
       motionText: "Visit us today",
+      prompt: null,
     });
   });
 
@@ -81,13 +82,21 @@ describe("planFootageSegments", () => {
     if (!plan.ok) expect(plan.problems[0]).toMatch(/not in the folder/);
   });
 
-  it("refuses generated shots until a video model is connected", () => {
+  it("plans a generated shot with its prompt and no source file", () => {
     const plan = planFootageSegments(
-      script([footage("1", 0, 3), { ...footage("2", 3, 7, null), kind: "generate" }]),
+      script([footage("1", 0, 3), { ...footage("2", 3, 7, null), kind: "generate", description: "Steam over a loaf" }]),
       sources,
     );
-    expect(plan.ok).toBe(false);
-    if (!plan.ok) expect(plan.problems[0]).toMatch(/generated shot.*video model/);
+    expect(plan.ok && plan.segments[1]).toEqual({
+      shotId: "2",
+      fileName: null,
+      kind: "generated",
+      sourceStartSec: 0,
+      lengthSec: 4,
+      caption: null,
+      motionText: null,
+      prompt: "Steam over a loaf",
+    });
   });
 
   it("refuses a footage shot with no source file", () => {

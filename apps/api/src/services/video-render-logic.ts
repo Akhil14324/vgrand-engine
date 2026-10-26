@@ -25,7 +25,7 @@ export interface PlannedSegment {
   shotId: string;
   /** Source file for footage shots; null for motion-graphic shots. */
   fileName: string | null;
-  kind: "image" | "video" | "motion";
+  kind: "image" | "video" | "motion" | "generated";
   /** Where in the source file this shot starts. Images and motion always start at 0. */
   sourceStartSec: number;
   lengthSec: number;
@@ -33,6 +33,8 @@ export interface PlannedSegment {
   caption: string | null;
   /** Text for a motion-graphic card. */
   motionText: string | null;
+  /** Prompt for a generated clip. */
+  prompt: string | null;
 }
 
 export type SegmentPlan =
@@ -56,7 +58,16 @@ export function planFootageSegments(script: ReelScript, sources: SourceInfo[]): 
     const lengthSec = shot.endSec - shot.startSec;
 
     if (shot.kind === "generate") {
-      problems.push(`Shot ${shot.id} is a generated shot. Generated clips need a video model, which isn't connected yet.`);
+      segments.push({
+        shotId: shot.id,
+        fileName: null,
+        kind: "generated",
+        sourceStartSec: 0,
+        lengthSec,
+        caption: shot.onScreenText ?? null,
+        motionText: null,
+        prompt: shot.description,
+      });
       continue;
     }
     if (shot.kind === "motion_graphic") {
@@ -68,6 +79,7 @@ export function planFootageSegments(script: ReelScript, sources: SourceInfo[]): 
         lengthSec,
         caption: null,
         motionText: shot.onScreenText ?? shot.description,
+        prompt: null,
       });
       continue;
     }
@@ -91,6 +103,7 @@ export function planFootageSegments(script: ReelScript, sources: SourceInfo[]): 
         lengthSec,
         caption,
         motionText: null,
+        prompt: null,
       });
       continue;
     }
@@ -112,6 +125,7 @@ export function planFootageSegments(script: ReelScript, sources: SourceInfo[]): 
       lengthSec,
       caption,
       motionText: null,
+      prompt: null,
     });
   }
 

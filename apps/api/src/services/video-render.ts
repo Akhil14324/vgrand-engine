@@ -4,11 +4,13 @@ import path from "node:path";
 import { prisma } from "@catgpt/db";
 import { MOTION_FPS, type MotionClipProps } from "@catgpt/motion";
 import { renderMotionClip } from "@catgpt/motion/render";
-import { reelBriefSchema, type BrandProfile, type ReelScript } from "@catgpt/types";
+import { reelBriefSchema, type BrandProfile, type ReelBrief, type ReelScript } from "@catgpt/types";
 import { fetchVideo } from "./social/media/fetch-video.js";
 import { parseFfmpegInfo, probeVideo, run } from "./social/media/video.js";
 import { ffmpegPath } from "./social/media/youtube-video.js";
+import { HttpError } from "../lib/errors.js";
 import { storeImage } from "./storage.js";
+import { ClipGenerationError, generateClip } from "./video-generate.js";
 import { parseAudioDuration, synthesizeLine, VoiceConfigError } from "./voice-tts.js";
 import {
   buildRenderArgs,
@@ -91,7 +93,7 @@ export async function runRenderJob(projectId: string): Promise<void> {
     // Download and probe each distinct source once, then reuse it for every shot.
     const sources = new Map<string, { path: string; hasAudio: boolean }>();
     for (const seg of plan.segments) {
-      if (seg.kind === "motion" || sources.has(seg.fileName!)) continue;
+      if (seg.kind === "motion" || seg.kind === "generated" || sources.has(seg.fileName!)) continue;
       const asset = assets.find((a) => a.fileName === seg.fileName)!;
       const buffer = await fetchVideo(asset.url);
       const filePath = path.join(workDir, `src-${sources.size}`);
@@ -100,10 +102,16 @@ export async function runRenderJob(projectId: string): Promise<void> {
       sources.set(seg.fileName!, { path: filePath, hasAudio });
     }
 
+    // Generated clips are made here, one at a time, so each one is budget-checked before it is paid for.
+    const ctx: SegmentContext = { userId: project.userId, projectId, brief, sources, palette, size, workDir };
     const inputs: RenderInput[] = [];
     for (const seg of plan.segments) {
-      inputs.push(await segmentInput(seg, sources, palette, size, workDir));
+      inputs.push(await segmentInput(seg, ctx));
     }
+    await prisma.videoProject.updateMany({
+      where: { id: projectId, status: "generating" },
+      data: { status: "editing" },
+    });
 
     // Voiceover: one line per shot, placed at the shot start. Each line must fit its shot.
     const voices: VoiceClip[] = [];
@@ -148,15 +156,16 @@ export async function runRenderJob(projectId: string): Promise<void> {
       keyPrefix: `video-outputs/${project.userId}`,
     });
     await prisma.videoProject.updateMany({
-      where: { id: projectId, status: "editing" },
+      where: { id: projectId, status: { in: ["generating", "editing"] } },
       data: { status: "review", outputUrl, errorMessage: null },
     });
   } catch (err) {
     console.error("[video-render] failed", projectId, err);
-    const userFacing = err instanceof RenderPlanError || err instanceof VoiceConfigError;
+    const userFacing =
+      err instanceof RenderPlanError || err instanceof VoiceConfigError || err instanceof ClipGenerationError || err instanceof HttpError;
     const message = userFacing ? err.message : "The reel could not be rendered. Try again.";
     await prisma.videoProject.updateMany({
-      where: { id: projectId, status: "editing" },
+      where: { id: projectId, status: { in: ["generating", "editing"] } },
       data: { status: "failed", errorMessage: message },
     });
   } finally {
@@ -164,14 +173,20 @@ export async function runRenderJob(projectId: string): Promise<void> {
   }
 }
 
-/** Turns one planned segment into a render input. Motion and caption clips are rendered with Remotion. */
-async function segmentInput(
-  seg: PlannedSegment,
-  sources: Map<string, { path: string; hasAudio: boolean }>,
-  palette: { background: string; accent: string },
-  size: { w: number; h: number },
-  workDir: string,
-): Promise<RenderInput> {
+/** Everything a segment needs beyond its own plan entry. */
+interface SegmentContext {
+  userId: string;
+  projectId: string;
+  brief: ReelBrief;
+  sources: Map<string, { path: string; hasAudio: boolean }>;
+  palette: { background: string; accent: string };
+  size: { w: number; h: number };
+  workDir: string;
+}
+
+/** Turns one planned segment into a render input. Motion and caption clips are rendered with Remotion; generated clips come from the video model. */
+async function segmentInput(seg: PlannedSegment, ctx: SegmentContext): Promise<RenderInput> {
+  const { sources, palette, size, workDir } = ctx;
   const durationFrames = Math.max(1, Math.round(seg.lengthSec * MOTION_FPS));
   const shared = {
     width: size.w,
@@ -187,6 +202,32 @@ async function segmentInput(
     captionPath = path.join(workDir, `cap-${seg.shotId}.webm`);
     const props: MotionClipProps = { ...shared, mode: "caption", text: seg.caption, background: "transparent" };
     await renderMotionClip(props, captionPath);
+  }
+
+  if (seg.kind === "generated") {
+    const aspect = ctx.brief.aspectRatio === "16:9" ? "landscape" : ctx.brief.aspectRatio === "1:1" ? "square" : "vertical";
+    const clipPath = await generateClip({
+      userId: ctx.userId,
+      projectId: ctx.projectId,
+      model: ctx.brief.videoModel,
+      prompt: `${seg.prompt}. Frame for a ${aspect} video. No on-screen text, captions or logos.`,
+      lengthSec: seg.lengthSec,
+      width: size.w,
+      height: size.h,
+      resolution: ctx.brief.resolution,
+      workDir,
+      fileName: `gen-${seg.shotId}.mp4`,
+    });
+    const hasAudio = await hasAudioTrack(clipPath);
+    return {
+      shotId: seg.shotId,
+      kind: "video",
+      sourceStartSec: 0,
+      lengthSec: seg.lengthSec,
+      path: clipPath,
+      hasAudio,
+      captionPath,
+    };
   }
 
   if (seg.kind === "motion") {

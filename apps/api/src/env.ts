@@ -91,6 +91,10 @@ const envSchema = z.object({
   ELEVENLABS_TTS_MODEL: z.string().default("eleven_multilingual_v2"),
   FISH_API_KEY: opt(z.string().min(1)),
   FISH_DEFAULT_VOICE_ID: opt(z.string().min(1)),
+  /** Reel studio generated clips (phase 6). Each provider is optional; its models are unavailable without the key. */
+  GOOGLE_AI_API_KEY: opt(z.string().min(1)),
+  RUNWAY_API_KEY: opt(z.string().min(1)),
+  KLING_API_KEY: opt(z.string().min(1)),
   /** Reel studio: monthly spend cap per user in USD. Unset = recorded but not enforced. */
   VIDEO_MONTHLY_CAP_USD: opt(z.coerce.number().positive()),
   WORKER_INLINE: bool,

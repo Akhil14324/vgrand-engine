@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canTransitionVideoProject,
+  clipLengthFor,
   DEFAULT_VIDEO_MODEL,
   estimateReelCostMicroUsd,
   isOverVideoBudget,
@@ -99,5 +100,17 @@ describe("reel brief schema", () => {
 
   it("rejects a model outside the catalog", () => {
     expect(reelBriefSchema.safeParse({ goal: "Teaser", videoModel: "sora" }).success).toBe(false);
+  });
+});
+
+describe("clip lengths", () => {
+  it("rounds a shot up to the smallest clip the model offers", () => {
+    expect(clipLengthFor("veo-3.1-lite", 5)).toBe(6);
+    expect(clipLengthFor("veo-3.1-lite", 4)).toBe(4);
+    expect(clipLengthFor("runway-gen4.5", 6)).toBe(10);
+  });
+
+  it("returns null when no clip is long enough", () => {
+    expect(clipLengthFor("veo-3.1-lite", 9)).toBeNull();
   });
 });

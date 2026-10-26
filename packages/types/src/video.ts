@@ -17,6 +17,8 @@ export interface VideoModelSpec {
   provider: "google" | "runway" | "kling";
   /** USD per output second, keyed by resolution. */
   pricePerSecondUsd: Record<VideoResolution, number>;
+  /** Clip lengths the model returns. A shot asks for the smallest one that covers it, then trims. */
+  clipLengthsSec: readonly number[];
   /** Prices come from third-party listings until checked against the vendor's own pricing page. */
   priceSource: "third-party-estimate";
 }
@@ -24,6 +26,7 @@ export interface VideoModelSpec {
 /**
  * Ordered cheapest first. The default is the cheapest model with audio included.
  * Runway and Kling prices vary by provider; the Kling figure is the cheapest listing found.
+ * Clip lengths: Veo 3.1 takes 4, 6 or 8 seconds; Runway and Kling take 5 or 10.
  */
 export const VIDEO_MODELS = [
   {
@@ -31,6 +34,7 @@ export const VIDEO_MODELS = [
     label: "Veo 3.1 Lite",
     provider: "google",
     pricePerSecondUsd: { "720p": 0.05, "1080p": 0.08 },
+    clipLengthsSec: [4, 6, 8],
     priceSource: "third-party-estimate",
   },
   {
@@ -38,6 +42,7 @@ export const VIDEO_MODELS = [
     label: "Runway Gen-4 Turbo",
     provider: "runway",
     pricePerSecondUsd: { "720p": 0.05, "1080p": 0.05 },
+    clipLengthsSec: [5, 10],
     priceSource: "third-party-estimate",
   },
   {
@@ -45,6 +50,7 @@ export const VIDEO_MODELS = [
     label: "Veo 3.1 Fast",
     provider: "google",
     pricePerSecondUsd: { "720p": 0.1, "1080p": 0.12 },
+    clipLengthsSec: [4, 6, 8],
     priceSource: "third-party-estimate",
   },
   {
@@ -52,6 +58,7 @@ export const VIDEO_MODELS = [
     label: "Runway Gen-4.5",
     provider: "runway",
     pricePerSecondUsd: { "720p": 0.12, "1080p": 0.12 },
+    clipLengthsSec: [5, 10],
     priceSource: "third-party-estimate",
   },
   {
@@ -59,6 +66,7 @@ export const VIDEO_MODELS = [
     label: "Kling 3.0 Standard",
     provider: "kling",
     pricePerSecondUsd: { "720p": 0.1764, "1080p": 0.1764 },
+    clipLengthsSec: [5, 10],
     priceSource: "third-party-estimate",
   },
   {
@@ -66,6 +74,7 @@ export const VIDEO_MODELS = [
     label: "Veo 3.1",
     provider: "google",
     pricePerSecondUsd: { "720p": 0.4, "1080p": 0.4 },
+    clipLengthsSec: [4, 6, 8],
     priceSource: "third-party-estimate",
   },
 ] as const satisfies readonly VideoModelSpec[];
@@ -73,6 +82,14 @@ export const VIDEO_MODELS = [
 export type VideoModelId = (typeof VIDEO_MODELS)[number]["id"];
 export const VIDEO_MODEL_IDS = VIDEO_MODELS.map((m) => m.id) as [VideoModelId, ...VideoModelId[]];
 export const DEFAULT_VIDEO_MODEL: VideoModelId = "veo-3.1-lite";
+
+/** Smallest clip length the model offers that covers `seconds`, or null when none does. */
+export function clipLengthFor(model: VideoModelId, seconds: number): number | null {
+  const spec = getVideoModel(model);
+  if (!spec) return null;
+  const fit = [...spec.clipLengthsSec].sort((a, b) => a - b).find((len) => len >= seconds);
+  return fit ?? null;
+}
 
 export const getVideoModel = (id: string): VideoModelSpec | undefined =>
   VIDEO_MODELS.find((m) => m.id === id);

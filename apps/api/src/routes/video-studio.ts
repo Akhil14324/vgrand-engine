@@ -342,8 +342,14 @@ export async function videoStudioRoutes(app: FastifyInstance) {
    */
   app.post<{ Params: { id: string } }>("/video/projects/:id/render", async (req, reply) => {
     const { project, profile } = await loadProject(req.userId, req.params.id);
-    if (!canTransitionVideoProject(project.status, "editing") || !project.script) {
+    if (!project.script) {
       throw new HttpError(409, "Write and review the script before rendering", "INVALID_STATE");
+    }
+    // Generated shots go through the video model first (status `generating`); footage and motion go straight to `editing`.
+    const hasGenerated = (project.script as unknown as ReelScript).shots.some((s) => s.kind === "generate");
+    const target = hasGenerated ? "generating" : "editing";
+    if (!canTransitionVideoProject(project.status, target)) {
+      throw new HttpError(409, "This reel can't be rendered right now", "INVALID_STATE");
     }
     const folder = project.folderId
       ? await prisma.sourceFolder.findUnique({ where: { id: project.folderId }, include: { assets: true } })
@@ -355,7 +361,7 @@ export async function videoStudioRoutes(app: FastifyInstance) {
     if (!plan.ok) throw badRequest(plan.problems.join(" "));
     const claimed = await prisma.videoProject.updateMany({
       where: { id: project.id, status: project.status },
-      data: { status: "editing", errorMessage: null },
+      data: { status: target, errorMessage: null },
     });
     if (claimed.count === 0) throw new HttpError(409, "This reel changed while starting. Try again.", "INVALID_STATE");
     void runRenderJob(project.id);
