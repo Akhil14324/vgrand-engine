@@ -111,7 +111,37 @@ export function resolveProductImageReference(
     return resolutionFor(mostSpecific);
   }
 
+  // No full label in the prompt: accept a product whose distinctive label
+  // word appears in it ("biryani post" → "Chicken Biryani"). Only a single
+  // unambiguous product counts, so a shared word never guesses between two.
+  const promptWords = new Set(normalizedPrompt.split(" ").filter(isDistinctiveWord));
+  const wordMatches = labeled.filter((item) =>
+    item.name.split(" ").some((word) => isDistinctiveWord(word) && promptWords.has(word)),
+  );
+  const uniqueProducts = new Set(wordMatches.map((item) => item.asset.id));
+  if (uniqueProducts.size === 1) {
+    return { status: "match", asset: wordMatches[0]!.asset };
+  }
+
   return { status: "none" };
+}
+
+const GENERIC_PRODUCT_WORDS = new Set([
+  "product",
+  "image",
+  "photo",
+  "picture",
+  "brand",
+  "post",
+  "your",
+  "with",
+  "from",
+  "this",
+  "that",
+]);
+
+function isDistinctiveWord(word: string): boolean {
+  return word.length >= 4 && !GENERIC_PRODUCT_WORDS.has(word);
 }
 
 function explicitQuotedNames(prompt: string): string[] {

@@ -77,6 +77,18 @@ describe("resolveProductImageReference", () => {
       status: "none",
     });
   });
+
+  it("matches a single product by one distinctive word of its label", () => {
+    expect(
+      resolveProductImageReference("Make a poster for our mutton offer", products),
+    ).toEqual({ status: "match", asset: products[2] });
+  });
+
+  it("does not guess when a shared label word matches more than one product", () => {
+    expect(
+      resolveProductImageReference("Make a poster for our chicken offer", products),
+    ).toEqual({ status: "none" });
+  });
 });
 
 describe("requestsImageFromProductImage", () => {

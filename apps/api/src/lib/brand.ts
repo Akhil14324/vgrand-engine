@@ -282,19 +282,24 @@ export async function loadBrandContext(brandId: string, userId?: string) {
   return brand;
 }
 
-/** The brand's own product photos, mascot, references — capped so references stay light. Products outrank the mascot: the real product must reach the model before a decorative character does. The exact logo never goes to the model: it is composited onto the image after generation, so a redrawn approximation can never sneak in. */
+/** Product photos sent when no specific product is named. Newest uploads come first, so a fresh photo is never silently dropped behind older ones. */
+const MAX_PRODUCT_REFERENCES = 2;
+
+/** The brand's own product photos, mascot, references — capped so references stay light. Each kind has a reserved share of the cap so one kind can't crowd out the others: up to two newest product photos, then the mascot, then references fill what's left. The exact logo never goes to the model: it is composited onto the image after generation, so a redrawn approximation can never sneak in. */
 export function brandReferenceUrls(
   assets: { kind: string; url: string }[],
   mascotUrl?: string | null,
   selectedProductUrl?: string,
 ): string[] {
+  // Assets arrive oldest-first from loadBrandContext; reverse for newest-first.
+  const newestFirst = [...assets].reverse();
   const mascotUrls = mascotUrl
     ? [mascotUrl]
-    : assets.filter((a) => a.kind === "mascot").map((a) => a.url).slice(0, 2);
+    : newestFirst.filter((a) => a.kind === "mascot").map((a) => a.url).slice(0, 1);
   const products = selectedProductUrl
     ? assets.filter((a) => a.kind === "product" && a.url === selectedProductUrl).slice(0, 1)
-    : assets.filter((a) => a.kind === "product");
-  const references = assets.filter((a) => a.kind === "reference");
+    : newestFirst.filter((a) => a.kind === "product").slice(0, MAX_PRODUCT_REFERENCES);
+  const references = newestFirst.filter((a) => a.kind === "reference");
   return [
     ...new Set([
       ...products.map((a) => a.url),

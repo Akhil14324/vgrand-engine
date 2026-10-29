@@ -25,6 +25,33 @@ describe("brandReferenceUrls", () => {
       ),
     ).toEqual(["mutton.png", "brand-style.png"]);
   });
+
+  it("sends the newest product photos, not the oldest, when a brand has many", () => {
+    // loadBrandContext returns assets oldest-first.
+    const assets = [
+      { kind: "product", url: "p1.png" },
+      { kind: "product", url: "p2.png" },
+      { kind: "product", url: "p3.png" },
+      { kind: "product", url: "p4.png" },
+      { kind: "product", url: "p5.png" },
+      { kind: "product", url: "p6.png" },
+    ];
+    expect(brandReferenceUrls(assets)).toEqual(["p6.png", "p5.png"]);
+  });
+
+  it("keeps the mascot and a reference in the cap when the brand has many products", () => {
+    expect(
+      brandReferenceUrls([
+        { kind: "product", url: "p1.png" },
+        { kind: "product", url: "p2.png" },
+        { kind: "product", url: "p3.png" },
+        { kind: "product", url: "p4.png" },
+        { kind: "mascot", url: "mascot.png" },
+        { kind: "reference", url: "style-1.png" },
+        { kind: "reference", url: "style-2.png" },
+      ]),
+    ).toEqual(["p4.png", "p3.png", "mascot.png", "style-2.png"]);
+  });
 });
 
 describe("brandImageGuidance", () => {
