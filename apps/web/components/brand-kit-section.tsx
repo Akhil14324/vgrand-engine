@@ -274,7 +274,11 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
   if (!usable.length) return null;
 
   const hasLogo = !!selected?.assets.some((a) => a.kind === "logo");
-  const canApply = !!selected && ((logo && hasLogo) || headline.trim() || cta.trim());
+  // Generations stamped at creation (or already branded) carry the logo: don't add a second one.
+  const meta = generation.metadata as { brandKitStamped?: unknown; brandKit?: { logo?: unknown } } | null;
+  const alreadyHasLogo = meta?.brandKitStamped === true || meta?.brandKit?.logo === true;
+  const addLogo = logo && hasLogo && !alreadyHasLogo;
+  const canApply = !!selected && (addLogo || headline.trim() || cta.trim());
 
   const submit = () => {
     if (!selected) return;
@@ -282,7 +286,7 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
       {
         generationId: generation.id,
         brandId: selected.id,
-        logo,
+        logo: addLogo,
         headline: headline.trim() || undefined,
         cta: cta.trim() || undefined,
       },
@@ -336,8 +340,9 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
             <span className="text-sm">
               Add logo
               {!hasLogo && <span className="ml-1 text-xs text-muted-foreground">(this brand has no logo yet)</span>}
+              {alreadyHasLogo && <span className="ml-1 text-xs text-muted-foreground">(already on this image)</span>}
             </span>
-            <Switch checked={logo && hasLogo} onCheckedChange={setLogo} disabled={!hasLogo} aria-label="Add logo" />
+            <Switch checked={addLogo} onCheckedChange={setLogo} disabled={!hasLogo || alreadyHasLogo} aria-label="Add logo" />
           </div>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Headline (optional)

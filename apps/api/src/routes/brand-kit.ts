@@ -67,14 +67,23 @@ export async function brandKitRoutes(app: FastifyInstance) {
       if (!(await loadBrandContext(body.brandId, req.userId))) throw notFound("Brand not found");
       const kit = await loadBrandKit(body.brandId);
       if (!kit) throw notFound("Brand not found");
-      if ((body.logo ?? true) && !kit.logoUrl && !body.headline && !body.cta) {
+
+      // Images that already carry the logo (auto-stamped at generation, or a
+      // previous brand kit) must not get a second copy.
+      const sourceMeta = (source.metadata ?? {}) as { brandKitStamped?: unknown; brandKit?: { logo?: unknown } };
+      const alreadyHasLogo = sourceMeta.brandKitStamped === true || sourceMeta.brandKit?.logo === true;
+      const logo = (body.logo ?? true) && !alreadyHasLogo;
+      if ((body.logo ?? true) && alreadyHasLogo && !body.headline && !body.cta) {
+        throw badRequest("This image already has your logo - add a headline or button text instead");
+      }
+      if (logo && !kit.logoUrl && !body.headline && !body.cta) {
         throw badRequest("Upload a logo to this brand first, or add a headline");
       }
 
       let out: Buffer | null;
       try {
         out = await composeBrandKit(await fetchOwnBytes(sourceUrl), kit, {
-          logo: body.logo ?? true,
+          logo,
           headline: body.headline,
           cta: body.cta,
         });
@@ -102,7 +111,7 @@ export async function brandKitRoutes(app: FastifyInstance) {
           status: "completed",
           metadata: {
             brandId: body.brandId,
-            brandKit: { logo: body.logo ?? true, headline: body.headline ?? null, cta: body.cta ?? null },
+            brandKit: { logo, headline: body.headline ?? null, cta: body.cta ?? null },
           },
         },
       });

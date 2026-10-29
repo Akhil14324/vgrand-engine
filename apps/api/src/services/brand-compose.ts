@@ -182,9 +182,12 @@ export async function loadBrandKit(brandId: string): Promise<BrandKit | null> {
   };
 }
 
+/** Off: generated images are no longer stamped with the logo. Use "Apply brand kit" on an image to add it. */
+const AUTO_STAMP_LOGO = false;
+
 /** The kit for generations that have a real brand logo to stamp. */
 export function shouldAutoStampLogo(kit: Pick<BrandKit, "logoUrl"> | null): boolean {
-  return Boolean(kit?.logoUrl);
+  return AUTO_STAMP_LOGO && Boolean(kit?.logoUrl);
 }
 
 export async function loadAutoStampKit(brandId: string | null | undefined): Promise<BrandKit | null> {

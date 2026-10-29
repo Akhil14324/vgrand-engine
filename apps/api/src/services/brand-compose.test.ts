@@ -79,8 +79,8 @@ const kit = (over: Partial<BrandKit> = {}): BrandKit => ({
 });
 
 describe("shouldAutoStampLogo", () => {
-  it("stamps the uploaded logo even when overlayDefault is disabled", () => {
-    expect(shouldAutoStampLogo(kit({ profile: { overlayDefault: false }, logoUrl: "logo.png" }))).toBe(true);
+  it("never auto-stamps the logo onto generated images", () => {
+    expect(shouldAutoStampLogo(kit({ profile: { overlayDefault: false }, logoUrl: "logo.png" }))).toBe(false);
     expect(shouldAutoStampLogo(kit({ logoUrl: null }))).toBe(false);
   });
 });

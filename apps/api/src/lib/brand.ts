@@ -347,7 +347,7 @@ export function brandImageGuidance(
   }
   if (hasLogo) {
     parts.push(
-      "The exact uploaded brand logo is composited onto the image after generation - it is not a model input. Do not draw, recreate, alter, or add another logo, watermark or brand lettering anywhere in the creative.",
+      "The uploaded brand logo is not a model input and is not added automatically. Do not draw, recreate, alter, or add a logo, watermark or brand lettering anywhere in the creative.",
     );
   }
   if (hasProducts) {
