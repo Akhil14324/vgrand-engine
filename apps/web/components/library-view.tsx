@@ -3,7 +3,6 @@
 import { RequireAuth } from "@/components/require-auth";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -26,6 +25,13 @@ import {
 } from "@/lib/hooks";
 import { SocialShareDialog } from "@/components/social-share";
 import { MediaThumb } from "@/components/media-thumb";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toaster";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -47,9 +53,9 @@ export function LibraryView() {
 }
 
 function LibraryContent() {
-  const router = useRouter();
-  const { historyTheme, setHistoryTheme, openConversation, select } =
-    useStudio();
+  const { historyTheme, setHistoryTheme } = useStudio();
+  // The item open in the in-page viewer. Opening never leaves the Library.
+  const [viewing, setViewing] = useState<GenerationDto | null>(null);
   const { data: themes } = useThemes();
   const {
     data,
@@ -87,12 +93,6 @@ function LibraryContent() {
     return () => io.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, images.length]);
 
-  const open = (g: GenerationDto) => {
-    if (g.conversationId) openConversation(g.conversationId);
-    select(g.id);
-    router.push("/");
-  };
-
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex items-center gap-3 border-b px-3 py-2.5 sm:px-4">
@@ -106,6 +106,8 @@ function LibraryContent() {
         </h1>
         <UploadButton />
       </header>
+
+      <LibraryViewer generation={viewing} onClose={() => setViewing(null)} />
 
       <div
         ref={scrollRef}
@@ -144,7 +146,7 @@ function LibraryContent() {
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {images.map((g) => (
-                <LibraryTile key={g.id} generation={g} onOpen={() => open(g)} />
+                <LibraryTile key={g.id} generation={g} onOpen={() => setViewing(g)} />
               ))}
             </div>
           )}
@@ -160,6 +162,43 @@ function LibraryContent() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Full-size view of one image or reel, shown on top of the Library. */
+function LibraryViewer({
+  generation,
+  onClose,
+}: {
+  generation: GenerationDto | null;
+  onClose: () => void;
+}) {
+  const url = generation?.imageUrls[0];
+  return (
+    <Dialog open={!!generation} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+        {generation && url && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="line-clamp-2 pr-6 text-sm font-medium">
+                {generation.prompt}
+              </DialogTitle>
+              {generation.theme && (
+                <DialogDescription>/{generation.theme.slug}</DialogDescription>
+              )}
+            </DialogHeader>
+            <div className="relative flex justify-center overflow-hidden rounded-lg bg-muted">
+              <MediaThumb
+                src={url}
+                alt={generation.prompt}
+                controls
+                className="max-h-[70dvh] w-auto max-w-full object-contain"
+              />
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
