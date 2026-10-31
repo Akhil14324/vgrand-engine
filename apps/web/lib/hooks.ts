@@ -96,6 +96,25 @@ export function useGenerations(filter?: {
   });
 }
 
+/** Library page size — each page is images only, so a full page is a full grid. */
+const LIBRARY_PAGE_SIZE = 30;
+
+/** Library grid, paged by cursor: one page at a time, the next page loads
+ *  when the reader scrolls to the bottom (`fetchNextPage`). Keys start with
+ *  "generations" so existing invalidations still refresh it. */
+export function useLibraryInfinite(filter?: { themeSlug?: string | null }) {
+  const themeSlug = filter?.themeSlug ?? null;
+  return useInfiniteQuery({
+    queryKey: ["generations", "library", themeSlug],
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      apiFetch<Paginated<GenerationDto>>(
+        `/generations?images=true&limit=${LIBRARY_PAGE_SIZE}${themeSlug ? `&themeSlug=${themeSlug}` : ""}${pageParam ? `&cursor=${pageParam}` : ""}`,
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+}
+
 export function useGeneration(id: string | null) {
   return useQuery({
     queryKey: ["generation", id],

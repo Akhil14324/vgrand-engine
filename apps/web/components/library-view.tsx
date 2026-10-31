@@ -1,7 +1,7 @@
 "use client";
 
 import { RequireAuth } from "@/components/require-auth";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,7 +20,7 @@ import { isVideoUrl, type GenerationDto } from "@catgpt/types";
 import { apiFetch } from "@/lib/api";
 import {
   useDeleteGeneration,
-  useGenerations,
+  useLibraryInfinite,
   useShareGeneration,
   useThemes,
 } from "@/lib/hooks";
@@ -51,13 +51,41 @@ function LibraryContent() {
   const { historyTheme, setHistoryTheme, openConversation, select } =
     useStudio();
   const { data: themes } = useThemes();
-  const { data, isLoading } = useGenerations({ themeSlug: historyTheme });
+  const {
+    data,
+    isLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useLibraryInfinite({ themeSlug: historyTheme });
 
-  // Only finished images belong here — chat replies and failures have none.
+  // Server only returns rows with images; the filter here is a cheap guard.
   const images = useMemo(
-    () => (data?.items ?? []).filter((g) => g.imageUrls.length > 0),
+    () =>
+      (data?.pages ?? [])
+        .flatMap((p) => p.items)
+        .filter((g) => g.imageUrls.length > 0),
     [data],
   );
+
+  // Load the next page when the sentinel below the grid scrolls into view.
+  // The grid scrolls inside its own container, so that is the IO root.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { root: scrollRef.current, rootMargin: "400px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, images.length]);
 
   const open = (g: GenerationDto) => {
     if (g.conversationId) openConversation(g.conversationId);
@@ -79,7 +107,10 @@ function LibraryContent() {
         <UploadButton />
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6"
+      >
         <div className="mx-auto max-w-6xl">
           {themes && themes.length > 0 && (
             <div className="mb-4 flex flex-wrap gap-1.5">
@@ -115,6 +146,15 @@ function LibraryContent() {
               {images.map((g) => (
                 <LibraryTile key={g.id} generation={g} onOpen={() => open(g)} />
               ))}
+            </div>
+          )}
+
+          {/* Sentinel — fetches the next page of older images on scroll. */}
+          {hasNextPage && (
+            <div ref={sentinelRef} className="flex justify-center py-6">
+              {isFetchingNextPage && (
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              )}
             </div>
           )}
         </div>

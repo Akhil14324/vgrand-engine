@@ -637,6 +637,8 @@ export async function generationRoutes(app: FastifyInstance) {
       conversationId?: string;
       cursor?: string;
       limit?: string;
+      /** "true" → only rows that have images/videos (the Library). */
+      images?: string;
     };
     const limit = Math.min(Math.max(Number(q.limit) || 30, 1), 100);
     if (q.cursor && !UUID_RE.test(q.cursor)) throw badRequest("invalid cursor");
@@ -645,6 +647,7 @@ export async function generationRoutes(app: FastifyInstance) {
         userId: req.userId,
         ...(q.themeSlug ? { theme: { slug: q.themeSlug } } : {}),
         ...(q.conversationId ? { conversationId: q.conversationId } : {}),
+        ...(q.images === "true" ? { imageUrls: { isEmpty: false } } : {}),
       },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
