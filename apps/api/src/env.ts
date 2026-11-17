@@ -107,6 +107,8 @@ const envSchema = z.object({
   EMAIL_FROM: opt(z.string().min(3)),
   META_APP_ID: opt(z.string().min(1)),
   META_APP_SECRET: opt(z.string().min(1)),
+  /** Facebook Login for Business configuration ID. When set, login uses config_id instead of scope. */
+  META_LOGIN_CONFIG_ID: opt(z.string().min(1)),
   /** Graph API version, e.g. "v23.0". Meta retires old versions - bump when needed. */
   META_GRAPH_VERSION: opt(z.string().regex(/^v\d+\.\d+$/)),
   X_CLIENT_ID: opt(z.string().min(1)),

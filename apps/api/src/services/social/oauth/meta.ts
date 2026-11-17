@@ -20,7 +20,12 @@ export function metaAuthUrl(state: string, redirectUri: string): string {
   url.searchParams.set("client_id", env.META_APP_ID!);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", state);
-  url.searchParams.set("scope", META_SCOPES.join(","));
+  if (env.META_LOGIN_CONFIG_ID) {
+    // Facebook Login for Business: permissions come from the saved configuration.
+    url.searchParams.set("config_id", env.META_LOGIN_CONFIG_ID);
+  } else {
+    url.searchParams.set("scope", META_SCOPES.join(","));
+  }
   url.searchParams.set("response_type", "code");
   return url.toString();
 }
@@ -76,6 +81,15 @@ export async function completeMetaConnect(
     throw new SocialConnectError("token_exchange_failed", "Meta returned no long-lived token");
   }
 
+  // App-scoped Facebook user id: lets Meta's data-deletion/deauthorize callbacks find these rows.
+  let fbUserId: string | undefined;
+  try {
+    const me = await graphGet("/me", { fields: "id", access_token: userToken });
+    if (typeof me.id === "string") fbUserId = me.id;
+  } catch {
+    // Best-effort; without it, deletion falls back to the email/manual route.
+  }
+
   const pages: PageRow[] = [];
   let next: string | null = null;
   let first = true;
@@ -107,7 +121,7 @@ export async function completeMetaConnect(
       accessToken: page.access_token,
       tokenExpiresAt: null, // long-lived-user-derived Page tokens carry no expiry; revocation is detected on use
       scopes: [...META_SCOPES],
-      metadata: { pageId: page.id },
+      metadata: { pageId: page.id, ...(fbUserId ? { fbUserId } : {}) },
     });
 
     // Instagram is best-effort per Page: a failure here must not drop the Page itself.
@@ -129,7 +143,7 @@ export async function completeMetaConnect(
           accessToken: page.access_token,
           tokenExpiresAt: null,
           scopes: [...META_SCOPES],
-          metadata: { pageId: page.id, igUserId: igAcc.id },
+          metadata: { pageId: page.id, igUserId: igAcc.id, ...(fbUserId ? { fbUserId } : {}) },
         });
       }
     } catch {

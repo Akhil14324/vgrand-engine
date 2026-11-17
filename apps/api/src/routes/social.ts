@@ -14,7 +14,10 @@ import {
   type SocialPostDto,
   type SocialPreviewsDto,
 } from "@catgpt/types";
+import { randomBytes } from "node:crypto";
+import { prisma } from "@catgpt/db";
 import { env } from "../env.js";
+import { parseMetaSignedRequest } from "../services/social/meta-deletion-logic.js";
 import { badRequest, HttpError, parseBody } from "../lib/errors.js";
 import { hasValidTokenKey } from "../lib/social-crypto.js";
 import {
@@ -210,6 +213,46 @@ export async function socialRoutes(app: FastifyInstance) {
  * opaque, single-use state that /social/connect stored for an authenticated user.
  */
 export async function socialCallbackRoutes(app: FastifyInstance) {
+  // Meta posts its callbacks as application/x-www-form-urlencoded. Scoped to this plugin.
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string", bodyLimit: 16 * 1024 },
+    (_req, body, done) => {
+      done(null, Object.fromEntries(new URLSearchParams(String(body))));
+    },
+  );
+
+  /**
+   * Meta "Data Deletion Request" and "Deauthorize" callbacks. Trust comes only
+   * from the HMAC signature over signed_request (keyed by the app secret).
+   * We delete the stored Facebook/Instagram tokens for that Facebook user and
+   * answer with the {url, confirmation_code} shape Meta requires.
+   */
+  const metaUserCallback = async (
+    req: { body: unknown; log: FastifyInstance["log"] },
+    reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+  ) => {
+    const secret = env.META_APP_SECRET;
+    const signed = (req.body as Record<string, unknown> | undefined)?.signed_request;
+    const parsed = secret ? parseMetaSignedRequest(signed, secret) : null;
+    if (!parsed) return reply.code(400).send({ message: "Invalid signed_request" });
+
+    const { count } = await prisma.socialAccount.deleteMany({
+      where: {
+        platform: { in: ["facebook", "instagram"] },
+        metadata: { path: ["fbUserId"], equals: parsed.userId },
+      },
+    });
+    const code = randomBytes(8).toString("hex");
+    req.log.info({ deleted: count, code }, "meta data deletion processed");
+    return {
+      url: `${env.WEB_ORIGIN.replace(/\/+$/, "")}/data-deletion?code=${code}`,
+      confirmation_code: code,
+    };
+  };
+  app.post("/social/meta/data-deletion", metaUserCallback as never);
+  app.post("/social/meta/deauthorize", metaUserCallback as never);
+
   app.get("/social/callback/:provider", async (req, reply) => {
     const { provider } = req.params as { provider: string };
     const connector = CONNECTOR_BY_SEGMENT[provider];

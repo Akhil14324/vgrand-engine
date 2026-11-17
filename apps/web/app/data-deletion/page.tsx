@@ -19,12 +19,28 @@ const body = [
 ].join("\n");
 const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
-export default function DataDeletionPage() {
+export default async function DataDeletionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ code?: string }>;
+}) {
+  const { code } = await searchParams;
+  const safeCode = code && /^[a-f0-9]{8,32}$/i.test(code) ? code : null;
   return (
     <LegalPage
       title="Data Deletion"
       intro="You can ask us to delete your CatGPT account and the data associated with it at any time. This page explains how to make the request and what happens next."
     >
+      {safeCode ? (
+        <Section title="Request received">
+          <p>
+            Your Facebook/Instagram data deletion request (confirmation code{" "}
+            <strong>{safeCode}</strong>) has been processed. The Facebook and Instagram access
+            tokens and connected accounts we held for you were deleted. To have the rest of your
+            CatGPT account deleted, follow the steps below.
+          </p>
+        </Section>
+      ) : null}
       <Section title="How to request deletion">
         <ol className="list-decimal space-y-2 pl-5">
           <li>
