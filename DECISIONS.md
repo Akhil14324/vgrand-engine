@@ -196,3 +196,24 @@ Fetched from the official pages, not taken from the build spec:
 - **Not verified live:** no real Google project was available, so the consent screen, real
   token exchange, real `videos.insert`, and YouTube's actual private-lock behaviour were not
   exercised. Request shapes follow the docs checked in Phase 1.
+
+## Phase 6 — Path A ingest
+
+- **Two entry points, one job.** Watch folder `STORAGE_PATH/ingest/<channel-slug>/` (scanned
+  every minute; a file must be unchanged for 30 s so half-copied files are skipped) and
+  `POST /shorts/channels/:id/ingest` (multipart, up to 500 MB, also in the Pipeline page). Both
+  stage the file and enqueue an `ingest` job keyed by the file's sha256: the same file is never
+  ingested twice (a re-drop goes to `rejected/` with a `.reason.txt`).
+- **Sidecar** `<name>.json` next to the MP4: `title, description, tags, synthetic, hookType,
+  topic` (all optional). An invalid sidecar rejects the pair with the reason. A `source` URL
+  pointing at YouTube/Instagram/TikTok is refused (no reposting).
+- **Normalisation, not trust.** Every ingest is re-encoded to H.264/AAC 1080x1920 (centre crop
+  if the aspect differs) and passes the same validation as Path B except "captions" (rendered
+  elsewhere). A render without audio gets a `music_library` track if one exists; otherwise it is
+  refused with that reason (Shorts without sound are not a fair comparison).
+- **Slot**: the channel's next free posting time. Then the channel's approval mode applies
+  (manual by default → "awaiting approval").
+- **Failures are visible**: a dead ingest moves the file to `rejected/` with the reason and
+  raises a channel alert shown on the Pipeline page.
+- The spec's "bucket prefix" alternative was not built; the watch folder lives under
+  `STORAGE_PATH`, which can be a mounted volume or a synced bucket mount.

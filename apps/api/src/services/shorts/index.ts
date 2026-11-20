@@ -1,9 +1,11 @@
 import { startShortsJobWorker } from "./jobs.js";
+import { startShortsScheduler } from "./scheduler.js";
 import { log } from "./log.js";
 import { registerPipelineHandlers } from "./pipeline.js";
 import { registerPostingHandlers } from "./posting.js";
 import { registerSyncHandlers } from "./sync.js";
 import { registerYoutubeHandlers } from "./youtube.js";
+import { registerIngestHandlers } from "./ingest.js";
 
 /** Job handlers are registered by any process that may run Shorts jobs (API, worker, CLI). */
 export function registerShortsHandlers(): void {
@@ -11,6 +13,7 @@ export function registerShortsHandlers(): void {
   registerPostingHandlers();
   registerSyncHandlers();
   registerYoutubeHandlers();
+  registerIngestHandlers();
 }
 
 let started = false;
@@ -26,6 +29,7 @@ export function startShortsFactory(): void {
   try {
     registerShortsHandlers();
     startShortsJobWorker();
+    startShortsScheduler();
   } catch (err) {
     log.error("factory.start_failed", { error: String(err) });
   }

@@ -104,3 +104,30 @@ export function useSetViewedPct() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["shorts"] }),
   });
 }
+
+export interface ShortsAlert {
+  id: string;
+  channel: string;
+  level: string;
+  type: string;
+  message: string;
+  createdAt: string;
+}
+
+export const useShortsAlerts = () =>
+  useQuery({
+    queryKey: ["shorts", "alerts"],
+    queryFn: () => apiFetch<{ items: ShortsAlert[] }>("/shorts/alerts"),
+    select: (d) => d.items,
+    refetchInterval: 30_000,
+  });
+
+/** Path A upload (multipart). */
+export function useIngestUpload() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ channelId, form }: { channelId: string; form: FormData }) =>
+      apiFetch<{ status: string }>(`/shorts/channels/${channelId}/ingest`, { method: "POST", body: form }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shorts"] }),
+  });
+}

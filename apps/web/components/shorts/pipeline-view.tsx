@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Upload } from "lucide-react";
 import type { ShortsStatus, ShortsVideoDto } from "@catgpt/types";
 import { ShortsShell, fmtNum, fmtWhen } from "@/components/shorts/shorts-shell";
 import { StatusBadge, VideoActions, VideoDetailDialog } from "@/components/shorts/video-detail";
@@ -8,7 +9,11 @@ import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { useShortsChannels, useShortsVideos } from "@/lib/shorts-hooks";
+import { useIngestUpload, useShortsAlerts, useShortsChannels, useShortsVideos } from "@/lib/shorts-hooks";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toaster";
+import { ApiRequestError } from "@/lib/api";
 
 const GROUPS: { key: string; label: string; statuses: ShortsStatus[] }[] = [
   { key: "review", label: "Needs your review", statuses: ["awaiting_approval"] },
@@ -36,6 +41,8 @@ function Pipeline() {
 
   return (
     <>
+      <Alerts />
+      <PathAUpload />
       <div className="flex flex-wrap items-center gap-3">
         <Select className="w-56" value={channelId} onChange={(e) => setChannelId(e.target.value)} aria-label="Channel">
           <option value="">All channels</option>
@@ -93,5 +100,71 @@ function Row({ v, onOpen }: { v: ShortsVideoDto; onOpen: () => void }) {
       <StatusBadge status={v.status} />
       <VideoActions video={v} />
     </div>
+  );
+}
+
+function Alerts() {
+  const { data } = useShortsAlerts();
+  if (!data?.length) return null;
+  return (
+    <Card className="space-y-1 border-amber-500/40 p-3 text-sm">
+      <div className="font-medium">Channel alerts (last 7 days)</div>
+      {data.slice(0, 8).map((a) => (
+        <div key={a.id} className={a.level === "error" ? "text-destructive" : "text-amber-500"}>
+          {fmtWhen(a.createdAt)} · {a.channel}: {a.message}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/** Upload a finished MP4 for a Path A channel (same as dropping it in the watch folder). */
+function PathAUpload() {
+  const channels = useShortsChannels();
+  const upload = useIngestUpload();
+  const pathA = channels.data?.filter((c) => c.path === "A") ?? [];
+  const [channelId, setChannelId] = useState("");
+  const [title, setTitle] = useState("");
+  const [synthetic, setSynthetic] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  if (!pathA.length) return null;
+  const target = channelId || pathA[0]!.id;
+
+  const submit = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) return toast.error("Choose an MP4");
+    const form = new FormData();
+    if (title.trim()) form.append("title", title.trim());
+    form.append("synthetic", String(synthetic));
+    form.append("file", file);
+    try {
+      await upload.mutateAsync({ channelId: target, form });
+      toast.success("Uploaded. It becomes a draft in a few seconds.");
+      setTitle("");
+      if (fileRef.current) fileRef.current.value = "";
+    } catch (err) {
+      toast.error(err instanceof ApiRequestError ? err.message : "Upload failed");
+    }
+  };
+
+  return (
+    <Card className="flex flex-wrap items-center gap-2 p-3 text-sm">
+      <span className="font-medium">Path A upload</span>
+      <Select className="w-48" value={target} onChange={(e) => setChannelId(e.target.value)} aria-label="Path A channel">
+        {pathA.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.displayName}
+          </option>
+        ))}
+      </Select>
+      <Input className="h-9 w-56" placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input ref={fileRef} type="file" accept="video/mp4" className="text-xs" />
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Switch checked={synthetic} onCheckedChange={setSynthetic} /> realistic synthetic
+      </label>
+      <Button size="sm" onClick={submit} disabled={upload.isPending}>
+        <Upload /> Upload
+      </Button>
+    </Card>
   );
 }

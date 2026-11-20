@@ -11,6 +11,14 @@ import { approveVideo, markPosted, rejectVideo, retryVideo, setManualViewedPct }
 import { syncPublic } from "../services/shorts/sync.js";
 import { prisma } from "@catgpt/db";
 import { disconnect, startConnect } from "../services/shorts/youtube.js";
+import { mkdir, rm } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { shortsSidecarSchema, SHORTS_HOOK_TYPES } from "@catgpt/types";
+import { stageForIngest } from "../services/shorts/ingest.js";
+import { storageRoot } from "../services/shorts/storage.js";
 
 /** Shorts Factory API. Everything here is scoped to the signed-in user. */
 export async function shortsRoutes(app: FastifyInstance) {
@@ -100,4 +108,77 @@ export async function shortsRoutes(app: FastifyInstance) {
     await disconnect(channel);
     return { ok: true };
   });
+
+  /** Path A upload: multipart with optional fields title, description, tags (comma separated), synthetic, then the MP4. */
+  app.post<{ Params: { id: string } }>("/shorts/channels/:id/ingest", async (req, reply) => {
+    const channel = await getOwnedChannel(req.userId, req.params.id);
+    if (channel.path !== "A") throw new HttpError(400, "Uploads are for Path A channels; Path B/C channels generate their own videos", "NOT_PATH_A");
+    const tmpDir = path.join(storageRoot(), "ingest", ".uploads");
+    await mkdir(tmpDir, { recursive: true });
+    const fields: Record<string, string> = {};
+    let tmp: string | null = null;
+    let originalName = "";
+    try {
+      for await (const part of req.parts({ limits: { fileSize: SHORTS_MAX_UPLOAD_BYTES, files: 1 } })) {
+        if (part.type === "file") {
+          originalName = part.filename;
+          tmp = path.join(tmpDir, `${randomUUID()}.mp4`);
+          await pipeline(part.file, createWriteStream(tmp));
+          if (part.file.truncated) throw new HttpError(413, `File is larger than ${SHORTS_MAX_UPLOAD_BYTES / 1024 / 1024} MB`);
+        } else {
+          fields[part.fieldname] = String(part.value);
+        }
+      }
+      if (!tmp) throw new HttpError(400, "No file in the upload");
+      const sidecar = parseBody(shortsSidecarSchema, {
+        ...(fields.title ? { title: fields.title } : {}),
+        ...(fields.description ? { description: fields.description } : {}),
+        ...(fields.tags ? { tags: fields.tags.split(",").map((t) => t.trim()).filter(Boolean) } : {}),
+        ...(fields.synthetic ? { synthetic: fields.synthetic === "true" } : {}),
+        ...(fields.hookType ? { hookType: fields.hookType } : {}),
+        ...(fields.topic ? { topic: fields.topic } : {}),
+      });
+      const r = await stageForIngest({ channelId: channel.id, file: tmp, originalName, sidecar, sidecarSource: fields.source ?? null });
+      if (r.status !== "queued") throw new HttpError(r.status === "duplicate" ? 409 : 400, r.detail, r.status.toUpperCase());
+      tmp = null;
+      return reply.code(202).send({ status: "queued", sha: r.detail });
+    } finally {
+      if (tmp) await rm(tmp, { force: true });
+    }
+  });
+
+  /** Edit title/description/tags/flags before the video is on YouTube. */
+  app.patch<{ Params: { id: string } }>("/shorts/videos/:id", async (req) => {
+    const body = parseBody(
+      z.object({
+        title: z.string().min(1).max(100).optional(),
+        description: z.string().max(5000).optional(),
+        tags: z.array(z.string().min(1).max(100)).max(30).optional(),
+        synthetic: z.boolean().optional(),
+        hookType: z.enum(SHORTS_HOOK_TYPES).optional(),
+      }),
+      req.body,
+    );
+    const v = await prisma.shortsVideo.findFirst({ where: { id: req.params.id, userId: req.userId } });
+    if (!v) throw new HttpError(404, "Video not found");
+    if (v.youtubeVideoId || ["posted", "manual_posted", "scheduled"].includes(v.status)) {
+      throw new HttpError(409, "This video is already on YouTube; edit it in YouTube Studio", "INVALID_STATE");
+    }
+    await prisma.shortsVideo.update({ where: { id: v.id }, data: body });
+    return videoDetail(req.userId, v.id);
+  });
+
+  /** Channel-level warnings/errors of the last 7 days (failed ingests, reauth needed, ...). */
+  app.get("/shorts/alerts", async (req) => {
+    const channels = await prisma.shortsChannel.findMany({ where: { userId: req.userId }, select: { id: true, displayName: true } });
+    const names = new Map(channels.map((c) => [c.id, c.displayName]));
+    const rows = await prisma.shortsEvent.findMany({
+      where: { videoId: null, channelId: { in: [...names.keys()] }, level: { in: ["warn", "error"] }, createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) } },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    return { items: rows.map((e) => ({ id: e.id, channel: names.get(e.channelId!) ?? "", level: e.level, type: e.type, message: e.message, createdAt: e.createdAt.toISOString() })) };
+  });
 }
+
+const SHORTS_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
