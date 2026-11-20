@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FlaskConical, Pencil, Sparkles, Youtube } from "lucide-react";
 import {
   SHORTS_PATHS,
@@ -32,7 +32,20 @@ export function ShortsChannelsView() {
   );
 }
 
+/** Shows the outcome of the Google OAuth redirect (?yt_connected / ?yt_error) once, then cleans the URL. */
+function useConnectResult() {
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const ok = q.get("yt_connected");
+    const err = q.get("yt_error");
+    if (ok) toast.success(`YouTube connected to ${ok}${q.get("yt_title") ? ` (${q.get("yt_title")})` : ""}`);
+    if (err) toast.error(`YouTube connect failed: ${err}`);
+    if (ok || err) window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+}
+
 function Channels() {
+  useConnectResult();
   const { data, isLoading } = useShortsChannels();
   const health = useShortsHealth();
   const [editing, setEditing] = useState<ShortsChannelDto | null>(null);
@@ -140,6 +153,7 @@ function ChannelCard({ channel: c, onEdit }: { channel: ShortsChannelDto; onEdit
           <YoutubeConnect channel={c} />
         </div>
       </div>
+      {c.youtube.status === "reauth_required" && c.youtube.reason && <p className="text-xs text-destructive">{c.youtube.reason}</p>}
     </Card>
   );
 }

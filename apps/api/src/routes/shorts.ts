@@ -10,6 +10,7 @@ import { listVideos, videoDetail } from "../services/shorts/video-api.js";
 import { approveVideo, markPosted, rejectVideo, retryVideo, setManualViewedPct } from "../services/shorts/posting.js";
 import { syncPublic } from "../services/shorts/sync.js";
 import { prisma } from "@catgpt/db";
+import { disconnect, startConnect } from "../services/shorts/youtube.js";
 
 /** Shorts Factory API. Everything here is scoped to the signed-in user. */
 export async function shortsRoutes(app: FastifyInstance) {
@@ -86,5 +87,17 @@ export async function shortsRoutes(app: FastifyInstance) {
     const r = await syncPublic([v.id], "manual");
     if (r.missing.length) throw new HttpError(404, "YouTube returned no public stats for this video (deleted, private, or wrong id)", "NOT_FOUND_ON_YOUTUBE");
     return videoDetail(req.userId, req.params.id);
+  });
+
+  /** Starts Google OAuth for one channel (pick that channel's YouTube account/brand channel). */
+  app.post<{ Params: { id: string } }>("/shorts/channels/:id/youtube/connect", async (req) => {
+    const channel = await getOwnedChannel(req.userId, req.params.id);
+    return { url: await startConnect(req.userId, channel.id) };
+  });
+
+  app.post<{ Params: { id: string } }>("/shorts/channels/:id/youtube/disconnect", async (req) => {
+    const channel = await getOwnedChannel(req.userId, req.params.id);
+    await disconnect(channel);
+    return { ok: true };
   });
 }

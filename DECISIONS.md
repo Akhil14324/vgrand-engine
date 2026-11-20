@@ -165,3 +165,34 @@ Fetched from the official pages, not taken from the build spec:
 - **Downloads/previews** use signed URLs (6 h expiry, HMAC) with HTTP Range support.
 - **DB integration tests** (`shorts-db.it.test.ts`) are opt-in (`SHORTS_IT=1` + a local
   Postgres) because the repo's test suite otherwise never touches a database.
+
+## Phase 5 — YouTube OAuth + automated upload
+
+- **One Google OAuth client, one connection per experiment channel.** "Connect YouTube" sends the
+  owner through Google with `prompt=consent select_account` so they can pick the right brand
+  channel; the callback (`GOOGLE_REDIRECT_URI`, which must point at
+  `<API>/shorts/oauth/callback`) stores the encrypted refresh token on that channel. Connecting the
+  same YouTube channel to two experiment channels is refused (it would mix their data). OAuth
+  state reuses the existing `SocialOAuthSession` table (hashed, 10-minute, single-use).
+- **Missing scopes are refused at connect time** (all three are needed: upload, readonly,
+  analytics) instead of failing later.
+- **Upload budget.** Counted per Pacific-time day in `shorts_quota_days`, reserved atomically
+  before opening an upload session (95 of the documented 100/day). A `quotaExceeded` from
+  YouTube marks the day exhausted, and every later video that day goes to the manual queue.
+- **Crash safety.** The resumable session URI is saved before bytes are sent; the YouTube id is
+  saved the moment YouTube returns it; a retry probes the saved session and resumes from the
+  byte YouTube confirmed. A video with an id is never uploaded again. Verified against a local
+  fake of Google's endpoints (`youtube-upload.it.test.ts`): network drop mid-upload → one init
+  call, one resumed PUT, quota counted once.
+- **"Posted" means verified public.** An upload for a future slot is `scheduled`
+  (`private` + `publishAt`); a `publish_check` job runs 10 min after the slot and only marks it
+  `posted` once YouTube reports `public`. Still private 30+ min after the slot, or YouTube
+  dropped `publishAt` → `privateLocked` + manual queue with instructions. Not public after 6 h
+  for any other reason → manual queue.
+- **Expired/revoked tokens** (`invalid_grant`, 401) set the channel to `reauth_required` with a
+  message that mentions the 7-day "Testing" consent-screen expiry; its videos go to the manual
+  queue until the owner presses Reconnect.
+- **Category** `22` (People & Blogs) for every upload; `selfDeclaredMadeForKids: false`.
+- **Not verified live:** no real Google project was available, so the consent screen, real
+  token exchange, real `videos.insert`, and YouTube's actual private-lock behaviour were not
+  exercised. Request shapes follow the docs checked in Phase 1.

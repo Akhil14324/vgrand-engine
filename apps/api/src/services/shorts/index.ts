@@ -3,12 +3,14 @@ import { log } from "./log.js";
 import { registerPipelineHandlers } from "./pipeline.js";
 import { registerPostingHandlers } from "./posting.js";
 import { registerSyncHandlers } from "./sync.js";
+import { registerYoutubeHandlers } from "./youtube.js";
 
 /** Job handlers are registered by any process that may run Shorts jobs (API, worker, CLI). */
 export function registerShortsHandlers(): void {
   registerPipelineHandlers();
   registerPostingHandlers();
   registerSyncHandlers();
+  registerYoutubeHandlers();
 }
 
 let started = false;

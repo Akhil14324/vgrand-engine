@@ -2,7 +2,9 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@catgpt/db";
+import { env } from "../env.js";
 import { insideStorage, verifyFileSignature } from "../services/shorts/storage.js";
+import { completeConnect } from "../services/shorts/youtube.js";
 
 /**
  * Unauthenticated Shorts endpoints. Trust comes from an HMAC-signed, expiring
@@ -39,4 +41,19 @@ export async function shortsPublicRoutes(app: FastifyInstance) {
       return reply.send(createReadStream(v.filePath));
     },
   );
+
+  /** Google redirects here (GOOGLE_REDIRECT_URI). Sends the owner back to the Channels page with the outcome. */
+  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>("/shorts/oauth/callback", async (req, reply) => {
+    const base = (env.APP_BASE_URL ?? env.WEB_ORIGIN).replace(/\/+$/, "");
+    const back = (q: Record<string, string>) => reply.redirect(`${base}/shorts?${new URLSearchParams(q)}`);
+    if (req.query.error) return back({ yt_error: `Google: ${req.query.error}` });
+    if (!req.query.code || !req.query.state) return back({ yt_error: "Missing code or state" });
+    try {
+      const r = await completeConnect(req.query.code, req.query.state);
+      return back({ yt_connected: r.slug, yt_title: r.title });
+    } catch (err) {
+      req.log.warn({ err }, "shorts oauth callback failed");
+      return back({ yt_error: err instanceof Error ? err.message.slice(0, 300) : "Connect failed" });
+    }
+  });
 }
