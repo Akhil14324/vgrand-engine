@@ -245,3 +245,45 @@ Fetched from the official pages, not taken from the build spec:
   fallback event as expected. **Not verified**: real Veo/Runway/Kling calls and their actual
   prices (the price table is the repo's third-party estimate; set your real price on the Costs
   page).
+
+## Phase 8 — Scheduler and 3-day dry run
+
+- **Generation 24 h ahead.** Every minute the scheduler creates one video per posting slot in the
+  next 24 h for enabled B/C channels (`videosPerDay` = number of posting times, in TIMEZONE). The
+  owner has a day to approve a manual-mode video. Path A channels get slots when files are
+  ingested. Idempotent: one row per (channel, slot, source), so overlapping ticks or several
+  processes never double-generate.
+- **Uniqueness includes `source`** so dry-run rows can never occupy (and silently block) the
+  real scheduler's slots.
+- **Approval mode** is read when a render finishes: manual → `awaiting_approval`, auto →
+  `approved` → post step. An approved video whose slot already passed is published immediately.
+- **Daily jobs** (once per local day, keyed by date): public stats sync at 03:00 and YouTube
+  Analytics for connected channels; weekly report Mondays 09:00.
+- **Dry run** (`shorts dry-run --days 3`): drives the real scheduler with a simulated hourly
+  clock over 3 full IST days starting tomorrow, renders every video on offline fixtures, and
+  prints expected vs actual per channel per day. Result: every B/C channel got exactly 1
+  video/day for 3 days (24 total), Path A channels 0; manual channels stopped at
+  `awaiting_approval`, the auto channel at `approved`; 0 uploads attempted.
+
+## Phase 9 — Analytics
+
+- **Comparable metric by default: views at the 7-day checkpoint.** Latest views mix videos of
+  different ages; the 7-day snapshot gives every video the same window. Toggle to latest views in
+  the UI. Videos without a 7-day snapshot are left out of that metric (shown as `n=`).
+- **"Too early"**: channels with fewer than 30 posted videos are labelled and never ranked (in the
+  dashboard and in the report prompt). Format-tag groups with fewer than 10 videos with data are
+  drawn grey and labelled "too few". Outliers need 10+ videos in a channel; "top 10%" is the top
+  ⌈n/10⌉ videos by value (ties included).
+- **Sources.** Views/likes/comments: public Data API (near real time), else YouTube Analytics.
+  Subscribers gained, average view %, duration, shares, engaged views: YouTube Analytics only
+  (connected channels). "Viewed vs swiped away" is not in the API: manual field per video.
+- **Format tags** analysed: hook type, length bucket, posting hour (IST), path, voice, synthetic,
+  niche. The page warns that tags overlap with niche (confounded), so compare within a channel.
+- **Weekly report**: Claude gets the dashboard JSON and is told to use only those numbers, not to
+  rank "too early" channels, and not to read anything into small groups. Stored per week with
+  the exact request/response. With no posted videos, no API call is made.
+- **Costs**: spend per channel (ledger, real spend only), cost per video (spend ÷ videos
+  rendered), cost per 1,000 views, remaining Path C budget, price setting.
+- **Charts** are inline SVG/CSS (no chart library added): single-series bars and small-multiple
+  sparklines with one validated hue (`#3987e5` on the app's dark surface `#111114`, contrast ≥3:1);
+  "too early"/"too few" bars are grey and labelled in text, so the state doesn't rely on colour.

@@ -33,6 +33,9 @@ export interface EnqueueInput {
 }
 
 export async function enqueueJob(input: EnqueueInput): Promise<{ job: ShortsJobRow; created: boolean }> {
+  // Look first so the common repeat doesn't log a constraint error; the catch below covers the race.
+  const existing = await prisma.shortsJob.findUnique({ where: { idempotencyKey: input.key } });
+  if (existing) return { job: existing, created: false };
   try {
     const job = await prisma.shortsJob.create({
       data: {
@@ -193,15 +196,18 @@ export async function runClaimedJob(job: ShortsJobRow, owner = workerId): Promis
 }
 
 /** Claims and runs due jobs until none are left (or `max` were run). Used by the CLI and tests. */
-export async function drainJobs(opts: { max?: number; types?: string[]; videoIds?: string[] } = {}): Promise<number> {
+export async function drainJobs(opts: { max?: number; types?: string[]; videoIds?: string[]; concurrency?: number } = {}): Promise<number> {
   let ran = 0;
   const max = opts.max ?? 1000;
-  while (ran < max) {
-    const [job] = await claimJobs(1, { types: opts.types, videoIds: opts.videoIds });
-    if (!job) break;
-    await runClaimedJob(job);
-    ran++;
-  }
+  const lane = async () => {
+    while (ran < max) {
+      const [job] = await claimJobs(1, { types: opts.types, videoIds: opts.videoIds });
+      if (!job) break;
+      ran++;
+      await runClaimedJob(job);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, opts.concurrency ?? 1) }, lane));
   return ran;
 }
 

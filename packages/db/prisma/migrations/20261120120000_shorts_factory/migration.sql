@@ -229,7 +229,7 @@ CREATE INDEX "shorts_videos_channelId_scriptHash_idx" ON "shorts_videos"("channe
 CREATE INDEX "shorts_videos_userId_createdAt_idx" ON "shorts_videos"("userId", "createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "shorts_videos_channelId_slotAt_key" ON "shorts_videos"("channelId", "slotAt");
+CREATE UNIQUE INDEX "shorts_videos_channelId_slotAt_source_key" ON "shorts_videos"("channelId", "slotAt", "source");
 
 -- CreateIndex
 CREATE INDEX "shorts_assets_videoId_idx" ON "shorts_assets"("videoId");

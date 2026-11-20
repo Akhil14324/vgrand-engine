@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { shortsSidecarSchema, SHORTS_HOOK_TYPES } from "@catgpt/types";
 import { stageForIngest } from "../services/shorts/ingest.js";
 import { pathCBudgetStatus } from "../services/shorts/pathc.js";
+import { buildDashboard, requestReportNow } from "../services/shorts/analytics.js";
 import { shortsSettingsSchema } from "@catgpt/types";
 import { storageRoot } from "../services/shorts/storage.js";
 
@@ -168,6 +169,22 @@ export async function shortsRoutes(app: FastifyInstance) {
     }
     await prisma.shortsVideo.update({ where: { id: v.id }, data: body });
     return videoDetail(req.userId, v.id);
+  });
+
+  /** All dashboards in one payload. metric=views7d (comparable, default) or views (latest). */
+  app.get("/shorts/analytics", async (req) => {
+    const q = parseBody(z.object({ metric: z.enum(["views7d", "views"]).default("views7d") }), req.query);
+    return buildDashboard(req.userId, q.metric);
+  });
+
+  app.get("/shorts/reports", async (req) => {
+    const rows = await prisma.shortsReport.findMany({ where: { userId: req.userId }, orderBy: { weekStart: "desc" }, take: 20 });
+    return { items: rows.map((r) => ({ id: r.id, weekStart: r.weekStart.toISOString().slice(0, 10), content: r.content, createdAt: r.createdAt.toISOString() })) };
+  });
+
+  app.post("/shorts/reports", async (req, reply) => {
+    await requestReportNow(req.userId);
+    return reply.code(202).send({ status: "queued" });
   });
 
   app.get("/shorts/settings", async (req) => pathCBudgetStatus(req.userId));

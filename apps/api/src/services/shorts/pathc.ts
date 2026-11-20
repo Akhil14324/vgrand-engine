@@ -81,9 +81,12 @@ const offlineGen: ClipGen = {
 
 /* ---------------------------------- ledger ---------------------------------- */
 
-export async function monthSpend(): Promise<number> {
+/** Dry-run spend (offline_clipgen) is tracked apart from real spend so it never eats the real budget. */
+const scope = (dryRun: boolean) => (dryRun ? { provider: "offline_clipgen" } : { provider: { not: "offline_clipgen" } });
+
+export async function monthSpend(dryRun = false): Promise<number> {
   const r = await prisma.shortsCost.aggregate({
-    where: { status: { in: ["reserved", "spent"] }, createdAt: { gte: monthStart(new Date(), env.TIMEZONE) } },
+    where: { ...scope(dryRun), status: { in: ["reserved", "spent"] }, createdAt: { gte: monthStart(new Date(), env.TIMEZONE) } },
     _sum: { cost: true },
   });
   return round2(r._sum.cost ?? 0);
@@ -94,7 +97,7 @@ async function reserve(input: { videoId: string; channelId: string; provider: st
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('shorts-pathc-budget'))`;
     const agg = await tx.shortsCost.aggregate({
-      where: { status: { in: ["reserved", "spent"] }, createdAt: { gte: monthStart(new Date(), env.TIMEZONE) } },
+      where: { ...scope(input.provider === "offline_clipgen"), status: { in: ["reserved", "spent"] }, createdAt: { gte: monthStart(new Date(), env.TIMEZONE) } },
       _sum: { cost: true },
     });
     const check = checkBudget(input.budget, agg._sum.cost ?? 0, input.estimate);

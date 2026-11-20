@@ -84,9 +84,12 @@ async function main(): Promise<number> {
     }
     case "make":
       return make();
-    case "drain":
-      console.log(`ran ${await drainJobs()} job(s)`);
+    case "drain": {
+      // --video <id>: only that video's jobs (used by the crash test).
+      const v = arg("video");
+      console.log(`ran ${await drainJobs(v ? { videoIds: [v] } : {})} job(s)`);
       return 0;
+    }
     default: {
       const handled = await runCliExtra(cmd, { arg, flag, resolveOwner });
       if (handled !== null) return handled;

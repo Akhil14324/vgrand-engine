@@ -110,3 +110,111 @@ GET  /health
   product goes multi-tenant.
 - UI primitives live in `apps/web/components/ui` rather than `packages/ui`
   since there's a single frontend; promote them if a second app appears.
+
+## Shorts Factory
+
+Runs 10 YouTube Shorts channels as an experiment to learn which formats work
+(web: `/shorts`). Design decisions and what was/wasn't verified live:
+[`DECISIONS.md`](DECISIONS.md).
+
+| Path | How videos are made | Channels |
+| ---- | ------------------- | -------- |
+| A | Rendered elsewhere; the app ingests finished MP4s (watch folder or upload) | oddly-satisfying, weird-science |
+| B | Claude script → Pexels/Pixabay footage → ElevenLabs voice → ffmpeg with burned-in captions | cats, dogs, wild-animals, food, wholesome, memes-relatable |
+| C | AI clips (Veo/Runway/Kling) under a hard monthly cap, falling back to B | fails, insane-skills |
+
+Pipeline per video: `idea → scripted → assets_ready → rendered → awaiting_approval → approved →
+scheduled → posted`, or `manual_pending → manual_posted`, or `failed` (retry from the UI).
+Every channel starts on **manual approval**; switch a channel to auto on the Channels page.
+
+### 1. Install ffmpeg and ffprobe
+
+The host needs both on `PATH` (with libass for captions and libx264):
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y ffmpeg
+# macOS
+brew install ffmpeg
+ffmpeg -version && ffprobe -version
+```
+
+On Railway, add `ffmpeg` to the build packages (Nixpacks: `NIXPACKS_APT_PKGS=ffmpeg`, or
+`[phases.setup] aptPkgs = ["ffmpeg"]`).
+
+### 2. Environment variables (apps/api/.env)
+
+| Variable | Purpose | Required |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | scripts and the weekly report | yes |
+| `ELEVENLABS_API_KEY` | voiceover (set a voice id per channel in the UI, or `ELEVENLABS_DEFAULT_VOICE_ID`) | yes |
+| `PEXELS_API_KEY`, `PIXABAY_API_KEY` | stock footage | yes |
+| `YOUTUBE_API_KEY` | public stats for every posted video | yes |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | YouTube OAuth for uploads and private analytics | optional (without them every video uses the manual queue) |
+| `TOKEN_ENCRYPTION_KEY` | encrypts stored OAuth tokens: `openssl rand -hex 32` | yes if Google OAuth is set |
+| `VIDEO_GEN_PROVIDER` (`veo`, `veo-fast`, `veo-lite`, `runway`, `kling`), `VIDEO_GEN_API_KEY` | Path C clips | optional (without them Path C always falls back to B) |
+| `PATH_C_MONTHLY_BUDGET`, `BUDGET_CURRENCY` | hard monthly cap for Path C, e.g. `20` and `USD` | yes |
+| `APP_BASE_URL` | the web app URL (OAuth returns here) | yes |
+| `TIMEZONE` | posting schedule time zone, default `Asia/Kolkata` | yes (has a default) |
+| `STORAGE_PATH` | videos, ingest folders, `music_library/`; default `./shorts-storage`. Use a persistent volume in production | if missing |
+| `DATABASE_URL` | already used by the app | yes |
+
+At boot the API and worker print a report naming every missing or invalid variable and tool;
+the Shorts page shows the same report. Check it any time with:
+
+```bash
+pnpm --filter @catgpt/api shorts check     # exits 1 if anything required is missing
+```
+
+If `BUDGET_CURRENCY` isn't `USD`, set your provider's real price per second on the Costs page;
+Path C refuses to spend until a price is known.
+
+### 3. Google Cloud project (for automatic uploads)
+
+1. Create a project at console.cloud.google.com and enable **YouTube Data API v3** and
+   **YouTube Analytics API**.
+2. **APIs & Services → Credentials → Create API key** → `YOUTUBE_API_KEY` (restrict it to the
+   YouTube Data API).
+3. **OAuth consent screen**: user type *External*; add the scopes
+   `youtube.upload`, `youtube.readonly`, `yt-analytics.readonly`.
+4. **Set the consent screen's publishing status to "In production".** While it stays in
+   "Testing", Google expires refresh tokens after **7 days**: every channel would need
+   reconnecting weekly, and uploads would fall back to the manual queue in between. Google may
+   ask for verification for these scopes; until it's done you can still connect (an
+   "unverified app" warning shows).
+5. **Credentials → Create OAuth client ID → Web application.** Authorized redirect URI:
+   `<API_PUBLIC_URL>/shorts/oauth/callback` (e.g. `https://api.example.com/shorts/oauth/callback`).
+   Put the same value in `GOOGLE_REDIRECT_URI`, and the client id/secret in `GOOGLE_CLIENT_ID` /
+   `GOOGLE_CLIENT_SECRET`.
+6. In the app, Channels → **Connect YouTube** on each channel and pick that channel's own
+   YouTube (brand) channel. One YouTube channel can't be connected to two experiment channels.
+
+Quota (checked 2026-11-20): `videos.insert` has its own bucket of 100 uploads/day per project;
+the app stops at 95 and sends the rest to the manual queue. Quota resets at midnight Pacific time.
+
+### 4. Running
+
+```bash
+pnpm db:migrate                              # creates the shorts_* tables
+pnpm dev                                     # the Shorts worker + scheduler run with the generation worker
+pnpm --filter @catgpt/api shorts make --channel cats            # one Path B video now (live APIs)
+pnpm --filter @catgpt/api shorts make --channel cats --offline  # same pipeline on local fixtures, no keys, no spend
+pnpm --filter @catgpt/api shorts dry-run --days 3               # scheduler simulation, offline, no uploads
+pnpm --filter @catgpt/api shorts ingest                         # scan Path A watch folders now
+```
+
+- **Path A**: drop `name.mp4` (+ optional `name.json` with `title`, `description`, `tags`,
+  `synthetic`, `hookType`, `topic`) into `STORAGE_PATH/ingest/<channel-slug>/`, or upload on the
+  Pipeline page. Refused files move to `rejected/` with a `.reason.txt`.
+- **Music**: put tracks you have cleared for use in `STORAGE_PATH/music_library/`. Empty = no
+  music.
+- **Manual queue**: download, copy title/description/tags, post at the suggested time, paste
+  the URL into "Mark as posted". The app verifies the URL is a public YouTube video.
+- **Stats**: public stats sync right after posting, at 24 h, 72 h and 7 days, and daily (03:00
+  in TIMEZONE); private analytics daily for connected channels. A channel with fewer than 30
+  posted videos shows "too early" and isn't ranked. The weekly report is written every Monday
+  09:00.
+- **Logs**: Shorts events are JSON lines with `"scope":"shorts"`; per-video history is on the
+  video's detail dialog.
+- **Integration tests** (need a local Postgres): `SHORTS_IT=1 DATABASE_URL=... pnpm --filter
+  @catgpt/api exec vitest run shorts-db.it youtube-upload.it worker-kill.it`.

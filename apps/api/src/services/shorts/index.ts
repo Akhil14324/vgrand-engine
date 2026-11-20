@@ -6,6 +6,7 @@ import { registerPostingHandlers } from "./posting.js";
 import { registerSyncHandlers } from "./sync.js";
 import { registerYoutubeHandlers } from "./youtube.js";
 import { registerIngestHandlers } from "./ingest.js";
+import { registerAnalyticsHandlers } from "./analytics.js";
 
 /** Job handlers are registered by any process that may run Shorts jobs (API, worker, CLI). */
 export function registerShortsHandlers(): void {
@@ -14,6 +15,7 @@ export function registerShortsHandlers(): void {
   registerSyncHandlers();
   registerYoutubeHandlers();
   registerIngestHandlers();
+  registerAnalyticsHandlers();
 }
 
 let started = false;

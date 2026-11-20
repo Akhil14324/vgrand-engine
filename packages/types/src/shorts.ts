@@ -398,3 +398,78 @@ export interface ShortsHealthDto {
   timezone: string;
   budget: { amount: number | null; currency: string | null };
 }
+
+/* ------------------------------- analytics DTO ------------------------------- */
+
+export type ShortsMetric = "views7d" | "views";
+
+export interface ShortsChannelStatsDto {
+  channelId: string;
+  slug: string;
+  name: string;
+  niche: string;
+  path: string;
+  videosPosted: number;
+  totalViews: number | null;
+  medianViews: number | null;
+  medianViews7d: number | null;
+  videosWith7d: number;
+  subscribersGained: number | null;
+  avgViewPercentage: number | null;
+  avgViewedPct: number | null;
+  confidence: "too_early" | "ok";
+  rank: number | null;
+}
+
+export interface ShortsFormatGroupDto {
+  value: string;
+  videos: number;
+  withMetric: number;
+  medianMetric: number | null;
+  avgViewPercentage: number | null;
+  engagementRate: number | null;
+  enough: boolean;
+}
+
+export interface ShortsDashboardDto {
+  metric: ShortsMetric;
+  thresholds: { minVideosToRank: number; minGroupSize: number };
+  totals: { videosPosted: number; totalViews: number; channelsRanked: number };
+  overview: ShortsChannelStatsDto[];
+  niche: {
+    perVideo: { slug: string; name: string; niche: string; videosPosted: number; viewsPerVideo: number | null; subsPerVideo: number | null; confidence: "too_early" | "ok" }[];
+    trend: { slug: string; points: { week: string; median: number; n: number }[] }[];
+  };
+  formats: Record<string, ShortsFormatGroupDto[]>;
+  outliers: {
+    id: string;
+    title: string | null;
+    channelSlug: string;
+    value: number;
+    channelP90: number;
+    channelMedian: number;
+    dims: Record<string, string | number | boolean | null>;
+    youtubeUrl: string | null;
+  }[];
+  costs: {
+    rows: { slug: string; name: string; spend: number; videosMade: number; costPerVideo: number | null; costPer1kViews: number | null }[];
+    budget: {
+      budget: number | null;
+      currency: string | null;
+      spent: number;
+      remaining: number | null;
+      provider: string | null;
+      model: string | null;
+      pricePerSecond: number | null;
+      priceIsOwnerSet: boolean;
+    };
+    monthSpend: number;
+  };
+}
+
+export interface ShortsReportDto {
+  id: string;
+  weekStart: string;
+  content: string;
+  createdAt: string;
+}

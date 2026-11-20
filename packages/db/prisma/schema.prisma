@@ -1079,7 +1079,7 @@ model ShortsVideo {
   costs           ShortsCost[]
   snapshots       ShortsMetricSnapshot[]
 
-  @@unique([channelId, slotAt])
+  @@unique([channelId, slotAt, source])
   @@index([status])
   @@index([channelId, createdAt])
   @@index([channelId, scriptHash])

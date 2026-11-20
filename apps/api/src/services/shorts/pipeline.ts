@@ -60,6 +60,13 @@ export async function createVideo(input: {
   if (channel.path === "A") throw new PermanentJobError("Path A channels don't generate videos; drop files into the ingest folder instead");
   let video: ShortsVideoRow;
   let created = true;
+  const source = input.source ?? "manual";
+  const already = input.slotAt ? await prisma.shortsVideo.findFirst({ where: { channelId: channel.id, slotAt: input.slotAt, source } }) : null;
+  if (already) {
+    // Same slot again (scheduler tick overlap): make sure its first step exists, nothing else.
+    await enqueueJob({ type: "script", key: jobKey.script(already.id), videoId: already.id, channelId: channel.id });
+    return { video: already, created: false };
+  }
   try {
     video = await prisma.shortsVideo.create({
       data: {
@@ -76,7 +83,7 @@ export async function createVideo(input: {
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && input.slotAt) {
-      video = await prisma.shortsVideo.findFirstOrThrow({ where: { channelId: channel.id, slotAt: input.slotAt } });
+      video = await prisma.shortsVideo.findFirstOrThrow({ where: { channelId: channel.id, slotAt: input.slotAt, source: input.source ?? "manual" } });
       created = false;
     } else throw err;
   }

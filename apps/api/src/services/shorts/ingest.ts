@@ -133,7 +133,7 @@ export async function runIngestJob(payload: { sha: string; staged: string; origi
     if (!report.ok) throw new PermanentJobError(`Ingested file failed validation: ${failureSummary(report)}`);
 
     // Slot: the channel's next free posting time.
-    const taken = await prisma.shortsVideo.findMany({ where: { channelId, slotAt: { gte: new Date() } }, select: { slotAt: true } });
+    const taken = await prisma.shortsVideo.findMany({ where: { channelId, slotAt: { gte: new Date() }, source: { not: "dry_run" } }, select: { slotAt: true } });
     const slotAt = nextFreeSlot(channel.postingTimes, env.TIMEZONE, new Date(), new Set(taken.map((t) => t.slotAt!.getTime())));
     await prisma.shortsAsset.create({
       data: {

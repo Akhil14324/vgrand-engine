@@ -3,6 +3,7 @@ import { buildApp } from "./app.js";
 import { env } from "./env.js";
 import { startGenerationWorker } from "./services/generation-worker.js";
 import { logShortsStartupCheck } from "./services/shorts/env-check.js";
+import { stopShortsJobWorker } from "./services/shorts/jobs.js";
 
 const app = await buildApp();
 // Prints exactly which Shorts Factory variables/tools are missing. Never throws.
@@ -17,6 +18,8 @@ let stopping = false;
 const shutdown = async () => {
   if (stopping) return;
   stopping = true;
+  // Shorts jobs in flight keep their lease; if the process dies first, another worker re-claims them.
+  stopShortsJobWorker();
   const force = setTimeout(() => process.exit(1), 25_000);
   force.unref();
   await Promise.allSettled([app.close(), worker?.close()]);

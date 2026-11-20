@@ -3,6 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ShortsChannelDto,
+  ShortsDashboardDto,
+  ShortsMetric,
+  ShortsReportDto,
   ShortsVideoDetailDto,
   ShortsVideoDto,
   ShortsHealthDto,
@@ -128,6 +131,36 @@ export function useIngestUpload() {
   return useMutation({
     mutationFn: ({ channelId, form }: { channelId: string; form: FormData }) =>
       apiFetch<{ status: string }>(`/shorts/channels/${channelId}/ingest`, { method: "POST", body: form }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shorts"] }),
+  });
+}
+
+export const useShortsDashboard = (metric: ShortsMetric) =>
+  useQuery({
+    queryKey: ["shorts", "analytics", metric],
+    queryFn: () => apiFetch<ShortsDashboardDto>(`/shorts/analytics?metric=${metric}`),
+  });
+
+export const useShortsReports = () =>
+  useQuery({
+    queryKey: ["shorts", "reports"],
+    queryFn: () => apiFetch<{ items: ShortsReportDto[] }>("/shorts/reports"),
+    select: (d) => d.items,
+    refetchInterval: 20_000,
+  });
+
+export function useGenerateReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ status: string }>("/shorts/reports", { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shorts", "reports"] }),
+  });
+}
+
+export function useSaveShortsSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { pathCPricePerSecond: number | null }) => apiFetch("/shorts/settings", { method: "PUT", json: body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["shorts"] }),
   });
 }
