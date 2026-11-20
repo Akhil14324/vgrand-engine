@@ -147,3 +147,21 @@ Fetched from the official pages, not taken from the build spec:
   never uploaded, and the content-rule check allows the `offline_fixture` provider only for them.
 - **Config errors don't retry**: a missing key fails the job immediately with "Not configured:
   set X" (shown on the video); network/429/5xx errors retry with backoff.
+
+## Phase 4 — Manual posting queue + public stats
+
+- **Manual vs upload is decided as soon as a video is approved**, so a manual-queue video shows
+  up immediately with its reason. A real upload defers itself until 6 h before the slot, so the
+  earliest slots use quota first.
+- **Suggested posting time** = the video's slot, or (for "Generate now" videos without a slot)
+  the channel's next posting time in TIMEZONE. The UI shows it in the viewer's local clock.
+- **"Mark as posted" never trusts a bare claim when it can check.** The URL must parse as a
+  YouTube video id; with `YOUTUBE_API_KEY` set the id must exist publicly (`videos.list`), else
+  the request is refused. A YouTube id can only be linked to one video. Without the key the post
+  is accepted and the event log says "not verified".
+- **Stats are never invented.** A video YouTube doesn't return (deleted/private/wrong id) gets no
+  snapshot and a warning event. Snapshots are stored per checkpoint: `posted` (immediately),
+  `24h`, `72h`, `7d`, `daily`, `manual`.
+- **Downloads/previews** use signed URLs (6 h expiry, HMAC) with HTTP Range support.
+- **DB integration tests** (`shorts-db.it.test.ts`) are opt-in (`SHORTS_IT=1` + a local
+  Postgres) because the repo's test suite otherwise never touches a database.

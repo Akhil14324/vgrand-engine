@@ -37,6 +37,7 @@ import { socialCalendarRoutes } from "./routes/social-calendar.js";
 import { videoStudioRoutes } from "./routes/video-studio.js";
 import { videoPlanRoutes } from "./routes/video-plan.js";
 import { shortsRoutes } from "./routes/shorts.js";
+import { shortsPublicRoutes } from "./routes/shorts-public.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -149,6 +150,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(videoStudioRoutes);
   await app.register(videoPlanRoutes);
   await app.register(shortsRoutes);
+  await app.register(shortsPublicRoutes);
   await app.register(socialCallbackRoutes);
 
   return app;

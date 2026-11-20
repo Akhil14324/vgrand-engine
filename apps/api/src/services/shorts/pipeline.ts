@@ -422,11 +422,9 @@ export async function routeForApproval(video: ShortsVideoRow, approvalMode: stri
   }
 }
 
-/** Posting step (upload or manual queue). Runs ahead of the slot so the earliest slots use quota first. */
+/** Posting step (upload or manual queue). Decides at once; an upload defers itself until shortly before the slot. */
 export async function enqueuePost(video: ShortsVideoRow, round = 0): Promise<void> {
-  const lead = 6 * 60 * 60_000;
-  const runAt = video.slotAt ? new Date(Math.max(Date.now(), video.slotAt.getTime() - lead)) : new Date();
-  await enqueueJob({ type: "post", key: jobKey.upload(video.id, round), videoId: video.id, channelId: video.channelId, runAt, maxAttempts: 5 });
+  await enqueueJob({ type: "post", key: jobKey.upload(video.id, round), videoId: video.id, channelId: video.channelId, maxAttempts: 5 });
 }
 
 /* ---------------------------------- failure -------------------------------- */

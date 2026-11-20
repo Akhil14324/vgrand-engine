@@ -345,6 +345,8 @@ export interface ShortsVideoDto {
   plannedPath: ShortsPath;
   source: string;
   slotAt: string | null;
+  /** When to post: the slot, or the channel's next posting time for videos made outside the schedule. */
+  suggestedPostAt: string | null;
   title: string | null;
   description: string | null;
   tags: string[];
