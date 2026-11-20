@@ -67,6 +67,7 @@ import { env } from "../env.js";
 import { startCampaignScheduler } from "./campaign-autopilot.js";
 import { startReelAutopilot } from "./reel-plan.js";
 import { startSocialScheduler } from "./social/posts.js";
+import { startShortsFactory } from "./shorts/index.js";
 
 interface GenerationMetadata {
   referenceImageUrl?: string;
@@ -127,6 +128,7 @@ export function startGenerationWorker(): Worker | null {
   startReelAutopilot();
   startSocialScheduler();
   startRetentionScheduler();
+  startShortsFactory();
   if (!env.redisConfigured) {
     // No queue — enqueueGeneration() calls runGeneration() directly. Rows
     // left pending/processing by a previous boot would never resume, so

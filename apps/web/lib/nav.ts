@@ -1,6 +1,7 @@
 import {
   CalendarDays,
   Clapperboard,
+  Film,
   ImageIcon,
   LayoutGrid,
   Compass,
@@ -41,6 +42,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { icon: ImageIcon, label: "Library", href: "/library" },
       { icon: CalendarDays, label: "Social Calendar", href: "/calendar" },
       { icon: Clapperboard, label: "Reels", href: "/reels" },
+      { icon: Film, label: "Shorts Factory", href: "/shorts" },
       { icon: Compass, label: "Brand Strategist", href: "/guava" },
       { icon: Target, label: "B Camp", href: "/bcamp" },
       { icon: ListChecks, label: "Execution", href: "/execution" },

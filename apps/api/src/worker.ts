@@ -1,5 +1,8 @@
 import "dotenv/config";
 import { startGenerationWorker } from "./services/generation-worker.js";
+import { logShortsStartupCheck } from "./services/shorts/env-check.js";
+
+await logShortsStartupCheck();
 
 /**
  * Standalone worker entry — run with `pnpm --filter @catgpt/api worker`

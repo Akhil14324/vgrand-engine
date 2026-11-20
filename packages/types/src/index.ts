@@ -1077,3 +1077,4 @@ export * from "./privacy";
 export * from "./bcamp";
 export * from "./growth";
 export * from "./video";
+export * from "./shorts";

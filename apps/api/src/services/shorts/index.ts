@@ -1,0 +1,19 @@
+import { startShortsJobWorker } from "./jobs.js";
+import { log } from "./log.js";
+
+let started = false;
+
+/**
+ * Starts the Shorts job worker (and, from later phases, the scheduler). Called from
+ * startGenerationWorker, so it runs wherever generation jobs run: inline in the API
+ * process, or in the separate worker process.
+ */
+export function startShortsFactory(): void {
+  if (started || process.env.SHORTS_DISABLED === "1") return;
+  started = true;
+  try {
+    startShortsJobWorker();
+  } catch (err) {
+    log.error("factory.start_failed", { error: String(err) });
+  }
+}

@@ -29,16 +29,24 @@ export function hasValidTokenKey(): boolean {
 }
 
 export function encryptToken(plain: string): string {
+  return encryptWithKey(plain, getKey());
+}
+
+export function decryptToken(encoded: string): string {
+  return decryptWithKey(encoded, getKey(), "SOCIAL_TOKEN_KEY");
+}
+
+/** AES-256-GCM with an explicit 32-byte key, same storage format as encryptToken. */
+export function encryptWithKey(plain: string, key: Buffer): string {
   const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv("aes-256-gcm", getKey(), iv);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
   const ciphertext = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   const parts = [iv, tag, ciphertext].map((b) => b.toString("base64")).join(".");
   return Buffer.from(parts, "utf8").toString("base64");
 }
 
-export function decryptToken(encoded: string): string {
-  const key = getKey();
+export function decryptWithKey(encoded: string, key: Buffer, keyName = "the encryption key"): string {
   const parts = Buffer.from(encoded, "base64").toString("utf8").split(".");
   if (parts.length !== 3) throw new Error("Stored token is malformed");
   const [iv, tag, ciphertext] = parts.map((p) => Buffer.from(p, "base64")) as [
@@ -52,7 +60,7 @@ export function decryptToken(encoded: string): string {
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch {
     // Wrong key or tampered data - say so without echoing anything sensitive.
-    throw new Error("Stored token could not be decrypted (wrong SOCIAL_TOKEN_KEY?)");
+    throw new Error(`Stored token could not be decrypted (wrong ${keyName}?)`);
   }
 }
 

@@ -97,3 +97,25 @@ Fetched from the official pages, not taken from the build spec:
 | Pexels | `GET https://api.pexels.com/v1/videos/search`, raw key in `Authorization`, `orientation=portrait`, `per_page≤80`; 200 req/hour, 20k/month | Client-side limiter at 200/hour; 24 h response cache. |
 | Pixabay | `GET https://pixabay.com/api/videos/?key=…`; 100 req/60 s; "requests must be cached for 24 hours"; store videos on your server | Limiter at 100/minute; 24 h response cache; clips are downloaded, never hotlinked. |
 | Google OAuth "Testing" | Refresh tokens expire in 7 days | README tells the owner to set the consent screen to "In production". |
+
+## Phase 2 — Foundations
+
+- **Migration authored as a schema diff.** `prisma migrate dev` can't replay this repo's
+  migrations on a fresh database: `20260927120000_social_post_media_urls` alters `SocialPost`
+  before `20260928120000_social_publishing` creates it (a pre-existing ordering bug, left
+  untouched because production already applied them). The Shorts migration
+  (`20261120120000_shorts_factory`) was generated with `prisma migrate diff` from the previous
+  schema to the new one, so it contains only the 10 `shorts_*` tables. `prisma migrate deploy`
+  on an existing database applies it normally.
+- **Seeded posting times** are one per channel per day, spread across the IST day
+  (08:30–21:30) so channels don't all compete for the same upload slot. Videos per day always
+  equals the number of posting times (the API rejects a mismatch; the edit dialog derives one
+  from the other).
+- **Voice id** is blank in the seed: the owner sets an ElevenLabs voice per channel in the UI;
+  until then `ELEVENLABS_DEFAULT_VOICE_ID` (an existing optional var) is used, and if neither is
+  set the voiceover step refuses with that message.
+- **Optional overrides not in the owner's list** (all have defaults, none are secrets):
+  `FFMPEG_BIN`/`FFPROBE_BIN` (binary names), `SHORTS_WORKER_CONCURRENCY` (default 2),
+  `SHORTS_DISABLED=1` (turn the worker/scheduler off in a process).
+- **Structured logs**: every Shorts event is one JSON line (`scope:"shorts"`), and
+  transitions/fallbacks/refusals are also persisted to `shorts_events` for the per-video history.

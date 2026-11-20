@@ -117,6 +117,23 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: opt(z.string().min(1)),
   /** Set to "public" once the Google OAuth app is verified; until then uploads are private. */
   YOUTUBE_VISIBILITY: opt(z.enum(["private", "public"])),
+
+  /* ---- Shorts Factory (see DECISIONS.md). Strings here; validated by services/shorts/env-check.ts
+     so a bad value reports clearly instead of stopping the whole API from booting. ---- */
+  ANTHROPIC_API_KEY: opt(z.string().min(1)),
+  ANTHROPIC_MODEL: opt(z.string().min(1)),
+  PEXELS_API_KEY: opt(z.string().min(1)),
+  PIXABAY_API_KEY: opt(z.string().min(1)),
+  YOUTUBE_API_KEY: opt(z.string().min(1)),
+  GOOGLE_REDIRECT_URI: opt(z.string().min(1)),
+  TOKEN_ENCRYPTION_KEY: opt(z.string().min(1)),
+  VIDEO_GEN_PROVIDER: opt(z.string().min(1)),
+  VIDEO_GEN_API_KEY: opt(z.string().min(1)),
+  PATH_C_MONTHLY_BUDGET: opt(z.string().min(1)),
+  BUDGET_CURRENCY: opt(z.string().min(1)),
+  APP_BASE_URL: opt(z.string().min(1)),
+  TIMEZONE: opt(z.string().min(1)),
+  STORAGE_PATH: opt(z.string().min(1)),
 });
 
 /**
@@ -155,6 +172,8 @@ export const env = {
   VOICE_MODEL_URL: parsed.VOICE_MODEL_URL ?? null,
   VOICE_SERVICE_TOKEN: parsed.VOICE_SERVICE_TOKEN ?? null,
   YOUTUBE_VISIBILITY: parsed.YOUTUBE_VISIBILITY ?? "private",
+  TIMEZONE: parsed.TIMEZONE ?? "Asia/Kolkata",
+  STORAGE_PATH: parsed.STORAGE_PATH ?? "./shorts-storage",
   META_GRAPH_VERSION: parsed.META_GRAPH_VERSION ?? "v23.0",
   // Inline worker is the no-Redis fallback — a Redis-backed deploy defaults
   // to a separate worker process (pnpm --filter @catgpt/api worker).

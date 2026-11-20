@@ -34,6 +34,9 @@ model User {
   videoUsage        VideoUsage[]
   reelPlanItems     ReelPlanItem[]
   videoSettings     VideoSettings?
+  shortsChannels    ShortsChannel[]
+  shortsSettings    ShortsSettings?
+  shortsReports     ShortsReport[]
 }
 
 // A brand profile: guided questionnaire answers + a compact digest that is
@@ -970,4 +973,267 @@ model VideoSettings {
   monthlyCapUsd    Float?
   autopilotEnabled Boolean  @default(false)
   updatedAt        DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Shorts Factory: 10 YouTube Shorts channels run as a format experiment.
+// See DECISIONS.md. Status values and transitions: packages/types/src/shorts.ts.
+// ---------------------------------------------------------------------------
+
+model ShortsChannel {
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug              String
+  displayName       String
+  niche             String
+  /// "A" (ingest external renders) | "B" (stock + script + voice) | "C" (AI clips, metered)
+  path              String
+  fallbackPath      String?
+  videosPerDay      Int           @default(1)
+  /// "HH:MM" in the app TIMEZONE (default Asia/Kolkata), one per video per day.
+  postingTimes      String[]
+  /// "manual" | "auto". Seeded manual; only the owner changes it in the UI.
+  approvalMode      String        @default("manual")
+  voiceId           String?
+  /// { tone, hookPatterns[], bannedTopics[], extra }
+  styleNotes        Json          @default("{}")
+  stockKeywords     String[]
+  enabled           Boolean       @default(true)
+  ytChannelId       String?
+  ytChannelTitle    String?
+  ytAccessTokenEnc  String?
+  ytRefreshTokenEnc String?
+  ytTokenExpiresAt  DateTime?
+  /// "disconnected" | "connected" | "reauth_required"
+  ytStatus          String        @default("disconnected")
+  ytStatusReason    String?       @db.Text
+  ytConnectedAt     DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  videos            ShortsVideo[]
+
+  @@unique([userId, slug])
+  @@map("shorts_channels")
+}
+
+model ShortsVideo {
+  id              String                 @id @default(uuid())
+  channelId       String
+  channel         ShortsChannel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId          String
+  status          String                 @default("idea")
+  /// Path this video is actually produced on (C can fall back to B).
+  path            String
+  plannedPath     String
+  /// "scheduler" | "manual" | "ingest" | "dry_run"
+  source          String                 @default("scheduler")
+  /// The posting slot this video fills (UTC). Unique per channel, so the scheduler is idempotent.
+  slotAt          DateTime?
+  title           String?
+  description     String?                @db.Text
+  tags            String[]
+  hook            String?                @db.Text
+  hookType        String?
+  topic           String?
+  narration       String?                @db.Text
+  /// [{ text, queries[], startSec, endSec }]
+  beats           Json?
+  scriptHash      String?
+  footageHash     String?
+  /// Exact request sent to the Claude API and the raw response.
+  llmPrompt       Json?
+  llmResponse     Json?
+  voiceId         String?
+  /// [{ word, start, end }] from the TTS alignment.
+  wordTimings     Json?
+  musicTrack      String?
+  filePath        String?
+  durationSec     Float?
+  width           Int?
+  height          Int?
+  fileSizeBytes   Int?
+  validation      Json?
+  synthetic       Boolean                @default(false)
+  /// Experiment dimensions (channel, niche, path, hookType, lengthBucket, voice, topic, postingHour, synthetic).
+  dims            Json                   @default("{}")
+  youtubeVideoId  String?
+  youtubeUrl      String?
+  publishAt       DateTime?
+  postedAt        DateTime?
+  privacyStatus   String?
+  privateLocked   Boolean                @default(false)
+  /// Why the video is in the manual queue (shown in the UI).
+  manualReason    String?                @db.Text
+  /// Resumable upload session { uri, size } persisted before bytes are sent.
+  uploadState     Json?
+  error           String?                @db.Text
+  /// Owner-entered "viewed vs swiped away" % (not in the API).
+  manualViewedPct Float?
+  /// Path A: sha256 of the ingested file, so a re-dropped file is not ingested twice.
+  ingestKey       String?                @unique
+  approvedAt      DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  assets          ShortsAsset[]
+  costs           ShortsCost[]
+  snapshots       ShortsMetricSnapshot[]
+
+  @@unique([channelId, slotAt])
+  @@index([status])
+  @@index([channelId, createdAt])
+  @@index([channelId, scriptHash])
+  @@index([userId, createdAt])
+  @@map("shorts_videos")
+}
+
+/// Every stock clip, voiceover, music track and generated clip used in a video, with its license.
+model ShortsAsset {
+  id              String      @id @default(uuid())
+  videoId         String
+  video           ShortsVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  /// "stock_video" | "voiceover" | "music" | "generated_clip" | "source_file"
+  kind            String
+  /// "pexels" | "pixabay" | "elevenlabs" | "music_library" | "veo" | "runway" | "kling" | "path_a"
+  provider        String
+  providerAssetId String?
+  sourceUrl       String?
+  downloadUrl     String?     @db.Text
+  license         String
+  licenseUrl      String?
+  author          String?
+  authorUrl       String?
+  beatIndex       Int?
+  localPath       String?
+  durationSec     Float?
+  width           Int?
+  height          Int?
+  meta            Json?
+  createdAt       DateTime    @default(now())
+
+  @@index([videoId])
+  @@index([provider, providerAssetId])
+  @@map("shorts_assets")
+}
+
+/// Path C cost ledger. Amounts are in BUDGET_CURRENCY.
+model ShortsCost {
+  id        String       @id @default(uuid())
+  videoId   String?
+  video     ShortsVideo? @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  channelId String
+  provider  String
+  units     Float
+  unitLabel String
+  cost      Float
+  currency  String
+  /// "reserved" (budget held before the call) | "spent" | "released" (call never accepted)
+  status    String
+  note      String?      @db.Text
+  createdAt DateTime     @default(now())
+
+  @@index([channelId, createdAt])
+  @@index([createdAt])
+  @@map("shorts_costs")
+}
+
+model ShortsMetricSnapshot {
+  id                      String      @id @default(uuid())
+  videoId                 String
+  video                   ShortsVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  /// "public" (Data API key) | "analytics" (OAuth Analytics API)
+  source                  String
+  /// "24h" | "72h" | "7d" | "daily" | "manual"
+  checkpoint              String
+  views                   Int?
+  likes                   Int?
+  comments                Int?
+  shares                  Int?
+  engagedViews            Int?
+  estimatedMinutesWatched Float?
+  averageViewDuration     Float?
+  averageViewPercentage   Float?
+  subscribersGained       Int?
+  raw                     Json?
+  capturedAt              DateTime    @default(now())
+
+  @@index([videoId, capturedAt])
+  @@map("shorts_metric_snapshots")
+}
+
+/// Persistent job queue (see DECISIONS.md). idempotencyKey makes enqueue a no-op on repeats.
+model ShortsJob {
+  id             String    @id @default(uuid())
+  type           String
+  videoId        String?
+  channelId      String?
+  payload        Json      @default("{}")
+  idempotencyKey String    @unique
+  /// "queued" | "running" | "done" | "dead"
+  status         String    @default("queued")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(4)
+  runAt          DateTime  @default(now())
+  lockedUntil    DateTime?
+  lockedBy       String?
+  lastError      String?   @db.Text
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+  @@index([videoId])
+  @@map("shorts_jobs")
+}
+
+/// Structured log: transitions, fallbacks, refusals. Shown per video in the UI.
+model ShortsEvent {
+  id        String   @id @default(uuid())
+  videoId   String?
+  channelId String?
+  level     String   @default("info")
+  type      String
+  message   String   @db.Text
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([videoId, createdAt])
+  @@index([channelId, createdAt])
+  @@index([type, createdAt])
+  @@map("shorts_events")
+}
+
+/// YouTube upload calls per Pacific-time day (the quota resets at midnight PT).
+model ShortsQuotaDay {
+  day       String   @id
+  uploads   Int      @default(0)
+  units     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("shorts_quota_days")
+}
+
+/// Owner-editable settings. Path C price is per generated second, in BUDGET_CURRENCY.
+model ShortsSettings {
+  userId              String   @id
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pathCPricePerSecond Float?
+  pathCModel          String?
+  updatedAt           DateTime @updatedAt
+
+  @@map("shorts_settings")
+}
+
+model ShortsReport {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekStart DateTime
+  content   String   @db.Text
+  data      Json
+  prompt    Json?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, weekStart])
+  @@map("shorts_reports")
 }

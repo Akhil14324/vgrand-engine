@@ -2,8 +2,11 @@ import "dotenv/config";
 import { buildApp } from "./app.js";
 import { env } from "./env.js";
 import { startGenerationWorker } from "./services/generation-worker.js";
+import { logShortsStartupCheck } from "./services/shorts/env-check.js";
 
 const app = await buildApp();
+// Prints exactly which Shorts Factory variables/tools are missing. Never throws.
+await logShortsStartupCheck();
 
 const worker = env.WORKER_INLINE ? startGenerationWorker() : null;
 if (worker) app.log.info("generation worker started inline");
