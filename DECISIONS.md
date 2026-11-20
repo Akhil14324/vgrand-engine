@@ -287,3 +287,27 @@ Fetched from the official pages, not taken from the build spec:
 - **Charts** are inline SVG/CSS (no chart library added): single-series bars and small-multiple
   sparklines with one validated hue (`#3987e5` on the app's dark surface `#111114`, contrast ≥3:1);
   "too early"/"too few" bars are grey and labelled in text, so the state doesn't rely on colour.
+
+## Phase 10 — Hardening
+
+- **Crash test** (`worker-kill.it.test.ts`): a real worker process is SIGKILLed (with its ffmpeg)
+  mid-render; after the lease expires another worker finishes it. Result: one video, one job per
+  step (render attempted twice), one voiceover, one clip per beat, valid file. Upload crash cases
+  are covered in `youtube-upload.it.test.ts` (resume the saved session; never re-upload a video
+  that has a YouTube id).
+- **Lease** is 10 min with a 1-min heartbeat, so a long render/upload keeps its lease, and a dead
+  worker's job is picked up about 10 min later. On SIGTERM the API stops claiming new Shorts jobs.
+- **Expected duplicates are checked before insert**, so normal idempotent repeats don't log
+  Prisma constraint errors (the unique constraints still catch real races).
+- **Logs**: one JSON line per event (`"scope":"shorts"`), plus per-video history in the DB.
+
+## What was not verified live (no credentials in the build environment)
+
+Claude, ElevenLabs, Pexels, Pixabay, YouTube Data/Analytics and Google OAuth, and
+Veo/Runway/Kling were **not** called for real. Request shapes follow the docs checked on
+2026-11-20 (table in Phase 1); response parsing is unit-tested against those documented shapes;
+the YouTube upload flow is tested against a local fake of Google's endpoints. Everything after
+the external calls (composition, validation, captions, state machine, queue, scheduler,
+budget, manual queue, analytics) ran for real on local Postgres + ffmpeg. First live run: start
+with `shorts check`, then `shorts make --channel cats` and look at the result before enabling
+the schedule.
