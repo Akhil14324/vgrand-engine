@@ -119,3 +119,31 @@ Fetched from the official pages, not taken from the build spec:
   `SHORTS_DISABLED=1` (turn the worker/scheduler off in a process).
 - **Structured logs**: every Shorts event is one JSON line (`scope:"shorts"`), and
   transitions/fallbacks/refusals are also persisted to `shorts_events` for the per-video history.
+
+## Phase 3 — Path B end to end
+
+- **One narration, one TTS call.** The hook and beats are voiced as one ElevenLabs request
+  (`with-timestamps`) so delivery is continuous. Beat clip lengths come from the word timings;
+  the hook shares the first beat's clip (a 1.5 s hook clip would be a jarring cut).
+- **Length.** Script prompt targets 15–40 s of narration at 2.6 words/s; the render is voice +
+  0.6 s tail, clamped to 15–45 s. A voiceover over ~44.4 s is refused rather than cut.
+- **Retries never re-pay.** The voiceover and downloaded clips are reused when a step is
+  retried; the script step makes up to 3 Claude calls (invalid JSON, a failed check, or a
+  duplicate each trigger a re-ask with the reason) and stores every request/response.
+- **"Vertical or croppable"** = native vertical, or a centre 9:16 crop at least 540 px wide and
+  960 px tall (at most 2x upscale). Native vertical scores higher. A clip shorter than its beat
+  is looped.
+- **Duplicate rules.** Same normalised script hash in the channel within 30 days → rejected
+  (re-asked). Identical footage set within 30 days → rejected. Clips the channel used in the last
+  30 days are only picked when nothing fresh fits.
+- **Captions.** ASS subtitles, ≤3 words per caption, the spoken word highlighted, upper case,
+  placed above the Shorts UI overlay. "Captions present" is validated as "N caption events were
+  burned in" (ffprobe can't see burned-in text); a frame grab was checked by eye.
+- **Music.** Least-recently-used track from `STORAGE_PATH/music_library`, looped, ducked
+  under the voice with `sidechaincompress`, final mix loudness-normalised to −14 LUFS.
+- **Offline fixtures** (`--offline` / "Dry run" button / `source = "dry_run"`): template
+  script, ffmpeg test-pattern footage, synthetic tone with even word timings. They exist so the
+  pipeline, scheduler and 3-day dry run can be exercised without keys or spend. Dry-run videos are
+  never uploaded, and the content-rule check allows the `offline_fixture` provider only for them.
+- **Config errors don't retry**: a missing key fails the job immediately with "Not configured:
+  set X" (shown on the video); network/429/5xx errors retry with backoff.

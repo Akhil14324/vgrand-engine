@@ -31,6 +31,15 @@ export function useUpdateShortsChannel() {
   });
 }
 
+export function useGenerateShort() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ channelId, offline }: { channelId: string; offline: boolean }) =>
+      apiFetch<{ id: string; status: string }>(`/shorts/channels/${channelId}/generate`, { method: "POST", json: { offline } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shorts"] }),
+  });
+}
+
 /** Invalidates everything under the Shorts module after a mutation. */
 export function useShortsRefresh() {
   const qc = useQueryClient();

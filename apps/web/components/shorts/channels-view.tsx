@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Youtube } from "lucide-react";
+import { FlaskConical, Pencil, Sparkles, Youtube } from "lucide-react";
 import {
   SHORTS_PATHS,
   SHORTS_PATH_LABELS,
@@ -21,7 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toaster";
 import { ApiRequestError } from "@/lib/api";
-import { useShortsChannels, useShortsHealth, useUpdateShortsChannel } from "@/lib/shorts-hooks";
+import { useGenerateShort, useShortsChannels, useShortsHealth, useUpdateShortsChannel } from "@/lib/shorts-hooks";
 import { YoutubeConnect } from "@/components/shorts/youtube-connect";
 
 export function ShortsChannelsView() {
@@ -56,6 +56,7 @@ function Channels() {
 
 function ChannelCard({ channel: c, onEdit }: { channel: ShortsChannelDto; onEdit: () => void }) {
   const update = useUpdateShortsChannel();
+  const generate = useGenerateShort();
   const posted = (c.counts.posted ?? 0) + (c.counts.manual_posted ?? 0);
   const waiting = c.counts.awaiting_approval ?? 0;
   const manual = c.counts.manual_pending ?? 0;
@@ -67,6 +68,15 @@ function ChannelCard({ channel: c, onEdit }: { channel: ShortsChannelDto; onEdit
       await update.mutateAsync({ id: c.id, patch: { approvalMode: auto ? "auto" : "manual" } });
     } catch (err) {
       toast.error(err instanceof ApiRequestError ? err.message : "Could not change approval mode");
+    }
+  };
+
+  const run = async (offline: boolean) => {
+    try {
+      await generate.mutateAsync({ channelId: c.id, offline });
+      toast.success(offline ? "Dry-run video queued (offline fixtures, never uploaded)" : "Video queued. Follow it in Pipeline.");
+    } catch (err) {
+      toast.error(err instanceof ApiRequestError ? err.message : "Could not start a video");
     }
   };
 
@@ -106,6 +116,20 @@ function ChannelCard({ channel: c, onEdit }: { channel: ShortsChannelDto; onEdit
         {manual > 0 && <Badge variant="outline">{manual} in manual queue</Badge>}
         {failed > 0 && <Badge variant="destructive">{failed} failed</Badge>}
       </div>
+      {c.path !== "A" ? (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => run(false)} disabled={generate.isPending}>
+            <Sparkles /> Generate now
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => run(true)} disabled={generate.isPending} title="Runs the whole pipeline on local test fixtures: no API calls, never uploaded">
+            <FlaskConical /> Dry run
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Drop finished MP4s (plus optional .json sidecar) into <span className="font-mono">ingest/{c.slug}/</span> or upload them in Pipeline.
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
         <label className="flex items-center gap-2 text-sm">
           <Switch checked={c.approvalMode === "auto"} onCheckedChange={setApproval} disabled={update.isPending} />

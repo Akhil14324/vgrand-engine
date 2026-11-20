@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, prisma } from "@catgpt/db";
 import { backoffMs } from "./jobs-logic.js";
 import { log } from "./log.js";
+import { ShortsConfigError } from "./env-check.js";
 
 /**
  * Postgres-backed job queue for the Shorts Factory (see DECISIONS.md).
@@ -69,8 +70,13 @@ export async function rearmJob(key: string, runAt = new Date()): Promise<boolean
 export const workerId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
 /** Claims up to `limit` due jobs (queued and due, or running with an expired lease). Earliest runAt first. */
-export async function claimJobs(limit: number, types?: string[], owner = workerId): Promise<ShortsJobRow[]> {
-  const typeFilter = types?.length ? Prisma.sql`AND "type" IN (${Prisma.join(types)})` : Prisma.empty;
+export async function claimJobs(
+  limit: number,
+  filter: { types?: string[]; videoIds?: string[] } = {},
+  owner = workerId,
+): Promise<ShortsJobRow[]> {
+  const typeFilter = filter.types?.length ? Prisma.sql`AND "type" IN (${Prisma.join(filter.types)})` : Prisma.empty;
+  const videoFilter = filter.videoIds?.length ? Prisma.sql`AND "videoId" IN (${Prisma.join(filter.videoIds)})` : Prisma.empty;
   const rows = await prisma.$queryRaw<ShortsJobRow[]>`
     UPDATE "shorts_jobs" SET
       "status" = 'running',
@@ -83,6 +89,7 @@ export async function claimJobs(limit: number, types?: string[], owner = workerI
       WHERE (("status" = 'queued' AND "runAt" <= now())
           OR ("status" = 'running' AND "lockedUntil" < now()))
       ${typeFilter}
+      ${videoFilter}
       ORDER BY "runAt" ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -112,7 +119,8 @@ export async function failJob(
   owner = workerId,
 ): Promise<"retry" | "dead"> {
   const message = err instanceof Error ? err.message : String(err);
-  const permanent = err instanceof PermanentJobError;
+  // Missing configuration won't fix itself between retries: fail now with the reason.
+  const permanent = err instanceof PermanentJobError || err instanceof ShortsConfigError;
   const dead = permanent || job.attempts >= job.maxAttempts;
   await prisma.shortsJob.updateMany({
     where: { id: job.id, lockedBy: owner, status: "running" },
@@ -185,11 +193,11 @@ export async function runClaimedJob(job: ShortsJobRow, owner = workerId): Promis
 }
 
 /** Claims and runs due jobs until none are left (or `max` were run). Used by the CLI and tests. */
-export async function drainJobs(opts: { max?: number; types?: string[] } = {}): Promise<number> {
+export async function drainJobs(opts: { max?: number; types?: string[]; videoIds?: string[] } = {}): Promise<number> {
   let ran = 0;
   const max = opts.max ?? 1000;
   while (ran < max) {
-    const [job] = await claimJobs(1, opts.types);
+    const [job] = await claimJobs(1, { types: opts.types, videoIds: opts.videoIds });
     if (!job) break;
     await runClaimedJob(job);
     ran++;
