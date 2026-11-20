@@ -18,6 +18,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { shortsSidecarSchema, SHORTS_HOOK_TYPES } from "@catgpt/types";
 import { stageForIngest } from "../services/shorts/ingest.js";
+import { pathCBudgetStatus } from "../services/shorts/pathc.js";
+import { shortsSettingsSchema } from "@catgpt/types";
 import { storageRoot } from "../services/shorts/storage.js";
 
 /** Shorts Factory API. Everything here is scoped to the signed-in user. */
@@ -166,6 +168,19 @@ export async function shortsRoutes(app: FastifyInstance) {
     }
     await prisma.shortsVideo.update({ where: { id: v.id }, data: body });
     return videoDetail(req.userId, v.id);
+  });
+
+  app.get("/shorts/settings", async (req) => pathCBudgetStatus(req.userId));
+
+  /** Owner-set Path C price per generated second, in BUDGET_CURRENCY (null = use the built-in USD price). */
+  app.put("/shorts/settings", async (req) => {
+    const body = parseBody(shortsSettingsSchema, req.body);
+    await prisma.shortsSettings.upsert({
+      where: { userId: req.userId },
+      create: { userId: req.userId, pathCPricePerSecond: body.pathCPricePerSecond, pathCModel: body.pathCModel ?? null },
+      update: { pathCPricePerSecond: body.pathCPricePerSecond, ...(body.pathCModel !== undefined ? { pathCModel: body.pathCModel } : {}) },
+    });
+    return pathCBudgetStatus(req.userId);
   });
 
   /** Channel-level warnings/errors of the last 7 days (failed ingests, reauth needed, ...). */

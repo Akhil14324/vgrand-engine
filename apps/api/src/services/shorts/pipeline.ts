@@ -236,6 +236,9 @@ export async function runAssetsStep(videoId: string): Promise<void> {
       await generateClipsForVideo(video, channel, timedBeats, dir);
     } catch (err) {
       if (!(err instanceof PathCFallback)) throw err;
+      if (channel.fallbackPath !== "B") {
+        throw new PermanentJobError(`Path C failed and this channel has no fallback path: ${err.message}`);
+      }
       await prisma.shortsVideo.update({ where: { id: videoId }, data: { path: "B", synthetic: false } });
       await recordEvent({
         videoId,

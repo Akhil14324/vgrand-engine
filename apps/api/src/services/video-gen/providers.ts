@@ -177,7 +177,8 @@ async function callJson<T>(url: string, init: RequestInit, label: string): Promi
   return (await res.json()) as T;
 }
 
-function keyFor(model: VideoModelId): string {
+function keyFor(model: VideoModelId, override?: string): string {
+  if (override) return override;
   const provider = model.startsWith("veo") ? "google" : model.startsWith("runway") ? "runway" : "kling";
   const key =
     provider === "google" ? env.GOOGLE_AI_API_KEY : provider === "runway" ? env.RUNWAY_API_KEY : env.KLING_API_KEY;
@@ -193,8 +194,8 @@ export class ClipProviderUnavailable extends Error {
 }
 
 /** Starts a clip. Returns the vendor's task id. */
-export async function submitClip(req: ClipRequest): Promise<string> {
-  const key = keyFor(req.model);
+export async function submitClip(req: ClipRequest, apiKey?: string): Promise<string> {
+  const key = keyFor(req.model, apiKey);
   if (req.model.startsWith("veo")) {
     const { url, init } = buildVeoSubmit(req, key);
     const op = await callJson<VeoOperation>(url, init, "Veo");
@@ -214,8 +215,8 @@ export async function submitClip(req: ClipRequest): Promise<string> {
 }
 
 /** Checks a clip started with submitClip. */
-export async function pollClip(model: VideoModelId, taskId: string): Promise<ClipStatus> {
-  const key = keyFor(model);
+export async function pollClip(model: VideoModelId, taskId: string, apiKey?: string): Promise<ClipStatus> {
+  const key = keyFor(model, apiKey);
   if (model.startsWith("veo")) {
     const op = await callJson<VeoOperation>(
       `${GOOGLE_BASE}/${taskId}`,

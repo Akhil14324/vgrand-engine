@@ -217,3 +217,31 @@ Fetched from the official pages, not taken from the build spec:
   raises a channel alert shown on the Pipeline page.
 - The spec's "bucket prefix" alternative was not built; the watch folder lives under
   `STORAGE_PATH`, which can be a mounted volume or a synced bucket mount.
+
+## Phase 7 — Path C with a hard budget cap
+
+- **Provider adapter** reuses the repo's Veo/Runway/Kling request/response code
+  (`services/video-gen/providers.ts`, now taking an explicit key). `VIDEO_GEN_PROVIDER` maps to a
+  model: `veo`→Veo 3.1, `veo-fast`, `veo-lite`, `runway`→Gen-4 Turbo, `kling`→Kling 3.0 Standard.
+  Clips are requested at 720p 9:16 (cheaper tier; the composer scales/crops to 1080x1920), one per
+  beat, the shortest length the model offers that covers the beat (longest + loop otherwise).
+- **Hard cap.** Before every generation call: estimate (seconds × price), then reserve it in
+  `shorts_costs` inside a transaction holding a Postgres advisory lock, so concurrent workers
+  can't both fit under the cap. Over the cap → no call is made, and the video falls back to B
+  with the reason logged ("5.6 of 6 USD spent, 0.4 left, next clip needs 0.8"). The month is the
+  calendar month in TIMEZONE.
+- **Ledger semantics.** `reserved` → `spent` once the provider accepts the job (providers bill on
+  acceptance, and we can't confirm refunds for failed jobs, so the conservative number is kept);
+  `released` (cost not counted) when the request was never accepted. The task id is stored on
+  the ledger row, so a crash after submitting resumes polling that task instead of paying again.
+- **Price.** Owner-set price per second in BUDGET_CURRENCY (Costs page). Without one, the
+  built-in list price is used only when BUDGET_CURRENCY is USD; for any other currency Path C
+  refuses ("price not set") instead of guessing an exchange rate.
+- **Fallback** goes to Path B only if the channel's fallback path is B (both seeded C channels);
+  with no fallback the video fails with the reason. A fallen-back video has `path = B`,
+  `plannedPath = C`, `synthetic = false` (its final footage is stock).
+- **Verified offline**: 3 dry-run videos on `fails` with a 6 USD cap at 0.10/s → videos 1–2 fully
+  generated (2.40 each), video 3 hit the cap after one clip and fell back to stock, ledger and
+  fallback event as expected. **Not verified**: real Veo/Runway/Kling calls and their actual
+  prices (the price table is the repo's third-party estimate; set your real price on the Costs
+  page).
