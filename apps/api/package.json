@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.11.0",
     "@catgpt/db": "workspace:*",
     "@catgpt/image-providers": "workspace:*",
     "@catgpt/motion": "workspace:*",
