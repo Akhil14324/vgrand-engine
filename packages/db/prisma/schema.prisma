@@ -376,11 +376,11 @@ model ShareLink {
 // cannot dedupe personal accounts (NULL workspaceId is distinct in Postgres),
 // so the migration adds a partial unique index for that case.
 model SocialAccount {
-  id                String       @id @default(uuid())
+  id                String              @id @default(uuid())
   userId            String
-  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspaceId       String?
-  workspace         Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace         Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   platform          String // instagram | facebook | x | youtube
   externalAccountId String
   handle            String?
@@ -391,10 +391,12 @@ model SocialAccount {
   tokenExpiresAt    DateTime?
   scopes            String[]
   metadata          Json?
-  status            String       @default("active")
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  status            String              @default("active")
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
   posts             SocialPost[]
+  igRules           IgAutomationRule[]
+  igEvents          IgAutomationEvent[]
 
   @@unique([workspaceId, userId, platform, externalAccountId])
   @@index([userId])
@@ -1236,4 +1238,78 @@ model ShortsReport {
 
   @@unique([userId, weekStart])
   @@map("shorts_reports")
+}
+
+// ---------------------------------------------------------------------------
+// Instagram comment / DM automation (keyword -> public reply + private DM).
+// Rules belong to one connected Instagram SocialAccount. Every incoming comment
+// or message is stored once per account (unique sourceId) and processed by the
+// Postgres job queue, so Meta's webhook retries never double-reply.
+// ---------------------------------------------------------------------------
+
+model IgAutomationRule {
+  id            String              @id @default(uuid())
+  accountId     String
+  account       SocialAccount       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdById   String
+  name          String
+  active        Boolean             @default(true)
+  /// "comment" (comment on a post/reel) | "dm" (incoming direct message)
+  trigger       String              @default("comment")
+  /// "keywords" (any keyword as a whole word/phrase) | "exact" (whole text equals a keyword) | "any" (every comment)
+  matchMode     String              @default("keywords")
+  keywords      String[]
+  /// "all" posts, or only the media ids in mediaIds
+  mediaScope    String              @default("all")
+  mediaIds      String[]
+  /// Public reply variants; one is picked per comment. Empty = no public reply.
+  publicReplies String[]
+  dmText        String?             @db.Text
+  dmButtonTitle String?
+  dmButtonUrl   String?
+  /// Reply to the same person at most once per rule.
+  oncePerUser   Boolean             @default(true)
+  /// Lower runs first when several rules match.
+  priority      Int                 @default(100)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  events        IgAutomationEvent[]
+
+  @@index([accountId, trigger, active])
+}
+
+model IgAutomationEvent {
+  id                String            @id @default(uuid())
+  accountId         String
+  account           SocialAccount     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  ruleId            String?
+  rule              IgAutomationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  /// "comment" | "message"
+  kind              String
+  /// Instagram comment id, or message mid. Unique per account: webhook retries are no-ops.
+  sourceId          String
+  mediaId           String?
+  parentCommentId   String?
+  fromId            String?
+  fromUsername      String?
+  text              String?           @db.Text
+  occurredAt        DateTime
+  /// "pending" | "no_match" | "skipped" | "done" | "partial" | "failed"
+  status            String            @default("pending")
+  skipReason        String?
+  /// "sent" | "failed" | "attempted" (sent but result unknown; never resent) | null (not needed)
+  publicReplyStatus String?
+  publicReplyText   String?           @db.Text
+  publicReplyId     String?
+  dmStatus          String?
+  dmText            String?           @db.Text
+  dmMessageId       String?
+  error             String?           @db.Text
+  processedAt       DateTime?
+  createdAt         DateTime          @default(now())
+
+  @@unique([accountId, kind, sourceId])
+  @@index([accountId, createdAt])
+  @@index([ruleId, createdAt])
+  @@index([ruleId, fromId])
 }

@@ -71,6 +71,10 @@ These two modules sit on top of the generation pipeline but run their own logic,
 
 10 YouTube Shorts channels run as a format experiment (`routes/shorts.ts`, `routes/shorts-public.ts`, `services/shorts/*`, shared types/state machine in `packages/types/src/shorts.ts`, CLI `apps/api/src/shorts-cli.ts`). It does **not** use `Generation` rows or BullMQ: it has its own Postgres job queue (`services/shorts/jobs.ts`: idempotency keys, `FOR UPDATE SKIP LOCKED` leases) and scheduler, started from `startGenerationWorker`. Video status only moves through `transition()` (conditional update). Pure logic lives in `services/shorts/*-logic.ts` with tests; DB/fake-Google integration tests are opt-in (`SHORTS_IT=1`). Dry-run videos (`source = "dry_run"`, offline fixtures) are never uploaded and are excluded from analytics and the real budget. Decisions and verified/unverified external API facts: `DECISIONS.md`.
 
+### Instagram Automations (`/automations`)
+
+Keyword comment → public reply + private DM, and DM keyword → DM reply, for connected Instagram accounts (`routes/ig-automation.ts`, public signed webhook `routes/ig-webhook.ts` at `/webhooks/meta`, `services/ig-automation/{logic,graph,processor,service}.ts`, types `packages/types/src/ig-automation.ts`). Events are stored once per account (unique source id) and processed through the Shorts Postgres job queue (`ig_event` jobs). Graph calls go through `graph.ts` (`endpoints.base` is overridable for the fake-Meta test). Meta facts and decisions: `DECISIONS.md` ("Instagram comment / DM automation").
+
 ### Other cross-file concepts
 
 - Image daily quota with refunds on failure: `lib/usage.ts`.

@@ -155,6 +155,9 @@ export type JobHandler = (job: ShortsJobRow) => Promise<JobResult>;
 
 const handlers = new Map<string, { run: JobHandler; onDead?: (job: ShortsJobRow, message: string) => Promise<void> }>();
 
+/** Job types this process can run. The worker only claims these, so a process never grabs jobs it can't handle. */
+export const registeredJobTypes = (): string[] => [...handlers.keys()];
+
 export function registerJobHandler(
   type: string,
   run: JobHandler,
@@ -226,7 +229,9 @@ export function startShortsJobWorker(pollMs = 5_000): void {
     if (free <= 0) return;
     let jobs: ShortsJobRow[] = [];
     try {
-      jobs = await claimJobs(free);
+      const types = registeredJobTypes();
+      if (!types.length) return;
+      jobs = await claimJobs(free, { types });
     } catch (err) {
       log.error("worker.claim_failed", { error: String(err) });
       return;

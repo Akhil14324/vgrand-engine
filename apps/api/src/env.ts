@@ -111,6 +111,13 @@ const envSchema = z.object({
   META_LOGIN_CONFIG_ID: opt(z.string().min(1)),
   /** Graph API version, e.g. "v23.0". Meta retires old versions - bump when needed. */
   META_GRAPH_VERSION: opt(z.string().regex(/^v\d+\.\d+$/)),
+  /** Instagram automation webhook: the "Verify Token" you type in Meta App Dashboard > Webhooks. */
+  META_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
+  /**
+   * "true" adds the Instagram automation permissions to the Meta login scope (only used when
+   * META_LOGIN_CONFIG_ID is not set). Turn on once Meta has approved them, or login fails.
+   */
+  META_AUTOMATION_SCOPES: bool,
   X_CLIENT_ID: opt(z.string().min(1)),
   X_CLIENT_SECRET: opt(z.string().min(1)),
   GOOGLE_CLIENT_ID: opt(z.string().min(1)),

@@ -311,3 +311,68 @@ the external calls (composition, validation, captions, state machine, queue, sch
 budget, manual queue, analytics) ran for real on local Postgres + ffmpeg. First live run: start
 with `shorts check`, then `shorts make --channel cats` and look at the result before enabling
 the schedule.
+
+---
+
+# Instagram comment / DM automation (2026-11-21)
+
+## Meta facts checked against developers.facebook.com (2026-11-21)
+
+| Fact | Docs say | Code |
+| --- | --- | --- |
+| Webhook verify | GET with `hub.mode=subscribe`, `hub.verify_token`, `hub.challenge`; answer with the challenge | `GET /webhooks/meta` |
+| Signature | `X-Hub-Signature-256: sha256=<sig>` with the app secret | HMAC-SHA256 over the raw body; refused without `META_APP_SECRET` |
+| Comment payload | `entry[].changes[].field = "comments"` (or `live_comments`), value `{ from{id,username}, comment_id, parent_id?, text, media{id, media_product_type} }` | parser accepts `comment_id` and legacy `id` |
+| Message payload | `entry[].messaging[] { sender.id, recipient.id, timestamp, message{ mid, text, is_echo } }` | echoes / deleted / unsupported dropped |
+| Public reply | `POST /{ig-comment-id}/replies` with `message`; top-level comments only; not live | planned out for replies/live |
+| Private reply | `recipient: { comment_id }`; one per commenter; within 7 days; Live only during the broadcast | 7-day check before sending |
+| Private reply path | docs show both `/{IG-ID}/messages` and `/{PAGE-ID}/messages` (conflict) | Page path first, IG path only when Meta rejects the path itself |
+| Send API | `/{PAGE-ID}/messages` (or `/me/messages`) with Page token, text < 1,000 chars; button template text ≤ 640, 1–3 buttons, `web_url` button | button template; text+link fallback if refused |
+| Permissions | comments: `instagram_basic, instagram_manage_comments, pages_manage_metadata, pages_read_engagement, pages_show_list`; messaging adds `instagram_manage_messages` | Setup card checks them live (`debug_token`) |
+| Access | Advanced Access needed for non-role accounts; app must be Live for webhooks | documented in README |
+| Page subscription | setup page: `POST /{page-id}/subscribed_apps?subscribed_fields=...`; reference page says Instagram fields come from the App Dashboard (conflict) | "Subscribe page" tries `feed,messages,messaging_postbacks`, then `feed` |
+| Rate limits | private replies 750/hour per IG account; Send API 100/s | rate-limit errors back off through the job queue |
+
+## Decisions
+
+- **Reuses the Postgres job queue** (`services/shorts/jobs.ts`) instead of BullMQ, for the same
+  reasons as Shorts: persistent, idempotent, crash-safe with or without Redis. The worker now
+  claims only job types the process has handlers for, and `SHORTS_DISABLED=1` stops Shorts but
+  not Instagram automation.
+- **Webhook answers fast and dedupes.** Each comment/message is stored once per connected
+  account (unique `accountId + kind + sourceId`) and processed by a job. Meta retries for up to
+  36 h; every retry after the first is a no-op. If the same Instagram account is connected by
+  several users/workspaces, each connection's rules run independently.
+- **No double replies.** The public reply is marked `attempted` before the call. If Meta
+  answers with an error, nothing was posted, so it can be retried; if the call's outcome is
+  unknown (network drop), it is never resent. A private reply can only be sent once by Meta's
+  rules, so its retry is safe. An invalid token stops the event at the first failure.
+- **Rule choice**: lowest priority number first, then post-specific rules before all-posts
+  rules, then oldest. Keywords match whole words/phrases, case- and accent-insensitive
+  (`link` matches "LINK!" but not "linked"); emoji keywords match anywhere. A public reply
+  variant is picked deterministically per comment, so a retry sends the same text.
+- **Permissions are opt-in in code** (`META_AUTOMATION_SCOPES`) because requesting permissions
+  Meta hasn't approved breaks the login for every user. With `META_LOGIN_CONFIG_ID` they live in
+  the Meta login configuration instead.
+- **Reconnecting keeps rules**: the existing connect flow updates the `SocialAccount` row in
+  place. Expired/revoked tokens (code 190) mark the account `reauth_required`; its events are
+  then skipped with "account needs reconnecting" until it is reconnected.
+- **Migration** `20261121120000_instagram_automation` only creates `IgAutomationRule` and
+  `IgAutomationEvent` (+ indexes and FKs to `SocialAccount` with ON DELETE CASCADE). It was
+  generated with `prisma migrate diff` and not applied anywhere except this build sandbox's
+  throwaway local database; Railway applies it on deploy.
+
+## Verified / not verified
+
+- **Verified**: 13 unit tests (matching, parsing, signature, payloads, error classes, limits);
+  12 end-to-end tests with the real Fastify app, Postgres and job queue against a local fake of
+  the Graph API (handshake, bad signature, keyword → public + private reply with button, Meta
+  retry no-op, once-per-user, no match, own comment, reply-to-reply, button refused → text, rate
+  limit → retry, network drop → no resend, DM keyword → DM, expired token → reconnect, unknown
+  account). Against the **real** Graph API with a fake token: requests reached Meta, which
+  answered 190 "invalid token", and the app flagged the account for reconnect as designed. The
+  page was checked in a browser.
+- **Not verified**: real deliveries and sends on a live Meta app (no approved permissions or real
+  tokens here). Which private-reply path and which `subscribed_fields` Meta accepts for your app
+  is handled by the fallbacks above; the Activity table shows Meta's exact error if anything is
+  refused.

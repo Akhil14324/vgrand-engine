@@ -3,8 +3,8 @@ import type { ConnectedAccountInput } from "../accounts.js";
 import { SocialConnectError } from "../errors.js";
 import { readJson, socialFetch } from "../http.js";
 
-/** Exactly the permission set the project specified - nothing added. */
-export const META_SCOPES = [
+/** Base permission set for publishing. */
+const BASE_META_SCOPES = [
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_posts",
@@ -12,6 +12,22 @@ export const META_SCOPES = [
   "instagram_basic",
   "instagram_content_publish",
 ] as const;
+
+/**
+ * Instagram comment/DM automation needs these too (Meta docs, 2026-11-21). They're
+ * only requested when META_AUTOMATION_SCOPES=true, because asking for permissions
+ * Meta hasn't approved yet makes the login fail for everyone. With Facebook Login
+ * for Business (META_LOGIN_CONFIG_ID) add them to the saved configuration instead.
+ */
+export const AUTOMATION_META_SCOPES = [
+  "instagram_manage_comments",
+  "instagram_manage_messages",
+  "pages_manage_metadata",
+] as const;
+
+export const META_SCOPES: readonly string[] = env.META_AUTOMATION_SCOPES
+  ? [...BASE_META_SCOPES, ...AUTOMATION_META_SCOPES]
+  : [...BASE_META_SCOPES];
 
 export const graphBase = () => `https://graph.facebook.com/${env.META_GRAPH_VERSION}`;
 

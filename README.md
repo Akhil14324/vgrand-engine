@@ -218,3 +218,55 @@ pnpm --filter @catgpt/api shorts ingest                         # scan Path A wa
   video's detail dialog.
 - **Integration tests** (need a local Postgres): `SHORTS_IT=1 DATABASE_URL=... pnpm --filter
   @catgpt/api exec vitest run shorts-db.it youtube-upload.it worker-kill.it`.
+
+## Instagram Automations
+
+Comment-to-DM automation for connected Instagram professional accounts (web: `/automations`).
+When someone comments a keyword on a post or reel, the app replies publicly under the comment
+(optional, random pick from your variants, `{username}` supported) and sends them a private
+DM (optional link button). DM keyword rules answer incoming DMs the same way. Every comment and
+message is logged in the Activity table with what was sent, skipped or failed.
+
+### What you set up in Meta (once)
+
+1. **App Review / Advanced Access** for: `instagram_basic`, `instagram_manage_comments`,
+   `instagram_manage_messages`, `pages_manage_metadata`, `pages_read_engagement`,
+   `pages_show_list` (plus the publishing ones you already use). Meta requires Advanced Access
+   (and Business Verification) for accounts that don't have a role on your app, and the app must
+   be **Live** to receive webhooks for them.
+2. **Login permissions.** If you use Facebook Login for Business (`META_LOGIN_CONFIG_ID`), add
+   the permissions above to that saved configuration. Otherwise set
+   `META_AUTOMATION_SCOPES=true` *after* Meta approves them (requesting unapproved permissions
+   breaks the login for everyone, so it's off by default).
+3. **Webhooks** (App Dashboard → Webhooks → Instagram): callback URL
+   `<API_PUBLIC_URL>/webhooks/meta`, verify token = the value of `META_WEBHOOK_VERIFY_TOKEN`,
+   then subscribe to the fields `comments`, `live_comments` and `messages`. Deliveries are
+   verified with `META_APP_SECRET` (`X-Hub-Signature-256`); unsigned ones are refused.
+4. **Reconnect** each Facebook/Instagram account after the permissions are approved, so its
+   token carries them (Automations page → Reconnect). Existing rules are kept.
+5. On the Automations page press **Subscribe page** for each account, then check the Setup
+   card is all green ("Ready"). The Instagram account must be **public**, and in the Instagram
+   app *Settings → Messages and story replies → Message controls → Connected tools*, "Allow
+   access to messages" must be on.
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `META_APP_ID`, `META_APP_SECRET` | already used for Facebook/Instagram connect; the secret also verifies webhook signatures |
+| `META_WEBHOOK_VERIFY_TOKEN` | any random string; type the same value as the Verify Token in Meta |
+| `META_AUTOMATION_SCOPES` | `true` to request the automation permissions at login (only without `META_LOGIN_CONFIG_ID`) |
+
+### Instagram's own limits (enforced in code)
+
+- The DM to a commenter is a one-time **private reply**, possible only within **7 days** of the
+  comment. Further DMs need the person to reply first (then within 24 h).
+- Public replies work on **top-level** comments only; not on replies or live comments (those
+  still get the DM).
+- "Reply to each person only once" is on by default per rule, and your own comments are ignored.
+- Rate-limit and server errors retry with backoff; a reply whose outcome is unknown (network
+  drop) is never resent, so nobody gets a duplicate public reply.
+
+The database tables come with the migration `20261121120000_instagram_automation` (applied by
+Railway's `prisma migrate deploy` on deploy). Tests: `SHORTS_IT=1 DATABASE_URL=... pnpm --filter
+@catgpt/api exec vitest run ig-automation`.

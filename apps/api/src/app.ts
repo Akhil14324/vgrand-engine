@@ -38,6 +38,8 @@ import { videoStudioRoutes } from "./routes/video-studio.js";
 import { videoPlanRoutes } from "./routes/video-plan.js";
 import { shortsRoutes } from "./routes/shorts.js";
 import { shortsPublicRoutes } from "./routes/shorts-public.js";
+import { igAutomationRoutes } from "./routes/ig-automation.js";
+import { igWebhookRoutes } from "./routes/ig-webhook.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -151,6 +153,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(videoPlanRoutes);
   await app.register(shortsRoutes);
   await app.register(shortsPublicRoutes);
+  await app.register(igAutomationRoutes);
+  await app.register(igWebhookRoutes);
   await app.register(socialCallbackRoutes);
 
   return app;

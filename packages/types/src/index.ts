@@ -1078,3 +1078,4 @@ export * from "./bcamp";
 export * from "./growth";
 export * from "./video";
 export * from "./shorts";
+export * from "./ig-automation";
