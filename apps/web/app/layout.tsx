@@ -1,18 +1,29 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
+import { Caveat, Fraunces, Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { PwaRegister } from "@/components/pwa";
+import { Petals } from "@/components/petals";
+import { AutoSketch } from "@/components/auto-sketch";
 
 const inter = Inter({
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
   variable: "--font-sans",
   display: "swap",
 });
 
-const spaceGrotesk = Space_Grotesk({
+const fraunces = Fraunces({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-display",
+  display: "swap",
+});
+
+const caveat = Caveat({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-hand",
   display: "swap",
 });
 
@@ -24,7 +35,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "CatGPT",
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
   },
 };
 
@@ -32,8 +43,17 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#17161c",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F4F1EC" },
+    { media: "(prefers-color-scheme: dark)", color: "#151718" },
+  ],
 };
+
+/**
+ * Runs before first paint so there is no light/dark flash: a saved choice
+ * wins, otherwise follow the OS setting.
+ */
+const THEME_SCRIPT = `try{var t=localStorage.getItem("catgpt-theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d)}catch(e){}`;
 
 export default function RootLayout({
   children,
@@ -41,11 +61,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans`}>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body
+        className={`${inter.variable} ${fraunces.variable} ${caveat.variable} font-sans`}
+      >
+        <Petals />
         <Providers>
           {children}
           <PwaRegister />
+          <AutoSketch />
         </Providers>
       </body>
     </html>

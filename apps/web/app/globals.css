@@ -3,29 +3,76 @@
 @tailwind utilities;
 
 @layer base {
+  /* Sketchbook theme. Values are "H S% L%" triplets so Tailwind can add alpha. */
   :root {
-    --background: 240 7% 7%;
-    --foreground: 0 0% 96%;
-    --card: 240 6% 13%;
-    --card-foreground: 0 0% 96%;
-    --popover: 240 6% 14%;
-    --popover-foreground: 0 0% 96%;
-    --primary: 24 95% 56%;
+    --background: 38 27% 94%; /* paper  #F4F1EC */
+    --foreground: 0 0% 8%; /* ink    #141414 */
+    --card: 40 33% 98%; /* card   #FCFBF9 */
+    --card-foreground: 0 0% 8%;
+    --popover: 40 33% 98%;
+    --popover-foreground: 0 0% 8%;
+    --primary: 272 80% 67%; /* lav    #AF69EE */
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 4% 18%;
-    --secondary-foreground: 0 0% 96%;
-    --muted: 240 4% 16%;
-    --muted-foreground: 240 4% 62%;
-    --accent: 240 4% 19%;
-    --accent-foreground: 0 0% 96%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 4% 17%;
-    --input: 240 4% 17%;
-    --ring: 24 95% 56%;
-    --sidebar: 240 8% 5%;
-    --sidebar-foreground: 0 0% 96%;
-    --radius: 0.625rem;
+    --primary-edge: 274 55% 56%; /* #9A4FD0 */
+    --primary-deep: 268 57% 51%; /* lavd   #7C3AC9 */
+    --secondary: 40 22% 89%;
+    --secondary-foreground: 0 0% 8%;
+    --muted: 38 25% 90%;
+    --muted-foreground: 40 7% 40%; /* mute   #6E695F */
+    --accent: 272 70% 94%; /* lavender tint for hover */
+    --accent-foreground: 0 0% 8%;
+    --destructive: 8 60% 45%;
+    --destructive-edge: 8 60% 34%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 14% 79%;
+    --input: 40 12% 62%;
+    --field: 0 0% 100%;
+    --ring: 272 80% 67%;
+    --sidebar: 38 22% 91%;
+    --sidebar-foreground: 0 0% 8%;
+    --pen: 0 0% 12%; /* ink-soft outlines */
+    --pen-soft: 40 8% 38%;
+    --soft: 42 11% 70%;
+    --ok: 146 44% 33%;
+    --warn: 40 70% 41%;
+    --radius: 0.5rem;
+    --sk-shadow: 0 18px 44px -22px rgba(25, 21, 15, 0.28);
+    --petal-opacity: 0.6;
+  }
+
+  .dark {
+    --background: 195 7% 9%;
+    --foreground: 43 25% 90%;
+    --card: 200 8% 12%;
+    --card-foreground: 43 25% 90%;
+    --popover: 200 8% 12%;
+    --popover-foreground: 43 25% 90%;
+    --primary: 270 75% 69%;
+    --primary-foreground: 195 7% 9%;
+    --primary-edge: 270 60% 58%;
+    --primary-deep: 269 70% 77%;
+    --secondary: 205 8% 17%;
+    --secondary-foreground: 43 25% 90%;
+    --muted: 205 8% 15%;
+    --muted-foreground: 45 5% 63%;
+    --accent: 272 22% 21%;
+    --accent-foreground: 43 25% 90%;
+    --destructive: 0 62% 52%;
+    --destructive-edge: 0 62% 38%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 200 6% 20%;
+    --input: 45 5% 45%;
+    --field: 205 8% 15%;
+    --ring: 270 75% 69%;
+    --sidebar: 195 8% 7%;
+    --sidebar-foreground: 43 25% 90%;
+    --pen: 43 18% 83%; /* #DAD5CC */
+    --pen-soft: 45 8% 55%;
+    --soft: 45 3% 53%;
+    --ok: 146 40% 55%;
+    --warn: 40 70% 58%;
+    --sk-shadow: 0 18px 44px -22px rgba(0, 0, 0, 0.7);
+    --petal-opacity: 0.35;
   }
 
   * {
@@ -40,15 +87,18 @@
   }
   html {
     scroll-behavior: smooth;
+    color-scheme: light;
+  }
+  html.dark {
     color-scheme: dark;
   }
   ::selection {
-    background: hsl(var(--primary) / 0.35);
+    background: hsl(var(--primary) / 0.3);
   }
-  /* Slim scrollbars that match the dark surfaces. */
+  /* Slim scrollbars that match the paper. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
@@ -62,17 +112,96 @@
     background: hsl(var(--muted-foreground) / 0.5);
   }
   body {
-    background-image: radial-gradient(60rem 30rem at 50% -10%, hsl(var(--primary) / 0.07), transparent 70%);
-    background-attachment: fixed;
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "ss01", "cv11";
+  }
+  /* Serif headlines; tight tracking only at display sizes. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display), Georgia, serif;
+    font-weight: 500;
+  }
+  h1,
+  h2 {
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  /*
+   * Sketched elements. lib/sketch.ts paints a rough.js outline into the
+   * element's background; until that runs (SSR, no JS) the irregular radius
+   * and double border below keep it reading as hand-drawn.
+   */
+  .sk {
+    position: relative;
+    border: 2px solid hsl(var(--pen));
+    border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  }
+  .sk-drawn {
+    border-color: transparent;
+    border-radius: 0 !important;
+  }
+  /* Browsers strip background images from autofilled fields, so fall back to a plain pen line. */
+  .sk:-webkit-autofill,
+  .sk:-webkit-autofill:focus {
+    -webkit-text-fill-color: hsl(var(--foreground));
+    box-shadow:
+      inset 0 0 0 2px hsl(var(--pen-soft)),
+      inset 0 0 0 100px hsl(var(--field));
+    border-radius: 6px 3px 7px 3px / 3px 7px 3px 6px !important;
+  }
+  .sk-auto.sk-drawn {
+    border-color: transparent !important;
+  }
+  .sk-paper {
+    background-color: hsl(var(--card));
+    box-shadow: var(--sk-shadow);
+  }
+  /* Small rotations for repeated display cards. Never on forms. */
+  .tilt-1 {
+    transform: rotate(-1deg);
+  }
+  .tilt-2 {
+    transform: rotate(0.7deg);
+  }
+  .tilt-3 {
+    transform: rotate(-0.5deg);
+  }
+  @media (max-width: 640px) {
+    .tilt-1,
+    .tilt-2,
+    .tilt-3 {
+      transform: rotate(0deg);
+    }
+  }
+  /* Hand-drawn lavender underline under an active tab / key phrase. */
+  .sk-underline {
+    position: relative;
+  }
+  .sk-underline::after {
+    content: "";
+    position: absolute;
+    left: 6%;
+    right: 6%;
+    bottom: -2px;
+    height: 6px;
+    background: hsl(var(--primary));
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 6' preserveAspectRatio='none'%3E%3Cpath d='M1 3.5 C 20 1.2, 38 5, 56 3 S 88 2, 99 3.6' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M4 4.6 C 28 2.6, 52 5.2, 96 2.8' fill='none' stroke='black' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 6' preserveAspectRatio='none'%3E%3Cpath d='M1 3.5 C 20 1.2, 38 5, 56 3 S 88 2, 99 3.6' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M4 4.6 C 28 2.6, 52 5.2, 96 2.8' fill='none' stroke='black' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
   }
 }
 
 @layer utilities {
-  /* Brand accent for headings: the primary orange easing into amber. */
+  /* Brand accent for headings: flat lavender (no gradients in this theme). */
   .text-gradient-brand {
-    @apply bg-gradient-to-r from-primary to-amber-300 bg-clip-text text-transparent;
+    @apply text-primary;
+  }
+  /* Handwritten margin note. Short phrases only, never paragraphs. */
+  .hand {
+    font-family: var(--font-hand), "Segoe Print", "Bradley Hand", cursive;
+    font-weight: 400;
+    letter-spacing: 0;
   }
   /* Shimmer used on image cards while a generation is in flight. */
   .shimmer {
@@ -194,5 +323,41 @@
     .landing-ember {
       display: none;
     }
+  }
+}
+
+/* Background petals: fixed, non-interactive lavender leaves drifting slowly. */
+.petals {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: var(--petal-opacity, 0.6);
+}
+.petal {
+  position: absolute;
+  background: hsl(var(--primary));
+  border-radius: 80% 0 80% 0;
+  animation: petal-drift 32s ease-in-out infinite alternate;
+}
+@keyframes petal-drift {
+  from {
+    transform: translate(0, 0) rotate(var(--r, 0deg));
+  }
+  to {
+    transform: translate(10px, 14px) rotate(calc(var(--r, 0deg) + 8deg));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .petal,
+  .animate-fade-in,
+  .animate-slide-in-left,
+  .animate-slide-in-right,
+  .animate-slide-in-up {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
   }
 }

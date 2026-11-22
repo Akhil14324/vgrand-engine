@@ -47,7 +47,7 @@ import { CHANNEL_PRESETS, channelLabel } from "@/lib/channels";
 import { THEME_ICONS } from "@/lib/theme-icons";
 import { useStudio } from "@/lib/store";
 import { useClickPulse } from "@/lib/use-click-pulse";
-import { DrawBorder } from "@/components/draw-border";
+import { useSketch } from "@/lib/sketch";
 import { cn } from "@/lib/utils";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -534,9 +534,9 @@ export function Composer() {
   const { ref: sendBtnRef, pulse: sendPulse } = useClickPulse();
   const { ref: stopBtnRef, pulse: stopPulse } = useClickPulse();
 
-  // Drives the composer's draw-on focus border (see DrawBorder).
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const [composerFocused, setComposerFocused] = useState(false);
+  const composerSketchRef = useSketch<HTMLDivElement>(composerFocused ? "active" : "paper", composerBoxRef);
 
   const submit = useCallback(() => {
     // A PDF on its own is a valid send — default to a summary request.
@@ -683,15 +683,12 @@ export function Composer() {
       <Popover open={menuOpen && filtered.length > 0}>
         <PopoverAnchor asChild>
           <div
-            ref={composerBoxRef}
+            ref={composerSketchRef}
             className={cn(
-              "relative mx-auto w-full max-w-4xl rounded-[28px] border bg-card px-2.5 py-2 shadow-lg transition-shadow",
+              "sk sk-paper relative mx-auto w-full max-w-4xl px-3.5 py-2.5",
               dragging && "ring-1 ring-primary",
             )}
           >
-            {/* Draws a border around the box from the center outward on
-                focus, instead of a ring/box-shadow just appearing at once. */}
-            <DrawBorder targetRef={composerBoxRef} active={composerFocused} radius={28} />
             {(armedTheme || refImages.length > 0 || docs.length > 0 || uploading > 0) && (
               <div className="flex flex-wrap items-center gap-2 px-2 pb-1.5 pt-0.5">
                 {armedTheme && (

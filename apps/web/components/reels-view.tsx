@@ -81,7 +81,7 @@ function Reels() {
             <ArrowLeft />
           </Link>
         </Button>
-        <h1 className="font-display text-lg font-semibold tracking-tight">Reels</h1>
+        <h1 className="font-display text-2xl font-medium tracking-[-0.02em]">Reels</h1>
         <select
           aria-label="Brand"
           className="h-9 rounded-md border bg-background px-2 text-sm"

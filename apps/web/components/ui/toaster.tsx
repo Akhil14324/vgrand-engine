@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { CheckCircle2, CircleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSketch } from "@/lib/sketch";
 
 type ToastKind = "success" | "error" | "info";
 interface ToastItem {
@@ -38,12 +39,13 @@ function ToastRow({ item }: { item: ToastItem }) {
     return () => clearTimeout(t);
   }, [item.id, item.kind, dismiss]);
   const Icon = item.kind === "error" ? CircleAlert : CheckCircle2;
+  const sketchRef = useSketch<HTMLDivElement>("paper");
   return (
     <div
+      ref={sketchRef}
       role={item.kind === "error" ? "alert" : "status"}
       className={cn(
-        "pointer-events-auto flex items-start gap-2 rounded-lg border bg-card px-3 py-2 text-sm shadow-lg",
-        item.kind === "error" && "border-destructive/40",
+        "sk sk-paper pointer-events-auto flex items-start gap-2 px-3 py-2 text-sm",
       )}
     >
       <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", item.kind === "error" ? "text-destructive" : "text-primary")} />

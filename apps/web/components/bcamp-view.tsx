@@ -70,7 +70,7 @@ function Dashboard({ brand }: { brand: BrandDto }) {
       <Creator key={prefill?.recommendation ?? "new"} brand={brand} data={data} prefill={prefill} />
 
       {data.flagged.length > 0 && (
-        <Card className="space-y-2 border-amber-500/40 p-4">
+        <Card tone="warn" className="space-y-2 p-4">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <AlertTriangle className="h-4 w-4 text-amber-500" /> Blockers flagged for strategic review
           </h3>

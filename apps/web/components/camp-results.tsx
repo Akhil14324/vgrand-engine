@@ -126,7 +126,7 @@ export function ResultsBody({
         {canManage && !compact && <AddResult strategyId={data.strategyId} />}
       </Card>
 
-      <Card className="space-y-2 border-amber-500/40 p-4">
+      <Card tone="warn" className="space-y-2 p-4">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <AlertTriangle className="h-4 w-4 text-amber-500" /> What cannot be concluded yet
         </h3>

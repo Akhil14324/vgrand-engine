@@ -62,8 +62,8 @@ function ShellInner({
           </Link>
         </Button>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-lg font-semibold leading-tight tracking-tight">{title}</h1>
-          <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+          <h1 className="font-display text-2xl font-medium leading-tight tracking-[-0.02em]">{title}</h1>
+          <p className="hand truncate text-lg leading-none text-lavd">{subtitle}</p>
         </div>
         <nav className="flex rounded-md border p-0.5" aria-label="Campaign workspace">
           {tabs.map((t) => (

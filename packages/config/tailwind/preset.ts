@@ -41,6 +41,11 @@ export const catgptPreset = {
           DEFAULT: "hsl(var(--popover))",
           foreground: "hsl(var(--popover-foreground))",
         },
+        field: "hsl(var(--field))",
+        pen: "hsl(var(--pen))",
+        ok: "hsl(var(--ok))",
+        warn: "hsl(var(--warn))",
+        lavd: "hsl(var(--primary-deep))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -50,10 +55,23 @@ export const catgptPreset = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        // Hand-drawn corners: slightly uneven, like a pen-drawn box.
+        xl: "14px 5px 12px 6px / 6px 12px 5px 14px",
+        "2xl": "18px 6px 16px 7px / 7px 16px 6px 18px",
+      },
+      boxShadow: {
+        // Soft, low, downward only: paper lifted off a desk.
+        sm: "0 6px 14px -10px rgba(25,21,15,.25)",
+        DEFAULT: "0 8px 20px -12px rgba(25,21,15,.28)",
+        md: "0 10px 24px -14px rgba(25,21,15,.28)",
+        lg: "0 14px 34px -18px rgba(25,21,15,.28)",
+        xl: "0 18px 44px -22px rgba(25,21,15,.28)",
+        "2xl": "0 22px 50px -26px rgba(25,21,15,.36)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-        display: ["var(--font-display)", "var(--font-sans)", "sans-serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],
+        hand: ["var(--font-hand)", "Segoe Print", "Bradley Hand", "cursive"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       keyframes: {

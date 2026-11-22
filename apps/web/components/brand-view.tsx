@@ -127,7 +127,7 @@ function BrandContent() {
             <ArrowLeft />
           </Link>
         </Button>
-        <h1 className="font-display text-lg font-semibold tracking-tight">
+        <h1 className="font-display text-2xl font-medium tracking-[-0.02em]">
           Brand
         </h1>
       </header>
@@ -276,16 +276,15 @@ function BrandContent() {
             <BrandEditor key={active.id} brand={active} />
           ) : (
             <div className="mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-20 text-center">
-              <Store className="h-8 w-8 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Set up your brand</h2>
+              <p className="hand -rotate-2 text-2xl text-primary">day one</p>
+              <Store className="h-10 w-10 text-primary" strokeWidth={1.5} />
+              <h2 className="text-4xl font-medium tracking-[-0.03em]">Set up your <span className="sk-underline">brand</span></h2>
               <p className="text-sm text-muted-foreground">
                 Tell the app what you sell and who you sell to. It uses this to
                 write on-brand copy, make on-brand images and plan campaigns
                 that are built around your real numbers.
               </p>
-              <p className="text-xs text-muted-foreground">
-                Select a brand or create a new one to begin.
-              </p>
+              <p className="hand text-xl text-lavd">pick one on the left, or start a new one ←</p>
             </div>
           )}
         </main>

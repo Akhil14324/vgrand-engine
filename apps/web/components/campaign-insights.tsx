@@ -137,7 +137,7 @@ function InsightsBody({ d }: { d: CampaignInsightsDto }) {
         ))}
       </Card>
 
-      <Card className="space-y-2 border-amber-500/40 p-4">
+      <Card tone="warn" className="space-y-2 p-4">
         <h3 className="text-sm font-semibold">Tracking gaps</h3>
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
           {d.gaps.map((g) => (

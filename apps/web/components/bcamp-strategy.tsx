@@ -216,7 +216,7 @@ function PlanEditor({ plan, onChange, disabled, warnings }: { plan: StrategyPlan
   return (
     <div className="space-y-4">
       {warnings.length > 0 && (
-        <Card className="space-y-1 border-amber-500/40 p-4">
+        <Card tone="warn" className="space-y-1 p-4">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <AlertTriangle className="h-4 w-4 text-amber-500" /> Check before you rely on this plan
           </h3>

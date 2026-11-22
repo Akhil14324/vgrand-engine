@@ -101,7 +101,7 @@ function LibraryContent() {
             <ArrowLeft />
           </Link>
         </Button>
-        <h1 className="font-display text-lg font-semibold tracking-tight">
+        <h1 className="font-display text-2xl font-medium tracking-[-0.02em]">
           Library
         </h1>
         <UploadButton />

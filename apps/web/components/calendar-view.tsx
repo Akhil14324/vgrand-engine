@@ -424,7 +424,7 @@ function CalendarContent() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Social Calendar</h1>
+          <h1 className="text-3xl font-medium tracking-[-0.02em]">Social Calendar</h1>
           <p className="text-sm text-muted-foreground">Plan, generate, approve and schedule every post in one place.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">

@@ -197,9 +197,12 @@ function Hero() {
           <PendingTurnBubble />
         </div>
       ) : (
-        <h1 className="text-gradient-brand animate-fade-in text-center font-display text-3xl font-semibold tracking-tight md:text-4xl">
-          Let the Cat Cook.
-        </h1>
+        <div className="animate-fade-in text-center">
+          <p className="hand -rotate-2 text-2xl text-primary md:text-3xl">hi, what are we making today?</p>
+          <h1 className="mt-1 font-display text-4xl font-medium tracking-[-0.04em] text-foreground md:text-6xl">
+            Let the Cat <span className="sk-underline">Cook.</span>
+          </h1>
+        </div>
       )}
       <div className="mt-7 w-full">
         <Composer />
@@ -214,7 +217,7 @@ function Hero() {
               setBrandId(b.id);
               setDraft("create an image of a ");
             }}
-            className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+            className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 tilt-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
           >
             <Store className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <span className="min-w-0">
@@ -229,7 +232,7 @@ function Hero() {
         ))}
         <button
           onClick={() => router.push("/brand")}
-          className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+          className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-card px-4 py-3 tilt-1 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
         >
           <Plus className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <span className="min-w-0">
@@ -241,7 +244,7 @@ function Hero() {
         </button>
         <button
           onClick={() => setDraft("/campaign ")}
-          className="flex items-start gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+          className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 tilt-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
         >
           <Megaphone className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <span className="min-w-0">

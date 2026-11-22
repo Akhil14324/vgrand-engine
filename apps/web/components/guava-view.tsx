@@ -43,7 +43,7 @@ function GuavaContent() {
           </Link>
         </Button>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-lg font-semibold leading-tight tracking-tight">Brand Strategist</h1>
+          <h1 className="font-display text-2xl font-medium tracking-[-0.02em]">Brand Strategist</h1>
           <p className="truncate text-xs text-muted-foreground">Your business strategist</p>
         </div>
         {brands && brands.length > 1 && brand && (

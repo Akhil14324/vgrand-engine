@@ -46,6 +46,7 @@ import { ImageUsage } from "@/components/image-usage";
 import { BrandSwitcher } from "@/components/brand-switcher";
 import { NAV_GROUPS, NAV_ITEMS, type NavGroup } from "@/lib/nav";
 import { InstallButton } from "@/components/pwa";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -308,7 +309,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Footer — user row, like ChatGPT's account row */}
       <div className="flex items-center gap-2.5 border-t border-sidebar px-3 py-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-orange-400/80 text-xs font-semibold text-primary-foreground shadow-sm">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
           {(user?.name ?? user?.email ?? "?").slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
@@ -316,6 +317,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <ImageUsage />
         </div>
         <InstallButton />
+        <ThemeToggle />
         <SettingsMenu onNavigate={onNavigate} />
         <Button
           variant="ghost"

@@ -1,20 +1,37 @@
+"use client";
+
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { useSketch } from "@/lib/sketch";
 
-const Input = React.forwardRef<
-  HTMLInputElement,
-  React.ComponentProps<"input">
->(({ className, type, ...props }, ref) => (
-  <input
-    type={type}
-    ref={ref}
-    className={cn(
-      "flex h-9 w-full rounded-md border border-input bg-background/40 px-3 py-1 text-sm shadow-sm transition-all hover:border-muted-foreground/40 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50",
-      className,
-    )}
-    {...props}
-  />
-));
+/** Text field with a hand-drawn outline; the pen turns lavender on focus. */
+const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
+  ({ className, type, onFocus, onBlur, ...props }, ref) => {
+    const [focused, setFocused] = React.useState(false);
+    const bare = (className ?? "").split(" ").includes("border-0");
+    const sketchRef = useSketch<HTMLInputElement>(bare ? null : focused ? "active" : "input", ref);
+    return (
+      <input
+        type={type}
+        ref={sketchRef}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
+        className={cn(
+          !bare && "sk",
+          "flex h-9 w-full rounded-md px-3 py-1 text-base text-foreground transition-colors placeholder:text-soft focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
 Input.displayName = "Input";
 
 export { Input };
