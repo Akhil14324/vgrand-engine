@@ -2,6 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  InstagramSetupDto,
+  InstagramSetupUpdate,
+  GuavaContentAuditDto,
+  GuavaContentAuditRequest,
+  GuavaContentAuditSummaryDto,
   GuavaDiagnosisDto,
   GuavaDiagnosisSummaryDto,
   GuavaMessageDto,
@@ -69,5 +74,55 @@ export function useAskGuava(brandId: string, diagnosisId: string) {
       }),
     // The server stores both turns; refetch so the thread matches it exactly.
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+  });
+}
+
+/* --------------------------- Instagram content review --------------------------- */
+
+/** Review list; polls while Gemini is still watching reels. */
+export function useGuavaContentAudits(brandId: string | null) {
+  return useQuery({
+    queryKey: ["guava", "content-audits", brandId],
+    enabled: !!brandId,
+    queryFn: () => apiFetch<{ items: GuavaContentAuditSummaryDto[] }>(`${base(brandId!)}/content-audits`),
+    select: (d) => d.items,
+    refetchInterval: (q) => (q.state.data?.items.some((d) => d.status === "processing") ? 3000 : false),
+  });
+}
+
+export function useGuavaContentAudit(brandId: string | null, id: string | null) {
+  return useQuery({
+    queryKey: ["guava", "content-audit", brandId, id],
+    enabled: !!brandId && !!id,
+    queryFn: () => apiFetch<GuavaContentAuditDto>(`${base(brandId!)}/content-audits/${id}`),
+    refetchInterval: (q) => (q.state.data?.status === "processing" ? 3000 : false),
+  });
+}
+
+export function useStartGuavaContentAudit(brandId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    /** No argument: run with the brand's saved Instagram setup. */
+    mutationFn: (req?: GuavaContentAuditRequest) =>
+      apiFetch<GuavaContentAuditSummaryDto>(`${base(brandId)}/content-audits`, { method: "POST", json: req ?? {} }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["guava", "content-audits", brandId] }),
+  });
+}
+
+/** Your one Instagram account and rival accounts (set on the Instagram page), shared by all brands in a scope. */
+export function useInstagramSetup(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ["guava", "instagram-setup", workspaceId],
+    queryFn: () =>
+      apiFetch<InstagramSetupDto>(`/guava/instagram-setup${workspaceId ? `?workspaceId=${workspaceId}` : ""}`),
+  });
+}
+
+export function useSaveInstagramSetup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (update: InstagramSetupUpdate) =>
+      apiFetch<InstagramSetupDto>("/guava/instagram-setup", { method: "PUT", json: update }),
+    onSuccess: (dto) => qc.setQueryData(["guava", "instagram-setup", dto.workspaceId], dto),
   });
 }

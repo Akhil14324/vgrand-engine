@@ -60,6 +60,7 @@ model Brand {
   generations         Generation[]
   guavaProfile        GuavaProfile?
   guavaDiagnoses      GuavaDiagnosis[]
+  guavaContentAudits  GuavaContentAudit[]
   guidelines          BrandGuidelines?
   strategies          Strategy[]
   learnings           CampaignLearning[]
@@ -633,6 +634,45 @@ model GuavaMessage {
   createdAt   DateTime       @default(now())
 
   @@index([diagnosisId, createdAt])
+}
+
+// The owner's Instagram setup (page /instagram): one own account and up to
+// three rival accounts, shared by all brands in the same scope. Brand
+// Strategist splits the account's posts by brand. scopeKey = "ws:<workspaceId>"
+// for workspace brands, "user:<userId>" for personal brands.
+model InstagramSetup {
+  id          String   @id @default(uuid())
+  scopeKey    String   @unique
+  accountId   String? // SocialAccount id (not a FK: disconnecting keeps the rivals)
+  competitors String[]
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+// Guava's Instagram content review: Gemini watches the brand's reels (and any
+// competitors' reels), then judges them against the Brand. Rows are never
+// overwritten; `reels` keeps what was seen so the report stays explainable.
+model GuavaContentAudit {
+  id          String    @id @default(uuid())
+  brandId     String
+  brand       Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId      String
+  accountId   String? // SocialAccount used to read Instagram (not a FK: deleting the account keeps history)
+  handle      String?
+  competitors String[]
+  status      String    @default("processing") // processing | completed | failed
+  progress    String?
+  accounts    Json?
+  reels       Json?
+  skipped     Json?
+  split       Json? // which of the user's brands each post on the account belongs to
+  report      Json?
+  model       String?
+  error       String?   @db.Text
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([brandId, createdAt(sort: Desc)])
 }
 
 // B Camp: a structured, editable marketing strategy for one brand. `plan` is the

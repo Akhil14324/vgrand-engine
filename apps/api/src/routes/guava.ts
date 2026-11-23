@@ -1,11 +1,24 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@catgpt/db";
-import { guavaAskSchema, guavaProfileUpdateSchema } from "@catgpt/types";
+import {
+  instagramSetupUpdateSchema,
+  guavaAskSchema,
+  guavaContentAuditRequestSchema,
+  guavaProfileUpdateSchema,
+} from "@catgpt/types";
 import { parseBody } from "../lib/errors.js";
 import { findAccessibleBrand, findManageableBrand } from "../lib/brand.js";
+import { findWorkspaceForUser } from "../lib/workspace-access.js";
 import { buildProfileDto, saveProfileUpdate } from "../services/guava-profile.js";
 import { askFollowUp, getDiagnosis, listDiagnoses, startDiagnosis } from "../services/guava-diagnosis.js";
+import {
+  getInstagramSetup,
+  getContentAudit,
+  listContentAudits,
+  saveInstagramSetup,
+  startContentAudit,
+} from "../services/guava-content.js";
 
 const brandParams = z.object({ brandId: z.string().uuid() });
 const diagnosisParams = z.object({ id: z.string().uuid() });
@@ -71,4 +84,51 @@ export async function guavaRoutes(app: FastifyInstance) {
       return askFollowUp(brand, id, question);
     },
   );
+
+  // Instagram setup: one own account + up to 3 rivals, shared by all brands in a
+  // scope (personal, or one workspace). Brand Strategist splits posts by brand.
+  const setupQuery = z.object({ workspaceId: z.string().uuid().optional() });
+
+  app.get("/guava/instagram-setup", async (req) => {
+    const { workspaceId } = parseBody(setupQuery, req.query);
+    let canEdit = true;
+    if (workspaceId) {
+      const ws = await findWorkspaceForUser(req.userId, workspaceId);
+      canEdit = ws.userId === req.userId;
+    }
+    return getInstagramSetup(req.userId, workspaceId ?? null, canEdit);
+  });
+
+  app.put("/guava/instagram-setup", async (req) => {
+    const body = parseBody(instagramSetupUpdateSchema, req.body);
+    if (body.workspaceId) await findWorkspaceForUser(req.userId, body.workspaceId, { ownerOnly: true });
+    return saveInstagramSetup(req.userId, body);
+  });
+
+  // Instagram content review: Gemini watches the brand's (and competitors') reels.
+  app.get("/guava/brands/:brandId/content-audits", async (req) => {
+    const { brandId } = parseBody(brandParams, req.params);
+    await findAccessibleBrand(req.userId, brandId);
+    return { items: await listContentAudits(brandId) };
+  });
+
+  app.post(
+    "/guava/brands/:brandId/content-audits",
+    { config: { rateLimit: { max: 3, timeWindow: "1 minute" } } },
+    async (req, reply) => {
+      const { brandId } = parseBody(brandParams, req.params);
+      const brand = await findManageableBrand(req.userId, brandId);
+      // No body: run with the brand's saved Instagram setup (Brand Engine → Instagram).
+      const hasBody = !!req.body && typeof req.body === "object" && Object.keys(req.body).length > 0;
+      const input = hasBody ? parseBody(guavaContentAuditRequestSchema, req.body) : null;
+      return reply.code(202).send(await startContentAudit(brand, req.userId, input));
+    },
+  );
+
+  app.get("/guava/brands/:brandId/content-audits/:id", async (req) => {
+    const { brandId } = parseBody(brandParams, req.params);
+    const { id } = parseBody(diagnosisParams, req.params);
+    await findAccessibleBrand(req.userId, brandId);
+    return getContentAudit(brandId, id);
+  });
 }
