@@ -16,6 +16,7 @@ import { env } from "../env.js";
 import { badRequest, notFound } from "../lib/errors.js";
 import { getClient, userContent } from "./chat.js";
 import { readDocumentText } from "./documents.js";
+import { latestContentAuditText } from "./guava-content.js";
 import {
   collectPlatformSnapshot,
   loadEffectiveProfile,
@@ -63,6 +64,7 @@ HOW TO THINK
 - Ground every statement in the information you are given. The business profile is what the owner told you. Platform activity is what the platform recorded.
 - Tag each finding with its evidence: "fact" = seen in the platform activity data; "provided" = stated by the owner in the profile; "estimate" = your arithmetic from their numbers (show the working in the text); "hypothesis" = a reasoned guess you could not confirm.
 - NEVER invent business performance, revenue, conversion rates, competitor behaviour, customer insights, market sizes or statistics. If you do not know, say so and tag it "hypothesis" or leave it out.
+- If an Instagram content review is included, use it for the marketing picture (tag what it saw as "fact"), but likes and comments are not sales.
 - Platform activity (posts published, campaigns planned, images made) shows effort, not results. Never claim it proves engagement, leads or sales. No reach, engagement, lead or revenue data is collected unless the profile says so.
 - Do not fetch or describe links or documents you were not given the text of. Links are only references the owner supplied.
 - Missing information does not stop the diagnosis. Diagnose what you can, list what is uncertain under "uncertainties", and say exactly what to provide to improve it.
@@ -267,6 +269,7 @@ async function runDiagnosis(id: string, brandId: string, previous: GuavaDiagnosi
     const platform = row.platformSnapshot as unknown as GuavaPlatformSnapshot;
     const completeness = computeGuavaCompleteness(values, row.industry);
     const docs = await documentExcerpts(brandId);
+    const contentReview = await latestContentAuditText(brandId).catch(() => "");
 
     const previousReport = previous ? readReport(previous) : null;
     const previousValues = previous ? readSnapshot(previous.profileSnapshot) : {};
@@ -285,6 +288,9 @@ async function runDiagnosis(id: string, brandId: string, previous: GuavaDiagnosi
         : "",
       `\n# Platform activity (recorded by this platform)\n${platformText(platform)}`,
       docs ? `\n# Documents the owner uploaded (excerpts)\n<documents>\n${docs}\n</documents>` : "",
+      contentReview
+        ? `\n# Instagram content review (an AI watched their recent reels; likes/comments are real, but are not sales)\n${contentReview}`
+        : "",
       previousReport
         ? `\n# Previous diagnosis (${previous!.createdAt.toISOString().slice(0, 10)})\nHeadline: ${previousReport.headline}\nPriorities: ${previousReport.priorities.map((p) => p.title).join("; ")}\nUncertainties: ${previousReport.uncertainties.map((u) => `${u.area} (needed: ${u.needed})`).join("; ")}\nHypotheses it relied on: ${[...previousReport.weaknesses, ...previousReport.opportunities].filter((f) => f.evidence === "hypothesis").map((f) => f.title).join("; ") || "none listed"}\n\n# What changed in the profile since then\n${profileChanges.length ? profileChanges.map((c) => `- ${c.label}: "${c.before || "(empty)"}" -> "${c.after || "(empty)"}"`).join("\n") : "(no profile changes)"}`
         : "",
