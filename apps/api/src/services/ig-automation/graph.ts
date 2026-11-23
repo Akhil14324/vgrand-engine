@@ -157,7 +157,13 @@ export async function pageSubscription(token: string, pageId: string): Promise<{
   return { subscribed: !!mine, fields: mine?.subscribed_fields ?? [] };
 }
 
-/** Subscribes this app to the Page (needs pages_manage_metadata). */
+/**
+ * Subscribes this app to the Page (needs pages_manage_metadata). Tries the full
+ * field set first, then `feed` alone. A permission error also falls through:
+ * Meta refuses the `messages` field with #200 unless the app has pages_messaging,
+ * which Instagram automation doesn't need (Instagram events come from the
+ * Instagram webhook object). If `feed` fails too, that last error is thrown.
+ */
 export async function subscribePage(token: string, pageId: string): Promise<string[]> {
   let lastErr: unknown = null;
   for (const fields of PAGE_SUBSCRIBE_FIELDS) {
@@ -166,7 +172,7 @@ export async function subscribePage(token: string, pageId: string): Promise<stri
       return fields;
     } catch (err) {
       lastErr = err;
-      if (!(err instanceof GraphError && (err.kind === "invalid" || err.kind === "unsupported_path"))) throw err;
+      if (!(err instanceof GraphError && (err.kind === "invalid" || err.kind === "unsupported_path" || err.kind === "permission"))) throw err;
     }
   }
   throw lastErr;

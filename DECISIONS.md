@@ -351,6 +351,11 @@ the schedule.
   rules, then oldest. Keywords match whole words/phrases, case- and accent-insensitive
   (`link` matches "LINK!" but not "linked"); emoji keywords match anywhere. A public reply
   variant is picked deterministically per comment, so a retry sends the same text.
+- **Subscribe page falls back to `feed` on a permission error too** (2026-11-23). On the live app
+  Meta refused `feed,messages,messaging_postbacks` with #200 "messages field needs
+  pages_messaging", which is classed as a permission error, so the `feed`-only retry never ran.
+  pages_messaging isn't requested (Instagram events arrive through the Instagram webhook object),
+  so the fallback now also covers permission errors; if `feed` fails as well, that error is shown.
 - **Permissions are opt-in in code** (`META_AUTOMATION_SCOPES`) because requesting permissions
   Meta hasn't approved breaks the login for every user. With `META_LOGIN_CONFIG_ID` they live in
   the Meta login configuration instead.
