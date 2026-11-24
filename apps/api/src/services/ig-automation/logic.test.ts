@@ -2,17 +2,20 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   buildDmMessage,
+  buildOptionReply,
   classifyGraphError,
   containsKeyword,
   dmTextWithLink,
   equalsKeyword,
   missingPermissions,
+  parseOptionPayload,
   parseWebhook,
   pickRule,
   pickVariant,
   planCommentActions,
   renderTemplate,
   ruleProblems,
+  readOptions,
   verifySignature,
   type RuleLike,
 } from "./logic.js";
@@ -156,5 +159,55 @@ describe("planning and errors", () => {
       "pages_manage_metadata",
       "pages_read_engagement",
     ]);
+  });
+});
+
+describe("tap-to-select options", () => {
+  const options = [
+    { id: "a1", title: "Floor plan", kind: "image", url: "https://x.test/plan.jpg", text: "Here is the floor plan" },
+    { id: "b2", title: "Brochure", kind: "link", url: "https://x.test/brochure.pdf", text: null },
+    { id: "c3", title: "3D walkthrough", kind: "video", url: "https://x.test/walk.mp4", text: null },
+  ];
+
+  it("sends the options as postback buttons carrying rule and option ids", () => {
+    const msg = buildDmMessage({ text: "What would you like to see?", ruleId: "r1", options }) as any;
+    const buttons = msg.attachment.payload.buttons;
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toEqual({ type: "postback", title: "Floor plan", payload: "opt:r1:a1" });
+    expect(buttons[2].title).toBe("3D walkthrough");
+  });
+
+  it("parses the payload back and rejects anything else", () => {
+    expect(parseOptionPayload("opt:r1:a1")).toEqual({ ruleId: "r1", optionId: "a1" });
+    expect(parseOptionPayload("hello")).toBeNull();
+    expect(parseOptionPayload(null)).toBeNull();
+  });
+
+  it("answers an image option with the image itself and a link option with an open button", () => {
+    const img = buildOptionReply(options[0]!);
+    expect((img.message as any).attachment).toEqual({ type: "image", payload: { url: "https://x.test/plan.jpg" } });
+    const link = buildOptionReply(options[1]!);
+    const btn = (link.message as any).attachment.payload.buttons[0];
+    expect(btn).toEqual({ type: "web_url", url: "https://x.test/brochure.pdf", title: "Open Brochure" });
+    expect(link.fallbackText).toContain("https://x.test/brochure.pdf");
+  });
+
+  it("parses a postback tap from the webhook", () => {
+    const evs = parseWebhook({
+      object: "instagram",
+      entry: [{ id: "ig1", time: 1700000000, messaging: [{ sender: { id: "u9" }, recipient: { id: "ig1" }, timestamp: 1700000000000, postback: { mid: "m1", title: "Floor plan", payload: "opt:r1:a1" } }] }],
+    });
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ kind: "postback", senderId: "u9", mid: "m1", payload: "opt:r1:a1", title: "Floor plan" });
+  });
+
+  it("validates options on a rule and ignores malformed stored ones", () => {
+    const base = { trigger: "dm", matchMode: "any", keywords: [], mediaScope: "all", mediaIds: [], publicReplies: [], dmText: "Pick one", dmButtonTitle: null, dmButtonUrl: null };
+    expect(ruleProblems({ ...base, dmOptions: options })).toEqual([]);
+    expect(ruleProblems({ ...base, dmText: null, dmOptions: options })).toContain("Write the DM text that comes with the options");
+    expect(ruleProblems({ ...base, dmOptions: [options[0]!, { ...options[1]!, title: "floor plan" }] })).toContain("Option titles must be different");
+    expect(ruleProblems({ ...base, dmOptions: [{ ...options[0]!, url: "http://x.test/a" }] }).join()).toContain("https");
+    expect(readOptions([{ id: "a", title: "T", url: "https://x.test" }, { nope: 1 }, null])).toHaveLength(1);
+    expect(readOptions(null)).toEqual([]);
   });
 });

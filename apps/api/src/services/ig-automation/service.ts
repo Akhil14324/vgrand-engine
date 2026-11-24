@@ -1,12 +1,13 @@
 import { Prisma, prisma, type SocialAccount } from "@catgpt/db";
-import type { IgAccountDto, IgAccountStatusDto, IgEventDto, IgRuleDto, IgRuleInput, IgRuleStatsDto, IgTestResultDto } from "@catgpt/types";
+import { randomUUID } from "node:crypto";
+import type { IgAccountDto, IgAccountStatusDto, IgEventDto, IgOption, IgRuleDto, IgRuleInput, IgRuleStatsDto, IgTestResultDto } from "@catgpt/types";
 import { env } from "../../env.js";
 import { badRequest, notFound } from "../../lib/errors.js";
 import { decryptToken } from "../../lib/social-crypto.js";
 import { workspaceAccess } from "../../lib/workspace-access.js";
 import { findUsableAccount } from "../social/accounts.js";
 import { grantedScopes, pageSubscription } from "./graph.js";
-import { missingPermissions, pickRule, pickVariant, planCommentActions, renderTemplate, ruleProblems } from "./logic.js";
+import { missingPermissions, pickRule, pickVariant, planCommentActions, readOptions, renderTemplate, ruleProblems } from "./logic.js";
 
 export type RuleRow = Prisma.IgAutomationRuleGetPayload<object>;
 
@@ -87,19 +88,23 @@ export function toRuleDto(r: RuleRow, stats: IgRuleStatsDto = emptyStats()): IgR
     dmText: r.dmText,
     dmButtonTitle: r.dmButtonTitle,
     dmButtonUrl: r.dmButtonUrl,
+    dmOptions: readOptions(r.dmOptions).map((o) => ({ id: o.id, title: o.title, kind: o.kind as IgOption["kind"], url: o.url, text: o.text })),
     oncePerUser: r.oncePerUser,
     priority: r.priority,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     stats,
-    problems: ruleProblems(r),
+    problems: ruleProblems({ ...r, dmOptions: readOptions(r.dmOptions) }),
   };
 }
 
 /** Normalises and validates a rule before saving. DM rules never keep post scope or public replies. */
 export function prepareRule(input: IgRuleInput) {
+  // Each option keeps a stable id: it is inside the buttons already sent, so editing a title must not break them.
+  const dmOptions = input.dmOptions.map((o) => ({ ...o, id: o.id || randomUUID().replace(/-/g, "").slice(0, 8), text: o.text?.trim() || null }));
   const data = {
     ...input,
+    dmOptions,
     dmText: input.dmText?.trim() ? input.dmText.trim() : null,
     dmButtonTitle: input.dmButtonTitle?.trim() || null,
     dmButtonUrl: input.dmButtonUrl?.trim() || null,
@@ -200,6 +205,13 @@ export async function testRules(accountId: string, input: { trigger: "comment" |
     ruleName: rule.name,
     publicReply: plan.publicReply && variant ? renderTemplate(variant, { username: input.username }) : null,
     publicReplyNote: plan.publicReplyNote,
-    dm: plan.dm ? { text: renderTemplate(rule.dmText ?? "", { username: input.username }), buttonTitle: rule.dmButtonTitle, buttonUrl: rule.dmButtonUrl } : null,
+    dm: plan.dm
+      ? {
+          text: renderTemplate(rule.dmText ?? "", { username: input.username }),
+          buttonTitle: rule.dmButtonTitle,
+          buttonUrl: rule.dmButtonUrl,
+          options: readOptions(rule.dmOptions).map((o) => o.title),
+        }
+      : null,
   };
 }

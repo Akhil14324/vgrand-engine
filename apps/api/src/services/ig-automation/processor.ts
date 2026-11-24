@@ -1,9 +1,12 @@
 import { Prisma, prisma, type SocialAccount } from "@catgpt/db";
 import { decryptToken } from "../../lib/social-crypto.js";
 import { enqueueJob, PermanentJobError, registerJobHandler, type ShortsJobRow } from "../shorts/jobs.js";
-import { GraphError, GraphNetworkError, replyToComment, sendDm, sendPrivateReply } from "./graph.js";
+import { GraphError, GraphNetworkError, replyToComment, sendDm, sendOptionReply, sendPrivateReply } from "./graph.js";
 import {
+  buildOptionReply,
+  parseOptionPayload,
   parseWebhook,
+  readOptions,
   pickRule,
   pickVariant,
   planCommentActions,
@@ -79,7 +82,9 @@ async function storeEvent(accountId: string, ev: InboundEvent): Promise<EventRow
               // Live comments: remembered so no public reply is attempted.
               skipReason: ev.live ? "live" : null,
             }
-          : { accountId, kind: "message", sourceId, fromId: ev.senderId, text: ev.text, occurredAt: ev.occurredAt },
+          : ev.kind === "postback"
+            ? { accountId, kind: "postback", sourceId, fromId: ev.senderId, text: ev.title || null, payload: ev.payload, occurredAt: ev.occurredAt }
+            : { accountId, kind: "message", sourceId, fromId: ev.senderId, text: ev.text, occurredAt: ev.occurredAt },
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return null; // concurrent retry
@@ -132,6 +137,10 @@ export async function processEvent(eventId: string): Promise<void> {
     await finish(ev.id, { status: "skipped", skipReason: "own_account" });
     return;
   }
+  if (ev.kind === "postback") {
+    await processPostback(ev, account, igUserId, pageId);
+    return;
+  }
   const text = ev.text ?? "";
   if (!text.trim()) {
     await finish(ev.id, { status: "skipped", skipReason: "empty_text" });
@@ -162,7 +171,14 @@ export async function processEvent(eventId: string): Promise<void> {
   }
 
   const token = decryptToken(account.accessTokenEnc);
-  const dmContent = { text: renderTemplate(rule.dmText ?? "", { username: ev.fromUsername }), buttonTitle: rule.dmButtonTitle, buttonUrl: rule.dmButtonUrl };
+  const options = readOptions(rule.dmOptions);
+  const dmContent = {
+    text: renderTemplate(rule.dmText ?? "", { username: ev.fromUsername }),
+    buttonTitle: rule.dmButtonTitle,
+    buttonUrl: rule.dmButtonUrl,
+    options: options.map((o) => ({ id: o.id, title: o.title })),
+    ruleId: rule.id,
+  };
   const notes: string[] = [];
   // An invalid token fails every call: once seen, nothing else is attempted for this event.
   let authFailed = false;
@@ -227,6 +243,44 @@ export async function processEvent(eventId: string): Promise<void> {
   const status = wanted.length === 0 ? "skipped" : sent === wanted.length ? "done" : sent > 0 ? "partial" : "failed";
   await finish(ev.id, { status, skipReason: notes.length ? notes.join("; ").slice(0, 500) : current.skipReason === "live" ? "live" : null });
   log(status === "failed" ? "warn" : "info", "event.processed", { eventId: ev.id, ruleId: rule.id, status, publicReply: current.publicReplyStatus, dm: current.dmStatus });
+}
+
+/**
+ * The person tapped one of the options we sent: answer with that option's content.
+ * Taps are always answerable (they open a fresh 24-hour window); a retry of the
+ * job never resends once the reply is recorded.
+ */
+async function processPostback(ev: EventRow, account: SocialAccount, igUserId: string, pageId: string | null): Promise<void> {
+  const parsed = parseOptionPayload(ev.payload);
+  const rule = parsed ? await prisma.igAutomationRule.findFirst({ where: { id: parsed.ruleId, accountId: account.id } }) : null;
+  if (!parsed || !rule) {
+    await finish(ev.id, { status: "skipped", skipReason: "unknown_option" });
+    return;
+  }
+  const option = readOptions(rule.dmOptions).find((o) => o.id === parsed.optionId);
+  if (!option) {
+    await finish(ev.id, { status: "skipped", skipReason: "option_removed", rule: { connect: { id: rule.id } } });
+    return;
+  }
+  const current = await prisma.igAutomationEvent.findUniqueOrThrow({ where: { id: ev.id } });
+  await prisma.igAutomationEvent.update({ where: { id: ev.id }, data: { ruleId: rule.id, text: option.title } });
+  if (current.dmStatus !== null) {
+    await finish(ev.id, { status: current.dmStatus === "failed" ? "failed" : "done" });
+    return;
+  }
+  const token = decryptToken(account.accessTokenEnc);
+  await prisma.igAutomationEvent.update({ where: { id: ev.id }, data: { dmText: option.text?.trim() || option.title } });
+  try {
+    const r = await sendOptionReply(token, pageId, ev.fromId!, buildOptionReply(option));
+    await prisma.igAutomationEvent.update({ where: { id: ev.id }, data: { dmStatus: "sent", dmMessageId: r.messageId } });
+    await finish(ev.id, { status: "done", skipReason: r.usedFallback ? "Instagram didn't accept the file; sent the link as text" : null });
+    log("info", "postback.processed", { eventId: ev.id, ruleId: rule.id, option: option.id, igUserId });
+  } catch (err) {
+    if (err instanceof GraphError && err.kind === "auth") await markReauth(account, err.message);
+    if (err instanceof GraphNetworkError || retryable(err)) throw err;
+    await prisma.igAutomationEvent.update({ where: { id: ev.id }, data: { dmStatus: "failed", error: describe(err) } });
+    await finish(ev.id, { status: "failed" });
+  }
 }
 
 async function onDead(job: ShortsJobRow, message: string): Promise<void> {

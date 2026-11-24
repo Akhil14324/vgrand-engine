@@ -1311,6 +1311,8 @@ model IgAutomationRule {
   oncePerUser   Boolean             @default(true)
   /// Lower runs first when several rules match.
   priority      Int                 @default(100)
+  /// Up to 3 tap-to-select options sent as postback buttons: [{id,title,kind,url,text}]
+  dmOptions     Json?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   events        IgAutomationEvent[]
@@ -1344,6 +1346,8 @@ model IgAutomationEvent {
   dmStatus          String?
   dmText            String?           @db.Text
   dmMessageId       String?
+  /// Postback payload ("opt:<ruleId>:<optionId>") for kind "postback".
+  payload           String?
   error             String?           @db.Text
   processedAt       DateTime?
   createdAt         DateTime          @default(now())

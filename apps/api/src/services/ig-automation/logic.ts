@@ -114,14 +114,55 @@ export function renderTemplate(template: string, vars: { username?: string | nul
     .trim();
 }
 
+export interface DmOptionLike {
+  id: string;
+  title: string;
+  kind: string;
+  url: string;
+  text: string | null;
+}
+
 export interface DmContent {
   text: string;
   buttonTitle?: string | null;
   buttonUrl?: string | null;
+  /** Tap-to-select choices (max 3). Sent as postback buttons that carry `opt:<ruleId>:<optionId>`. */
+  options?: { id: string; title: string }[];
+  ruleId?: string;
 }
 
-/** Instagram message body: a button template when a link button is set, otherwise plain text. */
+export const optionPayload = (ruleId: string, optionId: string) => `opt:${ruleId}:${optionId}`;
+
+export function parseOptionPayload(payload: string | null | undefined): { ruleId: string; optionId: string } | null {
+  const m = /^opt:([^:]+):([^:]+)$/.exec(payload ?? "");
+  return m ? { ruleId: m[1]!, optionId: m[2]! } : null;
+}
+
+/** Options as stored on a rule (JSON column), tolerant of anything malformed. */
+export function readOptions(raw: unknown): DmOptionLike[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((o) => {
+    const r = (o ?? {}) as Record<string, unknown>;
+    if (typeof r.id !== "string" || !r.id || typeof r.title !== "string" || typeof r.url !== "string") return [];
+    return [{ id: r.id, title: r.title, kind: typeof r.kind === "string" ? r.kind : "link", url: r.url, text: typeof r.text === "string" ? r.text : null }];
+  });
+}
+
+/** Instagram message body: option buttons, or a link button, otherwise plain text. */
 export function buildDmMessage(c: DmContent): Record<string, unknown> {
+  if (c.options?.length && c.ruleId) {
+    const ruleId = c.ruleId;
+    return {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: c.text.slice(0, MAX_BUTTON_TEXT),
+          buttons: c.options.slice(0, 3).map((o) => ({ type: "postback", title: o.title.slice(0, MAX_BUTTON_TITLE), payload: optionPayload(ruleId, o.id) })),
+        },
+      },
+    };
+  }
   if (c.buttonTitle && c.buttonUrl) {
     return {
       attachment: {
@@ -143,6 +184,30 @@ export function dmTextWithLink(c: DmContent): Record<string, unknown> {
   return { text: text.slice(0, MAX_DM_TEXT) };
 }
 
+/** Plain-text fallback for an option message: the choices are listed so the person can type one. */
+export function dmTextWithOptions(c: DmContent): Record<string, unknown> {
+  const list = (c.options ?? []).map((o) => `- ${o.title}`).join("\n");
+  return { text: `${c.text}\n\n${list}`.slice(0, MAX_DM_TEXT) };
+}
+
+/** What is sent when the person taps an option: the file itself, or a text with an open button. */
+export function buildOptionReply(o: DmOptionLike): { message: Record<string, unknown>; fallbackText: string } {
+  const text = (o.text?.trim() || o.title).slice(0, MAX_BUTTON_TEXT);
+  const fallbackText = `${o.text?.trim() || o.title}\n${o.url}`.slice(0, MAX_DM_TEXT);
+  if (o.kind === "image" || o.kind === "video") {
+    return { message: { attachment: { type: o.kind, payload: { url: o.url } } }, fallbackText };
+  }
+  return {
+    message: {
+      attachment: {
+        type: "template",
+        payload: { template_type: "button", text, buttons: [{ type: "web_url", url: o.url, title: `Open ${o.title}`.slice(0, MAX_BUTTON_TITLE) }] },
+      },
+    },
+    fallbackText,
+  };
+}
+
 /** Problems with a rule as configured (shown to the owner). Empty = valid. */
 export function ruleProblems(r: {
   trigger: string;
@@ -154,8 +219,23 @@ export function ruleProblems(r: {
   dmText: string | null;
   dmButtonTitle: string | null;
   dmButtonUrl: string | null;
+  dmOptions?: { title: string; kind: string; url: string }[];
 }): string[] {
   const p: string[] = [];
+  const options = r.dmOptions ?? [];
+  if (options.length) {
+    if (!r.dmText?.trim()) p.push("Write the DM text that comes with the options");
+    if (r.dmButtonTitle || r.dmButtonUrl) p.push("Use either a link button or options, not both");
+    if (options.length > 3) p.push("Instagram allows at most 3 options per message");
+    if (new Set(options.map((o) => o.title.trim().toLowerCase())).size !== options.length) p.push("Option titles must be different");
+    for (const o of options) {
+      try {
+        if (new URL(o.url).protocol !== "https:") p.push(`Option "${o.title}": URL must start with https://`);
+      } catch {
+        p.push(`Option "${o.title}": URL is not valid`);
+      }
+    }
+  }
   if (r.matchMode !== "any" && !r.keywords.some((k) => k.trim())) p.push("Add at least one keyword (or match every comment)");
   if (r.trigger === "comment" && r.mediaScope === "selected" && r.mediaIds.length === 0) p.push("Pick at least one post, or apply the rule to all posts");
   const hasPublic = r.trigger === "comment" && r.publicReplies.some((x) => x.trim());
@@ -213,7 +293,18 @@ export interface MessageEvent {
   occurredAt: Date;
 }
 
-export type InboundEvent = CommentEvent | MessageEvent;
+/** The person tapped a postback button (one of the options we sent). */
+export interface PostbackEvent {
+  kind: "postback";
+  igAccountId: string;
+  mid: string;
+  senderId: string;
+  payload: string;
+  title: string;
+  occurredAt: Date;
+}
+
+export type InboundEvent = CommentEvent | MessageEvent | PostbackEvent;
 
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : typeof v === "number" ? String(v) : null);
 
@@ -253,6 +344,25 @@ export function parseWebhook(body: unknown): InboundEvent[] {
       });
     }
     for (const m of (Array.isArray(e.messaging) ? e.messaging : []) as Record<string, unknown>[]) {
+      const pb = (m.postback ?? null) as Record<string, unknown> | null;
+      if (pb) {
+        const senderId = str((m.sender as Record<string, unknown> | undefined)?.id);
+        const payload = str(pb.payload);
+        if (!senderId || !payload || senderId === igAccountId) continue;
+        const ts = typeof m.timestamp === "number" ? m.timestamp : entryTime;
+        const at = ts ? new Date(ts > 1e12 ? ts : ts * 1000) : new Date();
+        out.push({
+          kind: "postback",
+          igAccountId,
+          // Some deliveries have no mid: sender + payload + time still identifies a tap.
+          mid: str(pb.mid) ?? `pb:${senderId}:${payload}:${at.getTime()}`,
+          senderId,
+          payload,
+          title: str(pb.title) ?? "",
+          occurredAt: at,
+        });
+        continue;
+      }
       const msg = (m.message ?? null) as Record<string, unknown> | null;
       if (!msg || msg.is_echo === true || msg.is_deleted === true || msg.is_unsupported === true) continue;
       const mid = str(msg.mid);
