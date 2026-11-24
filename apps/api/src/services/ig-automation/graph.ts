@@ -1,6 +1,6 @@
 import { env } from "../../env.js";
 import { graphBase } from "../social/oauth/meta.js";
-import { buildDmMessage, classifyGraphError, dmTextWithLink, type DmContent, type GraphErrorKind } from "./logic.js";
+import { buildDmMessage, classifyGraphError, dmTextWithLink, dmTextWithOptions, type DmContent, type GraphErrorKind } from "./logic.js";
 
 /**
  * Graph API calls for Instagram automation (Instagram API with Facebook Login,
@@ -75,8 +75,9 @@ async function sendWithFallback(send: (message: Record<string, unknown>) => Prom
   try {
     return { result: await send(buildDmMessage(content)), usedFallback: false };
   } catch (err) {
-    if (content.buttonUrl && err instanceof GraphError && err.kind === "invalid") {
-      return { result: await send(dmTextWithLink(content)), usedFallback: true };
+    if (err instanceof GraphError && err.kind === "invalid") {
+      if (content.options?.length) return { result: await send(dmTextWithOptions(content)), usedFallback: true };
+      if (content.buttonUrl) return { result: await send(dmTextWithLink(content)), usedFallback: true };
     }
     throw err;
   }
@@ -117,6 +118,31 @@ export async function sendDm(token: string, pageId: string | null, igsid: string
     (message) => call("POST", path, token, { json: { recipient: { id: igsid }, messaging_type: "RESPONSE", message } }),
     content,
   );
+  return { messageId: typeof result.message_id === "string" ? result.message_id : null, usedFallback };
+}
+
+/**
+ * Answer to a tapped option: sends `message` (an image/video attachment or a link template);
+ * if Meta refuses it, sends `fallbackText` (text with the link) instead.
+ */
+export async function sendOptionReply(
+  token: string,
+  pageId: string | null,
+  igsid: string,
+  reply: { message: Record<string, unknown>; fallbackText: string },
+): Promise<{ messageId: string | null; usedFallback: boolean }> {
+  const path = pageId ? `/${pageId}/messages` : "/me/messages";
+  const send = (message: Record<string, unknown>) =>
+    call("POST", path, token, { json: { recipient: { id: igsid }, messaging_type: "RESPONSE", message } });
+  let usedFallback = false;
+  let result: Record<string, unknown>;
+  try {
+    result = await send(reply.message);
+  } catch (err) {
+    if (!(err instanceof GraphError && err.kind === "invalid")) throw err;
+    usedFallback = true;
+    result = await send({ text: reply.fallbackText });
+  }
   return { messageId: typeof result.message_id === "string" ? result.message_id : null, usedFallback };
 }
 

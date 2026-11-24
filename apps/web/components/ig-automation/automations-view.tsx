@@ -280,6 +280,7 @@ function Rules({ account }: { account: IgAccountDto }) {
                   {r.publicReplies.length ? ` · public: "${r.publicReplies[0]}"${r.publicReplies.length > 1 ? ` +${r.publicReplies.length - 1}` : ""}` : ""}
                   {r.dmText ? ` · DM: "${r.dmText.slice(0, 60)}${r.dmText.length > 60 ? "..." : ""}"` : ""}
                   {r.dmButtonUrl ? " + link button" : ""}
+                  {r.dmOptions?.length ? ` + ${r.dmOptions.length} options (${r.dmOptions.map((o) => o.title).join(", ")})` : ""}
                 </div>
                 {r.problems.length > 0 && <div className="text-xs text-destructive">{r.problems.join(". ")}</div>}
                 <div className="text-xs tabular-nums text-muted-foreground">
@@ -422,7 +423,7 @@ function Activity({ accountId }: { accountId: string }) {
                 <tr key={e.id} className="border-t align-top">
                   <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-muted-foreground">
                     {when(e.occurredAt)}
-                    <div>{e.kind === "comment" ? "comment" : "DM"}</div>
+                    <div>{e.kind === "comment" ? "comment" : e.kind === "postback" ? "tapped option" : "DM"}</div>
                   </td>
                   <td className="pr-3">{e.fromUsername ? `@${e.fromUsername}` : (e.fromId ?? "-")}</td>
                   <td className="max-w-[220px] pr-3">

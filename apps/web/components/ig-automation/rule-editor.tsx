@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
-import type { IgRuleDto, IgRuleInput } from "@catgpt/types";
+import { Check, Plus, Trash2 } from "lucide-react";
+import { IG_MAX_OPTIONS, type IgOption, type IgRuleDto, type IgRuleInput } from "@catgpt/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -37,11 +37,13 @@ export function RuleEditor({ accountId, rule, onClose }: { accountId: string; ru
   const [dmText, setDmText] = useState(rule?.dmText ?? "");
   const [buttonTitle, setButtonTitle] = useState(rule?.dmButtonTitle ?? "");
   const [buttonUrl, setButtonUrl] = useState(rule?.dmButtonUrl ?? "");
+  const [options, setOptions] = useState<IgOption[]>(rule?.dmOptions ?? []);
   const [oncePerUser, setOncePerUser] = useState(rule?.oncePerUser ?? true);
   const [priority, setPriority] = useState(String(rule?.priority ?? 100));
   const [active, setActive] = useState(rule?.active ?? true);
   const media = useIgMedia(accountId, trigger === "comment" && mediaScope === "selected");
-  const dmMax = buttonUrl.trim() ? 640 : 1000;
+  const dmMax = buttonUrl.trim() || options.length ? 640 : 1000;
+  const setOption = (i: number, patch: Partial<IgOption>) => setOptions((os) => os.map((o, j) => (j === i ? { ...o, ...patch } : o)));
 
   const submit = async () => {
     const input: IgRuleInput = {
@@ -56,6 +58,7 @@ export function RuleEditor({ accountId, rule, onClose }: { accountId: string; ru
       dmText: dmText.trim() || null,
       dmButtonTitle: buttonTitle.trim() || null,
       dmButtonUrl: buttonUrl.trim() || null,
+      dmOptions: options.filter((o) => o.title.trim() && o.url.trim()),
       oncePerUser,
       priority: Number(priority) || 100,
     };
@@ -156,6 +159,47 @@ export function RuleEditor({ accountId, rule, onClose }: { accountId: string; ru
           <Field label={`${trigger === "comment" ? "Private DM to the commenter" : "DM reply"} (${dmText.length}/${dmMax})`}>
             <Textarea rows={4} value={dmText} onChange={(e) => setDmText(e.target.value)} placeholder="Here's the free guide you asked for!" />
           </Field>
+          <div className="grid gap-2 rounded-md border p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Options the person can tap (optional)</div>
+                <p className="text-xs text-muted-foreground">
+                  Sent as buttons under the DM, e.g. Floor plan, Brochure, 3D walkthrough. When they tap one, they get that file or link. Up to {IG_MAX_OPTIONS}.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={options.length >= IG_MAX_OPTIONS}
+                onClick={() => setOptions((os) => [...os, { id: "", title: "", kind: "image", url: "", text: null }])}
+              >
+                <Plus className="h-4 w-4" /> Add option
+              </Button>
+            </div>
+            {options.map((o, i) => (
+              <div key={o.id || i} className="grid gap-2 rounded-md bg-muted/40 p-2">
+                <div className="grid grid-cols-[1fr_9rem_auto] gap-2">
+                  <Input value={o.title} maxLength={20} placeholder="Button name, e.g. Floor plan" onChange={(e) => setOption(i, { title: e.target.value })} />
+                  <Select value={o.kind} onChange={(e) => setOption(i, { kind: e.target.value as IgOption["kind"] })}>
+                    <option value="image">Image</option>
+                    <option value="video">Video file</option>
+                    <option value="link">Link (PDF, 3D tour)</option>
+                  </Select>
+                  <Button type="button" variant="ghost" size="icon" aria-label="Remove option" onClick={() => setOptions((os) => os.filter((_, j) => j !== i))}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Input value={o.url} placeholder="https:// link to the file or page" onChange={(e) => setOption(i, { url: e.target.value })} />
+                <Input value={o.text ?? ""} maxLength={600} placeholder="Message sent with it (optional)" onChange={(e) => setOption(i, { text: e.target.value || null })} />
+              </div>
+            ))}
+            {options.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Image and Video send the file itself in the chat. Instagram can&apos;t send PDFs, so for a brochure or a hosted 3D walkthrough use Link: the person gets an Open button. If you also fill in the link below, it is added to the DM text (tappable) and the options stay as buttons under it.
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Link button title (optional, max 20)">
               <Input value={buttonTitle} onChange={(e) => setButtonTitle(e.target.value)} placeholder="Open guide" maxLength={20} />

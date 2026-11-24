@@ -12,6 +12,23 @@ const trimmedList = (max: number, itemMax: number) =>
     .max(max)
     .transform((xs) => xs.map((x) => x.trim()).filter(Boolean));
 
+export const IG_OPTION_KINDS = ["image", "video", "link"] as const;
+export const IG_MAX_OPTIONS = 3;
+
+/**
+ * One tap-to-select choice in an auto-DM (e.g. "Floor plan", "Brochure", "3D walkthrough").
+ * kind "image"/"video": the file itself is sent in the chat; "link": a text + open button
+ * (use it for PDFs and hosted 3D walkthroughs, which Instagram can't send as files).
+ */
+export const igOptionSchema = z.object({
+  id: z.string().trim().max(16).default(""),
+  title: z.string().trim().min(1).max(20),
+  kind: z.enum(IG_OPTION_KINDS).default("link"),
+  url: z.string().trim().min(1).max(2000),
+  text: z.string().trim().max(600).nullable().default(null),
+});
+export type IgOption = z.infer<typeof igOptionSchema>;
+
 export const igRuleInputSchema = z.object({
   name: z.string().trim().min(1).max(80),
   active: z.boolean().default(true),
@@ -24,6 +41,7 @@ export const igRuleInputSchema = z.object({
   dmText: z.string().max(1000).nullable().default(null),
   dmButtonTitle: z.string().trim().max(20).nullable().default(null),
   dmButtonUrl: z.string().trim().max(2000).nullable().default(null),
+  dmOptions: z.array(igOptionSchema).max(IG_MAX_OPTIONS).default([]),
   oncePerUser: z.boolean().default(true),
   priority: z.number().int().min(0).max(1000).default(100),
 });
@@ -79,7 +97,7 @@ export interface IgAccountStatusDto {
 
 export interface IgEventDto {
   id: string;
-  kind: "comment" | "message";
+  kind: "comment" | "message" | "postback";
   ruleId: string | null;
   ruleName: string | null;
   mediaId: string | null;
@@ -113,5 +131,5 @@ export interface IgTestResultDto {
   ruleName: string | null;
   publicReply: string | null;
   publicReplyNote: string | null;
-  dm: { text: string; buttonTitle: string | null; buttonUrl: string | null } | null;
+  dm: { text: string; buttonTitle: string | null; buttonUrl: string | null; options: string[] } | null;
 }
