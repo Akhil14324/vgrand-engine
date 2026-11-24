@@ -131,6 +131,12 @@ export interface DmContent {
   ruleId?: string;
 }
 
+/** DM text followed by the link, e.g. "Here you go\n\nGuide: https://...". */
+export function textWithLink(c: DmContent): string {
+  if (!c.buttonUrl || c.text.includes(c.buttonUrl)) return c.text;
+  return `${c.text}\n\n${c.buttonTitle ? `${c.buttonTitle}: ` : ""}${c.buttonUrl}`;
+}
+
 export const optionPayload = (ruleId: string, optionId: string) => `opt:${ruleId}:${optionId}`;
 
 export function parseOptionPayload(payload: string | null | undefined): { ruleId: string; optionId: string } | null {
@@ -152,12 +158,15 @@ export function readOptions(raw: unknown): DmOptionLike[] {
 export function buildDmMessage(c: DmContent): Record<string, unknown> {
   if (c.options?.length && c.ruleId) {
     const ruleId = c.ruleId;
+    const optionButtons = c.options.slice(0, 3).map((o) => ({ type: "postback", title: o.title.slice(0, MAX_BUTTON_TITLE), payload: optionPayload(ruleId, o.id) }));
+    // Instagram allows 3 buttons per message, all taken by the options: the link goes in the text (links in DM text are tappable).
+    const text = c.buttonUrl ? textWithLink(c) : c.text;
     return {
       attachment: {
         type: "template",
         payload: {
           template_type: "button",
-          text: c.text.slice(0, MAX_BUTTON_TEXT),
+          text: text.slice(0, MAX_BUTTON_TEXT),
           buttons: c.options.slice(0, 3).map((o) => ({ type: "postback", title: o.title.slice(0, MAX_BUTTON_TITLE), payload: optionPayload(ruleId, o.id) })),
         },
       },
@@ -187,7 +196,8 @@ export function dmTextWithLink(c: DmContent): Record<string, unknown> {
 /** Plain-text fallback for an option message: the choices are listed so the person can type one. */
 export function dmTextWithOptions(c: DmContent): Record<string, unknown> {
   const list = (c.options ?? []).map((o) => `- ${o.title}`).join("\n");
-  return { text: `${c.text}\n\n${list}`.slice(0, MAX_DM_TEXT) };
+  const link = c.buttonUrl ? `\n\n${c.buttonTitle ? `${c.buttonTitle}: ` : ""}${c.buttonUrl}` : "";
+  return { text: `${c.text}\n\n${list}${link}`.slice(0, MAX_DM_TEXT) };
 }
 
 /** What is sent when the person taps an option: the file itself, or a text with an open button. */
@@ -225,7 +235,9 @@ export function ruleProblems(r: {
   const options = r.dmOptions ?? [];
   if (options.length) {
     if (!r.dmText?.trim()) p.push("Write the DM text that comes with the options");
-    if (r.dmButtonTitle || r.dmButtonUrl) p.push("Use either a link button or options, not both");
+    if (r.dmButtonUrl && (r.dmText?.length ?? 0) + r.dmButtonUrl.length + (r.dmButtonTitle?.length ?? 0) + 4 > MAX_BUTTON_TEXT) {
+      p.push("With options, the DM text plus the link must fit in 640 characters");
+    }
     if (options.length > 3) p.push("Instagram allows at most 3 options per message");
     if (new Set(options.map((o) => o.title.trim().toLowerCase())).size !== options.length) p.push("Option titles must be different");
     for (const o of options) {
@@ -242,7 +254,7 @@ export function ruleProblems(r: {
   const hasDm = !!r.dmText?.trim();
   if (!hasPublic && !hasDm) p.push(r.trigger === "dm" ? "Write the DM reply" : "Write a public reply, a DM, or both");
   if (r.trigger === "dm" && r.publicReplies.some((x) => x.trim())) p.push("DM rules can't post public replies");
-  if (r.dmText && r.dmText.length > (r.dmButtonUrl ? MAX_BUTTON_TEXT : MAX_DM_TEXT)) {
+  if (r.dmText && !(r.dmOptions?.length && r.dmButtonUrl) && r.dmText.length > (r.dmButtonUrl || r.dmOptions?.length ? MAX_BUTTON_TEXT : MAX_DM_TEXT)) {
     p.push(`DM text is too long (max ${r.dmButtonUrl ? MAX_BUTTON_TEXT : MAX_DM_TEXT} characters${r.dmButtonUrl ? " with a button" : ""})`);
   }
   if (!!r.dmButtonTitle !== !!r.dmButtonUrl) p.push("A link button needs both a title and a URL");

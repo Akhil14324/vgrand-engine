@@ -56,8 +56,8 @@ export function RuleEditor({ accountId, rule, onClose }: { accountId: string; ru
       mediaIds: trigger === "comment" && mediaScope === "selected" ? mediaIds : [],
       publicReplies: trigger === "comment" ? lines(publicReplies) : [],
       dmText: dmText.trim() || null,
-      dmButtonTitle: options.length ? null : buttonTitle.trim() || null,
-      dmButtonUrl: options.length ? null : buttonUrl.trim() || null,
+      dmButtonTitle: buttonTitle.trim() || null,
+      dmButtonUrl: buttonUrl.trim() || null,
       dmOptions: options.filter((o) => o.title.trim() && o.url.trim()),
       oncePerUser,
       priority: Number(priority) || 100,
@@ -196,11 +196,11 @@ export function RuleEditor({ accountId, rule, onClose }: { accountId: string; ru
             ))}
             {options.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Image and Video send the file itself in the chat. Instagram can&apos;t send PDFs, so for a brochure or a hosted 3D walkthrough use Link: the person gets an Open button.
+                Image and Video send the file itself in the chat. Instagram can&apos;t send PDFs, so for a brochure or a hosted 3D walkthrough use Link: the person gets an Open button. If you also fill in the link below, it is added to the DM text (tappable) and the options stay as buttons under it.
               </p>
             )}
           </div>
-          <div className={cn("grid grid-cols-2 gap-3", options.length > 0 && "hidden")}>
+          <div className="grid grid-cols-2 gap-3">
             <Field label="Link button title (optional, max 20)">
               <Input value={buttonTitle} onChange={(e) => setButtonTitle(e.target.value)} placeholder="Open guide" maxLength={20} />
             </Field>

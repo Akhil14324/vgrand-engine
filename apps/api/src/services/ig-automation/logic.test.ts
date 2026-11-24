@@ -177,6 +177,21 @@ describe("tap-to-select options", () => {
     expect(buttons[2].title).toBe("3D walkthrough");
   });
 
+  it("puts the guide link in the text and keeps all 3 option buttons", () => {
+    const msg = buildDmMessage({ text: "What would you like to see?", ruleId: "r1", options, buttonTitle: "Guide", buttonUrl: "https://x.test/guide" }) as any;
+    expect(msg.attachment.payload.template_type).toBe("button");
+    expect(msg.attachment.payload.text).toContain("Guide: https://x.test/guide");
+    expect(msg.attachment.payload.text).toContain("What would you like to see?");
+    expect(msg.attachment.payload.buttons).toHaveLength(3);
+    expect(msg.attachment.payload.buttons.every((b: any) => b.type === "postback")).toBe(true);
+  });
+
+  it("checks that the text plus the link fit with options", () => {
+    const base = { trigger: "dm", matchMode: "any", keywords: [], mediaScope: "all", mediaIds: [], publicReplies: [], dmButtonTitle: "Guide", dmButtonUrl: "https://x.test/g", dmOptions: options };
+    expect(ruleProblems({ ...base, dmText: "Pick one" })).toEqual([]);
+    expect(ruleProblems({ ...base, dmText: "x".repeat(640) }).join()).toContain("640");
+  });
+
   it("parses the payload back and rejects anything else", () => {
     expect(parseOptionPayload("opt:r1:a1")).toEqual({ ruleId: "r1", optionId: "a1" });
     expect(parseOptionPayload("hello")).toBeNull();
