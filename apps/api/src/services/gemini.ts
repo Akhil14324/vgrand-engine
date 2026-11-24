@@ -12,6 +12,8 @@ const UPLOAD_BASE = "https://generativelanguage.googleapis.com/upload/v1beta";
 const REQUEST_TIMEOUT_MS = 180_000;
 const FILE_READY_MAX_MS = 3 * 60_000;
 const FILE_POLL_MS = 3_000;
+/** Waits before retrying a busy (503) or rate-limited (429) answer. */
+const BUSY_RETRY_DELAYS_MS = [4_000, 10_000, 20_000];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class GeminiError extends Error {}
@@ -62,9 +64,19 @@ export async function geminiJson(opts: {
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  let res = await send(opts.thinking === "low");
+  let thinking = opts.thinking === "low";
+  let res = await send(thinking);
   // A model that doesn't know the thinking setting answers 400: run the same request without it.
-  if (res.status === 400 && opts.thinking === "low") res = await send(false);
+  if (res.status === 400 && thinking) {
+    thinking = false;
+    res = await send(false);
+  }
+  // "High demand" (503) and rate limits (429) are temporary on Google's side: wait and try again.
+  for (const waitMs of BUSY_RETRY_DELAYS_MS) {
+    if (res.status !== 503 && res.status !== 429) break;
+    await sleep(waitMs);
+    res = await send(thinking);
+  }
   if (!res.ok) throw new GeminiError(`Gemini request failed: ${await readError(res)}`);
   const json = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
