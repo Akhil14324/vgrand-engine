@@ -41,7 +41,18 @@ import {
 } from "./guava-content-logic.js";
 
 /** Watching several videos takes a while; after this a run is treated as lost. */
-const STALE_AFTER_MS = 20 * 60 * 1000;
+const STALE_AFTER_MS = 30 * 60 * 1000;
+/** Watching one video (download, upload, Gemini processing, notes) gets this long, then the cover image is used instead. */
+const VIDEO_BUDGET_MS = 150_000;
+
+/** Rejects if `work` takes longer than `ms`; the work itself keeps running and cleans up after itself. */
+function withBudget<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} took longer than ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
 const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 90_000;
@@ -49,7 +60,7 @@ const DOWNLOAD_TIMEOUT_MS = 90_000;
 const COVER_TIMEOUT_MS = 12_000;
 /** One sorting call for ~30 posts should take seconds: give up on a stuck one early. */
 const SPLIT_TIMEOUT_MS = 60_000;
-const REELS_IN_PARALLEL = 2;
+const REELS_IN_PARALLEL = 3;
 
 /* --------------------------------- prompts -------------------------------- */
 
@@ -283,14 +294,18 @@ async function analyseMedia(handle: string, m: IgMedia): Promise<{ notes: GuavaR
   const run = async (parts: GeminiPart[]) => guavaReelNotesSchema.parse(await geminiJson({ system, parts, temperature: 0.2, thinking: "low" }));
 
   if (isReel(m) && m.mediaUrl) {
+    const mediaUrl = m.mediaUrl;
     try {
-      const { bytes, mimeType } = await download(m.mediaUrl, MAX_VIDEO_BYTES);
-      const file = await uploadGeminiFile(bytes, mimeType.startsWith("video/") ? mimeType : "video/mp4", `ig-${m.id}`);
-      try {
-        return { notes: await run([{ fileData: { mimeType: file.mimeType, fileUri: file.uri } }, captionPart(handle, m)]), from: "video" };
-      } finally {
-        void deleteGeminiFile(file.name);
-      }
+      const watchVideo = async () => {
+        const { bytes, mimeType } = await download(mediaUrl, MAX_VIDEO_BYTES);
+        const file = await uploadGeminiFile(bytes, mimeType.startsWith("video/") ? mimeType : "video/mp4", `ig-${m.id}`);
+        try {
+          return { notes: await run([{ fileData: { mimeType: file.mimeType, fileUri: file.uri } }, captionPart(handle, m)]), from: "video" as const };
+        } finally {
+          void deleteGeminiFile(file.name);
+        }
+      };
+      return await withBudget(watchVideo(), VIDEO_BUDGET_MS, "Watching the video");
     } catch (err) {
       console.warn("[guava-content] video analysis fell back", m.id, err instanceof Error ? err.message : err);
     }
