@@ -174,6 +174,10 @@ const SPLIT_SYSTEM = `You sort Instagram posts by business. One Instagram accoun
 
 Return ONE JSON object: { "posts": [ { "mediaId": "", "brand": "", "category": "", "reason": "" } ] } with one entry per post.`;
 
+/** Cover images are only used to tell brands apart: small ones are enough, and many large ones make the request slow. */
+const COVER_MAX_BYTES = 600 * 1024;
+const COVER_TOTAL_MAX_BYTES = 8 * 1024 * 1024;
+
 /** One Gemini call that tags every recent post with one of the user's brands and a category. */
 async function splitByBrand(
   posts: IgMedia[],
@@ -183,7 +187,7 @@ async function splitByBrand(
     const url = isReel(m) ? m.thumbnailUrl : (m.mediaUrl ?? m.thumbnailUrl);
     if (!url) return null;
     try {
-      const { bytes, mimeType } = await download(url, 1.5 * 1024 * 1024);
+      const { bytes, mimeType } = await download(url, COVER_MAX_BYTES);
       return { mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg", data: Buffer.from(bytes).toString("base64") };
     } catch {
       return null;
@@ -194,10 +198,14 @@ async function splitByBrand(
       text: `# Businesses\n${brands.map((b) => `- ${b.name}: ${clip(b.summary.replace(/\s+/g, " "), 400) || "(no details)"}`).join("\n")}\n\n# Posts`,
     },
   ];
+  let coverBytes = 0;
   posts.forEach((m, i) => {
     parts.push({ text: `\n## Post ${m.id} (${isReel(m) ? "reel" : m.mediaType.toLowerCase()})\nCaption: ${clip(m.caption, 400) || "(none)"}` });
     const c = covers[i];
-    if (c) parts.push({ inlineData: { mimeType: c.mimeType, data: c.data } });
+    if (c && coverBytes + c.data.length <= COVER_TOTAL_MAX_BYTES) {
+      coverBytes += c.data.length;
+      parts.push({ inlineData: { mimeType: c.mimeType, data: c.data } });
+    }
   });
 
   const tags = new Map<string, { brand: string; category: string; reason: string }>();
@@ -206,7 +214,7 @@ async function splitByBrand(
   // Try with cover images first; if Gemini rejects that (size, quota, bad image), retry on captions only.
   for (const attempt of [parts, textOnly]) {
     try {
-      const res = guavaSplitResponseSchema.parse(await geminiJson({ system: SPLIT_SYSTEM, parts: attempt, temperature: 0 }));
+      const res = guavaSplitResponseSchema.parse(await geminiJson({ system: SPLIT_SYSTEM, parts: attempt, temperature: 0, thinking: "low" }));
       for (const p of res.posts) tags.set(p.mediaId, p);
       if (tags.size) break;
       lastError = "Gemini returned no posts";
@@ -268,7 +276,7 @@ const captionPart = (handle: string, m: IgMedia): GeminiPart => ({
 /** Watch the video if possible, else look at the cover image, else read the caption. */
 async function analyseMedia(handle: string, m: IgMedia): Promise<{ notes: GuavaReelNotes; from: GuavaReelSource }> {
   const system = REEL_SYSTEM.replace("{handle}", handle);
-  const run = async (parts: GeminiPart[]) => guavaReelNotesSchema.parse(await geminiJson({ system, parts, temperature: 0.2 }));
+  const run = async (parts: GeminiPart[]) => guavaReelNotesSchema.parse(await geminiJson({ system, parts, temperature: 0.2, thinking: "low" }));
 
   if (isReel(m) && m.mediaUrl) {
     try {

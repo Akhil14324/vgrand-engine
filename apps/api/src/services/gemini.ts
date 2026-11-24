@@ -9,7 +9,7 @@ import { env } from "../env.js";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 const UPLOAD_BASE = "https://generativelanguage.googleapis.com/upload/v1beta";
-const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 const FILE_READY_MAX_MS = 3 * 60_000;
 const FILE_POLL_MS = 3_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -43,18 +43,28 @@ export async function geminiJson(opts: {
   parts: GeminiPart[];
   model?: string;
   temperature?: number;
+  /** "low" asks the model to think briefly: classification and note-taking don't need long reasoning, which is what makes calls slow. */
+  thinking?: "low";
 }): Promise<Record<string, unknown>> {
   const model = opts.model ?? env.GEMINI_MODEL;
-  const res = await fetch(`${BASE}/models/${encodeURIComponent(model)}:generateContent`, {
-    method: "POST",
-    headers: { "x-goog-api-key": key(), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: opts.system }] },
-      contents: [{ role: "user", parts: opts.parts }],
-      generationConfig: { responseMimeType: "application/json", temperature: opts.temperature ?? 0.4 },
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  const send = (withThinking: boolean) =>
+    fetch(`${BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST",
+      headers: { "x-goog-api-key": key(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: opts.system }] },
+        contents: [{ role: "user", parts: opts.parts }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: opts.temperature ?? 0.4,
+          ...(withThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+        },
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  let res = await send(opts.thinking === "low");
+  // A model that doesn't know the thinking setting answers 400: run the same request without it.
+  if (res.status === 400 && opts.thinking === "low") res = await send(false);
   if (!res.ok) throw new GeminiError(`Gemini request failed: ${await readError(res)}`);
   const json = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
