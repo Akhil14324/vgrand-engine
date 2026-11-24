@@ -29,6 +29,7 @@ import {
   IG_MEDIA_FIELDS,
   IG_PROFILE_FIELDS,
   clip,
+  cleanForJson,
   competitorErrorReason,
   computePerformance,
   engagementAverages,
@@ -329,7 +330,7 @@ async function analyseMedia(handle: string, m: IgMedia): Promise<{ notes: GuavaR
 
 /* --------------------------------- helpers -------------------------------- */
 
-const json = (v: unknown) => v as Prisma.InputJsonValue;
+const json = (v: unknown) => cleanForJson(v) as Prisma.InputJsonValue;
 
 function readReport(row: Pick<GuavaContentAudit, "report">): GuavaContentReport | null {
   if (!row.report) return null;
@@ -664,7 +665,7 @@ async function runContentAudit(id: string) {
               ? err.message
               : err instanceof GeminiError || (err instanceof Error && err.name === "TimeoutError")
                 ? `Brand Strategist couldn't finish the review (${clip(err instanceof Error ? err.message : "", 160)}). Please try again.`
-                : `Brand Strategist couldn't finish the Instagram review${err instanceof Error ? ` (${err.name})` : ""}. Check the Instagram connection and try again.`,
+                : `Brand Strategist couldn't finish the Instagram review${err instanceof Error ? ` (${err.name}${err instanceof Error && err.name === "PrismaClientKnownRequestError" ? ` ${String((err as { code?: unknown }).code)}` : ""})` : ""}. Check the Instagram connection and try again.`,
         },
       })
       .catch(() => {});
