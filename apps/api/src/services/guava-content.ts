@@ -41,11 +41,26 @@ import {
 } from "./guava-content-logic.js";
 
 /** Watching several videos takes a while; after this a run is treated as lost. */
-const STALE_AFTER_MS = 20 * 60 * 1000;
+const STALE_AFTER_MS = 30 * 60 * 1000;
+/** Watching one video (download, upload, Gemini processing, notes) gets this long, then the cover image is used instead. */
+const VIDEO_BUDGET_MS = 150_000;
+
+/** Rejects if `work` takes longer than `ms`; the work itself keeps running and cleans up after itself. */
+function withBudget<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} took longer than ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
 const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 90_000;
-const REELS_IN_PARALLEL = 2;
+/** Cover images for sorting are small; a slow one is skipped instead of holding the whole review up. */
+const COVER_TIMEOUT_MS = 12_000;
+/** One sorting call for ~30 posts should take seconds: give up on a stuck one early. */
+const SPLIT_TIMEOUT_MS = 60_000;
+const REELS_IN_PARALLEL = 3;
 
 /* --------------------------------- prompts -------------------------------- */
 
@@ -187,7 +202,7 @@ async function splitByBrand(
     const url = isReel(m) ? m.thumbnailUrl : (m.mediaUrl ?? m.thumbnailUrl);
     if (!url) return null;
     try {
-      const { bytes, mimeType } = await download(url, COVER_MAX_BYTES);
+      const { bytes, mimeType } = await download(url, COVER_MAX_BYTES, COVER_TIMEOUT_MS);
       return { mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg", data: Buffer.from(bytes).toString("base64") };
     } catch {
       return null;
@@ -214,7 +229,7 @@ async function splitByBrand(
   // Try with cover images first; if Gemini rejects that (size, quota, bad image), retry on captions only.
   for (const attempt of [parts, textOnly]) {
     try {
-      const res = guavaSplitResponseSchema.parse(await geminiJson({ system: SPLIT_SYSTEM, parts: attempt, temperature: 0, thinking: "low" }));
+      const res = guavaSplitResponseSchema.parse(await geminiJson({ system: SPLIT_SYSTEM, parts: attempt, temperature: 0, thinking: "low", timeoutMs: SPLIT_TIMEOUT_MS }));
       for (const p of res.posts) tags.set(p.mediaId, p);
       if (tags.size) break;
       lastError = "Gemini returned no posts";
@@ -259,8 +274,8 @@ async function fetchCompetitor(token: string, igUserId: string, handle: string) 
 
 /* ------------------------------ watching reels ----------------------------- */
 
-async function download(url: string, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+async function download(url: string, maxBytes: number, timeoutMs = DOWNLOAD_TIMEOUT_MS): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (declared > maxBytes) throw new Error("file too large");
@@ -279,14 +294,18 @@ async function analyseMedia(handle: string, m: IgMedia): Promise<{ notes: GuavaR
   const run = async (parts: GeminiPart[]) => guavaReelNotesSchema.parse(await geminiJson({ system, parts, temperature: 0.2, thinking: "low" }));
 
   if (isReel(m) && m.mediaUrl) {
+    const mediaUrl = m.mediaUrl;
     try {
-      const { bytes, mimeType } = await download(m.mediaUrl, MAX_VIDEO_BYTES);
-      const file = await uploadGeminiFile(bytes, mimeType.startsWith("video/") ? mimeType : "video/mp4", `ig-${m.id}`);
-      try {
-        return { notes: await run([{ fileData: { mimeType: file.mimeType, fileUri: file.uri } }, captionPart(handle, m)]), from: "video" };
-      } finally {
-        void deleteGeminiFile(file.name);
-      }
+      const watchVideo = async () => {
+        const { bytes, mimeType } = await download(mediaUrl, MAX_VIDEO_BYTES);
+        const file = await uploadGeminiFile(bytes, mimeType.startsWith("video/") ? mimeType : "video/mp4", `ig-${m.id}`);
+        try {
+          return { notes: await run([{ fileData: { mimeType: file.mimeType, fileUri: file.uri } }, captionPart(handle, m)]), from: "video" as const };
+        } finally {
+          void deleteGeminiFile(file.name);
+        }
+      };
+      return await withBudget(watchVideo(), VIDEO_BUDGET_MS, "Watching the video");
     } catch (err) {
       console.warn("[guava-content] video analysis fell back", m.id, err instanceof Error ? err.message : err);
     }
@@ -506,13 +525,20 @@ async function runContentAudit(id: string) {
       orderBy: { createdAt: "asc" },
     });
     let split: GuavaSplitPost[] = [];
+    let splitNote = "";
     let pool = own.recent;
     if (siblings.length > 1) {
       await setProgress(`Sorting @${own.info.handle}'s posts by brand`);
-      split = await splitByBrand(own.recent, siblings);
+      try {
+        split = await splitByBrand(own.recent, siblings);
+      } catch (err) {
+        // Sorting is a refinement: if Gemini can't do it right now, review the latest posts anyway and say so.
+        console.warn("[guava-content] brand split skipped", id, err instanceof Error ? err.message : err);
+        splitNote = "The posts could NOT be sorted by brand this time, so these are the account's latest posts. The account may post for several businesses: judge only what fits this brand and say plainly if a post is about another business.";
+      }
       const mine = new Set(split.filter((p) => p.brandId === brand.id).map((p) => p.mediaId));
-      pool = own.recent.filter((m) => mine.has(m.id));
-      if (!pool.length) {
+      if (split.length) pool = own.recent.filter((m) => mine.has(m.id));
+      if (split.length && !pool.length) {
         const counts = new Map<string, number>();
         for (const p of split) if (p.brandName) counts.set(p.brandName, (counts.get(p.brandName) ?? 0) + 1);
         const found = [...counts].map(([n, c]) => `${n} (${c})`).join(", ");
@@ -585,6 +611,7 @@ async function runContentAudit(id: string) {
         isOwn && split.length
           ? `This account posts for several businesses; these posts were picked as being about ${brand.name}.`
           : "",
+        isOwn && splitNote ? splitNote : "",
         info.biography ? `Bio: ${clip(info.biography, 300)}` : "",
         ...posts.map(
           (r) =>

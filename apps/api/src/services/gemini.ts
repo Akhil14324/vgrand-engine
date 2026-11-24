@@ -49,6 +49,8 @@ export async function geminiJson(opts: {
   thinking?: "low" | "medium";
   /** Upper bound for the answer (thinking included). Long answers like the full review need a high value, or they are cut off mid-JSON. */
   maxOutputTokens?: number;
+  /** Per-request timeout; defaults to 180s. Short jobs (sorting posts) use less so a stuck call fails fast. */
+  timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
   // A cut-off or malformed answer is retried once: it is usually a one-off.
   try {
@@ -69,6 +71,7 @@ async function geminiJsonOnce(opts: {
   temperature?: number;
   thinking?: "low" | "medium";
   maxOutputTokens?: number;
+  timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
   const model = opts.model ?? env.GEMINI_MODEL;
   const send = (withThinking: boolean) =>
@@ -85,7 +88,7 @@ async function geminiJsonOnce(opts: {
           ...(withThinking ? { thinkingConfig: { thinkingLevel: opts.thinking } } : {}),
         },
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
   let thinking: "low" | "medium" | null = opts.thinking ?? null;
   let res = await send(thinking !== null);
