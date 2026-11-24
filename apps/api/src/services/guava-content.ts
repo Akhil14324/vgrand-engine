@@ -607,9 +607,9 @@ async function runContentAudit(id: string) {
       .join("\n");
 
     await setProgress("Writing the review");
-    const raw = await geminiJson({ system: REPORT_SYSTEM, parts: [{ text: user }], thinking: "medium" });
+    const raw = await geminiJson({ system: REPORT_SYSTEM, parts: [{ text: user }], thinking: "medium", maxOutputTokens: 32_768 });
     const report = guavaContentReportSchema.parse(raw);
-    if (!report.summary && !report.improvements.length) throw new Error("no usable review in response");
+    if (!report.summary && !report.improvements.length) throw new UserFacingError("Gemini's review came back empty. Please try again.");
 
     await prisma.guavaContentAudit.update({
       where: { id },
@@ -637,7 +637,7 @@ async function runContentAudit(id: string) {
               ? err.message
               : err instanceof GeminiError || (err instanceof Error && err.name === "TimeoutError")
                 ? `Brand Strategist couldn't finish the review (${clip(err instanceof Error ? err.message : "", 160)}). Please try again.`
-                : "Brand Strategist couldn't finish the Instagram review. Check the Instagram connection and try again.",
+                : `Brand Strategist couldn't finish the Instagram review${err instanceof Error ? ` (${err.name})` : ""}. Check the Instagram connection and try again.`,
         },
       })
       .catch(() => {});
