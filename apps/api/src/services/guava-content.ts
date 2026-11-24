@@ -201,12 +201,22 @@ async function splitByBrand(
   });
 
   const tags = new Map<string, { brand: string; category: string; reason: string }>();
-  try {
-    const res = guavaSplitResponseSchema.parse(await geminiJson({ system: SPLIT_SYSTEM, parts, temperature: 0 }));
-    for (const p of res.posts) tags.set(p.mediaId, p);
-  } catch (err) {
-    console.warn("[guava-content] brand split failed", err instanceof Error ? err.message : err);
-    throw new UserFacingError("Couldn't sort this account's posts by brand. Please try again.");
+  const textOnly = parts.filter((p) => !("inlineData" in p));
+  let lastError = "";
+  // Try with cover images first; if Gemini rejects that (size, quota, bad image), retry on captions only.
+  for (const attempt of [parts, textOnly]) {
+    try {
+      const res = guavaSplitResponseSchema.parse(await geminiJson({ system: SPLIT_SYSTEM, parts: attempt, temperature: 0 }));
+      for (const p of res.posts) tags.set(p.mediaId, p);
+      if (tags.size) break;
+      lastError = "Gemini returned no posts";
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      console.warn("[guava-content] brand split failed", lastError);
+    }
+  }
+  if (!tags.size) {
+    throw new UserFacingError(`Couldn't sort this account's posts by brand (${clip(lastError, 160)}). Please try again.`);
   }
 
   return posts.map((m) => {
@@ -396,7 +406,7 @@ export async function getInstagramSetup(
   return {
     workspaceId,
     accountId: account ? row!.accountId : null,
-    accountHandle: account?.handle ?? null,
+    accountHandle: account?.handle?.replace(/^@/, "") ?? null,
     competitors: row?.competitors ?? [],
     canEdit,
     updatedAt: row?.updatedAt.toISOString() ?? null,
