@@ -165,6 +165,16 @@ export const guavaContentReportSchema = z.object({
   performance: z
     .object({ summary: text, whatWorks: text, whatDoesNot: text })
     .catch({ summary: "", whatWorks: "", whatDoesNot: "" }),
+  /** Why each reel did well, average or poorly (the tier itself is computed, see GuavaReelRank). */
+  reelComparison: z
+    .object({
+      summary: text,
+      reels: items(z.object({ mediaId: text, why: text, wentWrong: textList, doNext: text })),
+      winningPatterns: textList,
+      losingPatterns: textList,
+      nextStrategy: items(z.object({ title: text, what: text, why: text })),
+    })
+    .catch({ summary: "", reels: [], winningPatterns: [], losingPatterns: [], nextStrategy: [] }),
   reachTips: items(z.object({ tip: text, why: text })),
   improvements: items(
     z.object({
@@ -216,6 +226,19 @@ export const guavaSplitResponseSchema = z.object({
   posts: items(z.object({ mediaId: text, brand: text, category: text, reason: text })),
 });
 
+export const GUAVA_REEL_TIERS = ["strong", "average", "weak"] as const;
+export type GuavaReelTier = (typeof GUAVA_REEL_TIERS)[number];
+
+/** One own reel ranked against the account's average (likes + comments). Computed, never by the model. */
+export interface GuavaReelRank {
+  mediaId: string;
+  rank: number;
+  tier: GuavaReelTier;
+  score: number;
+  /** % above (+) or below (-) the average score of the reviewed posts; null when the average is 0. */
+  vsAvgPct: number | null;
+}
+
 /** Computed from Instagram's own numbers, never by the model. */
 export interface GuavaPerformance {
   followers: number | null;
@@ -256,6 +279,8 @@ export interface GuavaContentAuditDto extends GuavaContentAuditSummaryDto {
   /** Every recent post on the account and which brand it belongs to (empty when the user has one brand). */
   split: GuavaSplitPost[];
   performance: GuavaPerformance | null;
+  /** Own reels from best to worst with their tier. */
+  reelRanking: GuavaReelRank[];
   /** Competitors that could not be read (private, personal account, not found). */
   skippedCompetitors: { handle: string; reason: string }[];
 }

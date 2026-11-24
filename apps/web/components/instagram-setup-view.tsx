@@ -94,7 +94,7 @@ function SetupForm() {
             <option value="">Not set</option>
             {igAccounts.map((a) => (
               <option key={a.id} value={a.id}>
-                @{a.handle ?? a.displayName ?? "instagram"}
+                @{(a.handle ?? a.displayName ?? "instagram").replace(/^@/, "")}
                 {a.status !== "active" ? " (reconnect needed)" : ""}
               </option>
             ))}
@@ -106,7 +106,7 @@ function SetupForm() {
           <Button size="sm" variant={igAccounts.length ? "outline" : "default"} disabled={connect.isPending || !canEdit} onClick={onConnect}>
             <Plus className="h-4 w-4" /> {igAccounts.length ? "Connect a different account" : "Connect Instagram"}
           </Button>
-          {setup.data?.accountHandle && <Badge variant="secondary">Saved: @{setup.data.accountHandle}</Badge>}
+          {setup.data?.accountHandle && <Badge variant="secondary">Saved: @{setup.data.accountHandle.replace(/^@/, "")}</Badge>}
         </div>
       </div>
 
