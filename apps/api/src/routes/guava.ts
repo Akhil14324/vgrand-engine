@@ -108,9 +108,9 @@ export async function guavaRoutes(app: FastifyInstance) {
 
   // Instagram Insights (views, reach, watch time) for the account saved on the Instagram page.
   app.get("/guava/instagram-insights", async (req) => {
-    const q = parseBody(z.object({ workspaceId: z.string().uuid().optional(), refresh: z.coerce.boolean().optional() }), req.query);
+    const q = parseBody(z.object({ workspaceId: z.string().uuid().optional(), accountId: z.string().uuid().optional(), refresh: z.coerce.boolean().optional() }), req.query);
     if (q.workspaceId) await findWorkspaceForUser(req.userId, q.workspaceId);
-    return getInstagramInsights(req.userId, q.workspaceId ?? null, { refresh: q.refresh });
+    return getInstagramInsights(req.userId, q.workspaceId ?? null, { refresh: q.refresh, accountId: q.accountId ?? null });
   });
 
   // AI "next strategy" for one brand, from those insights.
@@ -120,7 +120,8 @@ export async function guavaRoutes(app: FastifyInstance) {
     async (req) => {
       const { brandId } = parseBody(brandParams, req.params);
       const brand = await findManageableBrand(req.userId, brandId);
-      return generateInstagramStrategy(brand, req.userId, brand.workspaceId);
+      const body = parseBody(z.object({ accountId: z.string().uuid().nullable().optional() }), req.body ?? {});
+      return generateInstagramStrategy(brand, req.userId, brand.workspaceId, body.accountId ?? null);
     },
   );
 

@@ -7,10 +7,11 @@ import type { IgDemographicRow, IgInsightsDto, IgInsightsReel, IgStrategyDto } f
 import { RequireAuth } from "@/components/require-auth";
 import { fmtDate } from "@/components/guava-report";
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
-import { useBrands } from "@/lib/hooks";
-import { useInstagramInsights, useInstagramStrategy, useRefreshInstagramInsights } from "@/lib/guava-hooks";
+import { useBrands, useSocialAccounts } from "@/lib/hooks";
+import { useInstagramInsights, useInstagramSetup, useInstagramStrategy, useRefreshInstagramInsights } from "@/lib/guava-hooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toaster";
 
@@ -51,37 +52,66 @@ function Insights() {
   const chosen = useBrandMode((s) => s.brandId);
   const brand = resolveActiveBrand(brands, chosen) ?? brands?.[0] ?? null;
   const workspaceId = brand?.workspaceId ?? null;
-  const insights = useInstagramInsights(workspaceId, !brandsLoading);
+  const accounts = useSocialAccounts(workspaceId, !brandsLoading);
+  const setup = useInstagramSetup(brandsLoading ? null : workspaceId);
+  const igAccounts = (accounts.data ?? []).filter((a) => a.platform === "instagram");
+  // Any connected account can be viewed; the one saved on the Instagram page is the default.
+  const [picked, setPicked] = useState("");
+  const accountId = picked || setup.data?.accountId || igAccounts[0]?.id || null;
+  const ready = !brandsLoading && !accounts.isLoading && !setup.isLoading;
+  const insights = useInstagramInsights(workspaceId, accountId, ready);
 
-  if (brandsLoading || insights.isLoading) return <Skeleton className="h-72 w-full" />;
+  if (!ready || insights.isLoading) return <Skeleton className="h-72 w-full" />;
+  const picker =
+    igAccounts.length > 1 ? (
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Account</span>
+        <Select className="w-auto min-w-[220px]" value={accountId ?? ""} onChange={(e) => setPicked(e.target.value)}>
+          {igAccounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              @{(a.handle ?? a.displayName ?? "instagram").replace(/^@/, "")}
+              {a.status !== "active" ? " (reconnect needed)" : ""}
+            </option>
+          ))}
+        </Select>
+      </div>
+    ) : null;
+  const wrap = (node: ReactNode) => (
+    <>
+      {picker}
+      {node}
+    </>
+  );
   if (insights.error || !insights.data) {
-    return <Notice tone="error">Couldn&apos;t load Instagram insights. Please try again.</Notice>;
+    return wrap(<Notice tone="error">Couldn&apos;t load Instagram insights. Please try again.</Notice>);
   }
   const d = insights.data;
   if (d.status === "no_account") {
-    return (
+    return wrap(
       <Notice>
         Add your Instagram account first.{" "}
         <Link href="/instagram" className="underline">
           Open Instagram setup
         </Link>
-      </Notice>
+      </Notice>,
     );
   }
   if (d.status === "needs_permission") {
-    return (
+    return wrap(
       <Notice tone="warn">
         {d.message}{" "}
         <Link href="/instagram" className="underline">
           Open Instagram setup
         </Link>
-      </Notice>
+      </Notice>,
     );
   }
   if (d.status === "error" || !d.account) {
-    return <Notice tone="error">{d.message ?? "Couldn't read Instagram insights."}</Notice>;
+    return wrap(<Notice tone="error">{d.message ?? "Couldn't read Instagram insights."}</Notice>);
   }
-  return <InsightsBody dto={d} workspaceId={workspaceId} brand={brand ? { id: brand.id, name: brand.name } : null} />;
+  return wrap(
+    <InsightsBody dto={d} workspaceId={workspaceId} accountId={accountId} brand={brand ? { id: brand.id, name: brand.name } : null} />,
+  );
 }
 
 function Notice({ children, tone }: { children: ReactNode; tone?: "warn" | "error" }) {
@@ -101,9 +131,19 @@ function Notice({ children, tone }: { children: ReactNode; tone?: "warn" | "erro
   );
 }
 
-function InsightsBody({ dto, workspaceId, brand }: { dto: IgInsightsDto; workspaceId: string | null; brand: { id: string; name: string } | null }) {
+function InsightsBody({
+  dto,
+  workspaceId,
+  accountId,
+  brand,
+}: {
+  dto: IgInsightsDto;
+  workspaceId: string | null;
+  accountId: string | null;
+  brand: { id: string; name: string } | null;
+}) {
   const a = dto.account!;
-  const refresh = useRefreshInstagramInsights(workspaceId);
+  const refresh = useRefreshInstagramInsights(workspaceId, accountId);
   const reachTotal = (a.reachFollowers ?? 0) + (a.reachNonFollowers ?? 0);
   const followerPct = reachTotal > 0 ? Math.round(((a.reachFollowers ?? 0) / reachTotal) * 100) : null;
   return (
@@ -157,7 +197,7 @@ function InsightsBody({ dto, workspaceId, brand }: { dto: IgInsightsDto; workspa
         </div>
       )}
 
-      <Strategy brand={brand} />
+      <Strategy brand={brand} accountId={accountId} />
     </>
   );
 }
@@ -229,7 +269,10 @@ function ReelsTable({ reels }: { reels: IgInsightsReel[] }) {
             ))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-muted-foreground">Numbers come from Instagram and can lag by up to 48 hours. A dash means Instagram didn&apos;t return it.</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Reel numbers are for each reel&apos;s whole life, while the tiles above cover the last 30 days. Instagram can lag by up to 48 hours. A dash means Instagram
+          didn&apos;t return it.
+        </p>
       </CardContent>
     </Card>
   );
@@ -256,8 +299,8 @@ function Demo({ title, rows }: { title: string; rows: IgDemographicRow[] }) {
   );
 }
 
-function Strategy({ brand }: { brand: { id: string; name: string } | null }) {
-  const gen = useInstagramStrategy(brand?.id ?? null);
+function Strategy({ brand, accountId }: { brand: { id: string; name: string } | null; accountId: string | null }) {
+  const gen = useInstagramStrategy(brand?.id ?? null, accountId);
   const [result, setResult] = useState<IgStrategyDto | null>(null);
   if (!brand) return null;
   return (

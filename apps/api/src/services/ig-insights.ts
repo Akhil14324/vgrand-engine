@@ -159,13 +159,18 @@ async function reelInsights(token: string, igId: string): Promise<IgInsightsReel
 export async function getInstagramInsights(
   userId: string,
   workspaceId: string | null,
-  opts: { refresh?: boolean } = {},
+  opts: { refresh?: boolean; accountId?: string | null } = {},
 ): Promise<IgInsightsDto> {
-  const setup = await prisma.instagramSetup.findUnique({ where: { scopeKey: setupScopeKey(userId, workspaceId) } });
-  if (!setup?.accountId) {
+  // A chosen account wins; otherwise the one saved on the Instagram page.
+  let accountId = opts.accountId ?? null;
+  if (!accountId) {
+    const setup = await prisma.instagramSetup.findUnique({ where: { scopeKey: setupScopeKey(userId, workspaceId) } });
+    accountId = setup?.accountId ?? null;
+  }
+  if (!accountId) {
     return empty({ status: "no_account", message: "Add your Instagram account first: Brand Engine → Instagram." });
   }
-  const account = await findUsableAccount(userId, setup.accountId);
+  const account = await findUsableAccount(userId, accountId);
   if (account.platform !== "instagram" || account.status !== "active") {
     return empty({ status: "error", accountId: account.id, handle: account.handle, message: "This Instagram account needs to be reconnected first." });
   }
@@ -257,9 +262,10 @@ export async function generateInstagramStrategy(
   brand: { id: string; name: string; category: string | null; profile: unknown; summary: string },
   userId: string,
   workspaceId: string | null,
+  accountId: string | null = null,
 ): Promise<IgStrategyDto> {
   if (!geminiConfigured()) throw badRequest("Gemini isn't set up on this server yet.");
-  const insights = await getInstagramInsights(userId, workspaceId);
+  const insights = await getInstagramInsights(userId, workspaceId, { accountId });
   if (insights.status !== "ok" || !insights.account) throw badRequest(insights.message ?? "Instagram insights aren't available yet.");
   const { industry, values } = await loadEffectiveProfile(brand as Parameters<typeof loadEffectiveProfile>[0]);
   const profileText = renderProfileText(values, industry);
