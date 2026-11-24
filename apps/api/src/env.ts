@@ -120,6 +120,8 @@ const envSchema = z.object({
    * META_LOGIN_CONFIG_ID is not set). Turn on once Meta has approved them, or login fails.
    */
   META_AUTOMATION_SCOPES: bool,
+  /** Ask for instagram_manage_insights when connecting Instagram (needed for the Instagram Insights page). */
+  META_INSIGHTS_SCOPES: bool,
   X_CLIENT_ID: opt(z.string().min(1)),
   X_CLIENT_SECRET: opt(z.string().min(1)),
   GOOGLE_CLIENT_ID: opt(z.string().min(1)),
