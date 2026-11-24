@@ -6,6 +6,7 @@ import {
   engagementAverages,
   matchBrand,
   pickMedia,
+  rankReels,
   toIgMedia,
   type IgMedia,
 } from "./guava-content-logic.js";
@@ -131,5 +132,27 @@ describe("matchBrand", () => {
     expect(matchBrand("none", brands)).toBeNull();
     expect(matchBrand("Planet", brands)).toBeNull();
     expect(matchBrand("", brands)).toBeNull();
+  });
+});
+
+describe("rankReels", () => {
+  it("labels one strong, one average and one weak reel against the account average", () => {
+    const r = rankReels([
+      { mediaId: "a", likes: 200, comments: 20 },
+      { mediaId: "b", likes: 100, comments: 10 },
+      { mediaId: "c", likes: 20, comments: 2 },
+    ]);
+    expect(r.map((x) => [x.mediaId, x.tier, x.rank])).toEqual([
+      ["a", "strong", 1],
+      ["b", "average", 2],
+      ["c", "weak", 3],
+    ]);
+    expect(r[0]!.vsAvgPct).toBeGreaterThan(20);
+    expect(r[2]!.vsAvgPct).toBeLessThan(-20);
+  });
+  it("calls everything average when reels perform alike, or when there is only one", () => {
+    expect(rankReels([{ mediaId: "a", likes: 100, comments: 0 }, { mediaId: "b", likes: 105, comments: 0 }]).map((x) => x.tier)).toEqual(["average", "average"]);
+    expect(rankReels([{ mediaId: "a", likes: 5, comments: 1 }])[0]!.tier).toBe("average");
+    expect(rankReels([{ mediaId: "a", likes: null, comments: null }])).toEqual([]);
   });
 });

@@ -10,6 +10,8 @@ import {
   type GuavaContentAuditSummaryDto,
   type GuavaContentReport,
   type GuavaPerformance,
+  type GuavaReelRank,
+  type GuavaReelTier,
   type GuavaSplitPost,
   type GuavaReelInsight,
 } from "@catgpt/types";
@@ -40,6 +42,12 @@ const PRIORITY_CLASS = {
   medium: "bg-primary/15 text-primary",
   low: "bg-muted text-muted-foreground",
 } as const;
+const TIER_LABEL: Record<GuavaReelTier, string> = { strong: "Did well", average: "Average", weak: "Did poorly" };
+const TIER_CLASS: Record<GuavaReelTier, string> = {
+  strong: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  average: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  weak: "bg-destructive/15 text-destructive",
+};
 const SOURCE_LABEL = { video: "Watched video", thumbnail: "Cover image only", caption: "Caption only" } as const;
 
 function FitPill({ fit, className }: { fit: GuavaBrandFit; className?: string }) {
@@ -77,7 +85,7 @@ export function GuavaInstagram({ brand, canEdit }: { brand: BrandDto; canEdit: b
           <div className="min-w-0 flex-1 text-sm">
             {s?.accountHandle ? (
               <>
-                <div className="font-semibold">Reviewing {brand.name} from @{s.accountHandle}</div>
+                <div className="font-semibold">Reviewing {brand.name} from @{s.accountHandle.replace(/^@/, "")}</div>
                 <div className="text-muted-foreground">
                   {s.competitors.length ? `Rivals: ${s.competitors.map((h) => `@${h}`).join(", ")}` : "No rival accounts added"}
                   {" · "}
@@ -183,6 +191,7 @@ function AuditReport({ audit }: { audit: GuavaContentAuditDto }) {
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList className="flex-wrap">
           <TabsTrigger value="performance">Performance</TabsTrigger>
+          {audit.reelRanking.length > 0 && <TabsTrigger value="compare">Compare reels</TabsTrigger>}
           <TabsTrigger value="fit">Brand fit</TabsTrigger>
           <TabsTrigger value="improve">Improve ({r.improvements.length})</TabsTrigger>
           <TabsTrigger value="competitors">Competitors ({r.competitors.length})</TabsTrigger>
@@ -192,6 +201,12 @@ function AuditReport({ audit }: { audit: GuavaContentAuditDto }) {
         <TabsContent value="performance" className="space-y-4">
           <PerformancePanel audit={audit} perf={audit.performance} />
         </TabsContent>
+
+        {audit.reelRanking.length > 0 && (
+          <TabsContent value="compare" className="space-y-4">
+            <ReelComparisonPanel audit={audit} />
+          </TabsContent>
+        )}
 
         {audit.split.length > 0 && (
           <TabsContent value="split" className="space-y-4">
@@ -718,5 +733,117 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
     >
       {children}
     </button>
+  );
+}
+
+/** Own reels from best to worst, with why each did what it did and what to change. */
+function ReelComparisonPanel({ audit }: { audit: GuavaContentAuditDto }) {
+  const c = audit.report!.reelComparison;
+  const byId = new Map(audit.reels.filter((x) => x.isOwn).map((x) => [x.mediaId, x]));
+  const counts = audit.reelRanking.reduce<Record<GuavaReelTier, number>>((n, r) => ({ ...n, [r.tier]: n[r.tier] + 1 }), { strong: 0, average: 0, weak: 0 });
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3">
+        {(["strong", "average", "weak"] as const).map((t) => (
+          <div key={t} className={cn("rounded-lg p-3 text-center", TIER_CLASS[t])}>
+            <div className="text-2xl font-semibold">{counts[t]}</div>
+            <div className="text-xs">{TIER_LABEL[t]}</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Reels are ranked by likes + comments against this account&apos;s own average: 20% or more above = did well, 20% or more below = did poorly. Instagram doesn&apos;t
+        share views here, so this is engagement, not reach.
+      </p>
+      {c.summary && (
+        <Card className="p-4 text-sm">
+          <p>{c.summary}</p>
+        </Card>
+      )}
+      <div className="space-y-3">
+        {audit.reelRanking.map((rank) => {
+          const reel = byId.get(rank.mediaId);
+          if (!reel) return null;
+          const entry = c.reels.find((x) => x.mediaId === rank.mediaId);
+          return <ComparedReel key={rank.mediaId} reel={reel} rank={rank} entry={entry} />;
+        })}
+      </div>
+      {(c.winningPatterns.length > 0 || c.losingPatterns.length > 0) && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <BulletList title="What the better reels do" items={c.winningPatterns} />
+          <BulletList title="What the weaker reels have in common" items={c.losingPatterns} />
+        </div>
+      )}
+      {c.nextStrategy.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Strategy for the next reels</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ol className="list-decimal space-y-2 pl-5 text-sm">
+              {c.nextStrategy.map((x, i) => (
+                <li key={i}>
+                  <span className="font-medium">{x.title}</span>
+                  {x.what && <span>: {x.what}</span>}
+                  {x.why && <span className="text-muted-foreground"> · {x.why}</span>}
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      )}
+    </>
+  );
+}
+
+function ComparedReel({
+  reel,
+  rank,
+  entry,
+}: {
+  reel: GuavaReelInsight;
+  rank: GuavaReelRank;
+  entry?: { why: string; wentWrong: string[]; doNext: string };
+}) {
+  return (
+    <div className="flex gap-3 rounded-lg border p-3 text-sm">
+      <div className="w-24 shrink-0">
+        <ReelThumb reel={reel} />
+      </div>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", TIER_CLASS[rank.tier])}>
+            #{rank.rank} · {TIER_LABEL[rank.tier]}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {reel.likes ?? "?"} likes · {reel.comments ?? "?"} comments
+            {rank.vsAvgPct !== null ? ` · ${rank.vsAvgPct >= 0 ? "+" : ""}${rank.vsAvgPct}% vs average` : ""}
+          </span>
+          {reel.permalink && (
+            <a href={reel.permalink} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground" aria-label="Open on Instagram">
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">{reel.notes.summary}</p>
+        {entry?.why && (
+          <p>
+            <span className="font-medium">Why: </span>
+            {entry.why}
+          </p>
+        )}
+        {entry?.wentWrong.map((t, i) => (
+          <p key={i} className="text-xs text-destructive">
+            − {t}
+          </p>
+        ))}
+        {entry?.doNext && (
+          <p className="text-xs">
+            <span className="font-medium">Next time: </span>
+            {entry.doNext}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

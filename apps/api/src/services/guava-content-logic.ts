@@ -3,6 +3,8 @@
  * they can be unit tested. The Graph calls live in guava-content.ts.
  */
 
+import type { GuavaReelRank, GuavaReelTier } from "@catgpt/types";
+
 /** The media fields asked for, both for the brand's own account and via business_discovery. */
 export const IG_MEDIA_FIELDS =
   "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count";
@@ -79,6 +81,26 @@ export function engagementAverages(list: { likes: number | null; comments: numbe
     likes: avg(list.flatMap((m) => (m.likes === null ? [] : [m.likes]))),
     comments: avg(list.flatMap((m) => (m.comments === null ? [] : [m.comments]))),
   };
+}
+
+/**
+ * Ranks posts by likes + comments and labels each against the group's own average:
+ * 20% or more above = strong, 20% or more below = weak, otherwise average.
+ */
+export function rankReels(
+  posts: { mediaId: string; likes: number | null; comments: number | null }[],
+): GuavaReelRank[] {
+  const scored = posts
+    .filter((p) => p.likes !== null || p.comments !== null)
+    .map((p) => ({ mediaId: p.mediaId, score: (p.likes ?? 0) + (p.comments ?? 0) }))
+    .sort((a, b) => b.score - a.score);
+  if (!scored.length) return [];
+  const mean = scored.reduce((n, p) => n + p.score, 0) / scored.length;
+  return scored.map((p, i) => {
+    const vsAvgPct = mean > 0 ? Math.round(((p.score - mean) / mean) * 100) : null;
+    const tier: GuavaReelTier = scored.length < 2 || vsAvgPct === null ? "average" : vsAvgPct >= 20 ? "strong" : vsAvgPct <= -20 ? "weak" : "average";
+    return { mediaId: p.mediaId, rank: i + 1, tier, score: p.score, vsAvgPct };
+  });
 }
 
 /** Engagement numbers for one account, from Instagram's like/comment counts only. */
