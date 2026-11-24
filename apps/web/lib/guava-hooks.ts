@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  IgInsightsDto,
+  IgStrategyDto,
   InstagramSetupDto,
   InstagramSetupUpdate,
   GuavaContentAuditDto,
@@ -124,5 +126,31 @@ export function useSaveInstagramSetup() {
     mutationFn: (update: InstagramSetupUpdate) =>
       apiFetch<InstagramSetupDto>("/guava/instagram-setup", { method: "PUT", json: update }),
     onSuccess: (dto) => qc.setQueryData(["guava", "instagram-setup", dto.workspaceId], dto),
+  });
+}
+
+/** Instagram Insights (views, reach, watch time) for the account saved on the Instagram page. */
+export function useInstagramInsights(workspaceId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["guava", "ig-insights", workspaceId],
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => apiFetch<IgInsightsDto>(`/guava/instagram-insights${workspaceId ? `?workspaceId=${workspaceId}` : ""}`),
+  });
+}
+
+export function useRefreshInstagramInsights(workspaceId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<IgInsightsDto>(`/guava/instagram-insights?refresh=true${workspaceId ? `&workspaceId=${workspaceId}` : ""}`),
+    onSuccess: (dto) => qc.setQueryData(["guava", "ig-insights", workspaceId], dto),
+  });
+}
+
+/** AI "next strategy" for a brand, from the Instagram insights. */
+export function useInstagramStrategy(brandId: string | null) {
+  return useMutation({
+    mutationFn: () => apiFetch<IgStrategyDto>(`${base(brandId!)}/instagram-insights/strategy`, { method: "POST" }),
   });
 }

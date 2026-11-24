@@ -25,9 +25,14 @@ export const AUTOMATION_META_SCOPES = [
   "pages_manage_metadata",
 ] as const;
 
-export const META_SCOPES: readonly string[] = env.META_AUTOMATION_SCOPES
-  ? [...BASE_META_SCOPES, ...AUTOMATION_META_SCOPES]
-  : [...BASE_META_SCOPES];
+/** Instagram Insights page: views, reach and watch time need this one permission. */
+export const INSIGHTS_META_SCOPES = ["instagram_manage_insights"] as const;
+
+export const META_SCOPES: readonly string[] = [
+  ...BASE_META_SCOPES,
+  ...(env.META_AUTOMATION_SCOPES ? AUTOMATION_META_SCOPES : []),
+  ...(env.META_INSIGHTS_SCOPES ? INSIGHTS_META_SCOPES : []),
+];
 
 export const graphBase = () => `https://graph.facebook.com/${env.META_GRAPH_VERSION}`;
 
