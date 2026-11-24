@@ -148,7 +148,7 @@ export function clip(s: string, n: number): string {
 
 /** Replaces lone surrogates and drops NUL characters, which Postgres JSON columns reject. */
 export function wellFormed(s: string): string {
-  return s.replace(/\u0000/g, "").replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+  return s.split("\u0000").join("").replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
 }
 
 /** A copy of `v` safe to store in a JSON column: every string is made well-formed. */
