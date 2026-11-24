@@ -270,7 +270,7 @@ async function fetchComments(token: string, mediaId: string): Promise<string[]> 
 }
 
 /** Another public Business/Creator account, read through the brand's own account (business_discovery). */
-async function fetchCompetitor(token: string, igUserId: string, handle: string) {
+export async function fetchCompetitor(token: string, igUserId: string, handle: string) {
   const fields = `business_discovery.username(${handle}){${IG_PROFILE_FIELDS},media.limit(30){${IG_MEDIA_FIELDS}}}`;
   const json = await graphGet(`/${encodeURIComponent(igUserId)}`, token, { fields });
   const bd = (json.business_discovery ?? {}) as Record<string, unknown>;

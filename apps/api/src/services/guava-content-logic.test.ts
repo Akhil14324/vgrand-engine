@@ -5,6 +5,7 @@ import {
   computePerformance,
   engagementAverages,
   findSpikes,
+  parseCandidates,
   median,
   signalSplits,
   matchBrand,
@@ -209,5 +210,19 @@ describe("Petalie-style splits", () => {
     expect(findSpikes(posts)).toEqual([{ mediaId: "d", handle: "me", timesTypical: 10 }]);
     const split = signalSplits(posts, new Set(["d"])).find((s) => s.key === "faceInFirstSecond")!;
     expect(split.withoutTypical).toBe(90);
+  });
+});
+
+describe("find accounts: parseCandidates", () => {
+  it("keeps valid handles from the JSON, normalised and de-duplicated", () => {
+    const raw = 'Here you go: {"accounts":[{"handle":"@Arjun.Infra","why":"Builder in Ongole"},{"handle":"https://instagram.com/arjun.infra/","why":"dup"},{"handle":"not a handle!","why":"x"},{"handle":"ms_constructions_ongole"}]}';
+    expect(parseCandidates(raw)).toEqual([
+      { handle: "arjun.infra", why: "Builder in Ongole" },
+      { handle: "ms_constructions_ongole", why: "" },
+    ]);
+  });
+  it("returns nothing for broken or missing JSON", () => {
+    expect(parseCandidates("no json here")).toEqual([]);
+    expect(parseCandidates('{"accounts": [ {"handle": ')).toEqual([]);
   });
 });

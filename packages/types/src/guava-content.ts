@@ -391,3 +391,41 @@ export interface GuavaContentAuditDto extends GuavaContentAuditSummaryDto {
   /** Competitors that could not be read (private, personal account, not found). */
   skippedCompetitors: { handle: string; reason: string }[];
 }
+
+/* ------------------------------ find accounts ------------------------------ */
+
+/** "rivals" = businesses competing with you; "creators" = people to collaborate with. */
+export const GUAVA_FIND_KINDS = ["rivals", "creators"] as const;
+export type GuavaFindKind = (typeof GUAVA_FIND_KINDS)[number];
+
+export const guavaFindRequestSchema = z.object({
+  workspaceId: z.string().uuid().nullable().default(null),
+  kind: z.enum(GUAVA_FIND_KINDS),
+  /** e.g. "construction companies in Ongole" or "home-decor creators in Andhra Pradesh". */
+  query: z.string().trim().min(3).max(300),
+});
+export type GuavaFindRequest = z.input<typeof guavaFindRequestSchema>;
+
+export interface GuavaFoundAccount {
+  handle: string;
+  /** Why the web search picked it. */
+  why: string;
+  /** True when Instagram confirmed it as a public Business/Creator account. */
+  verified: boolean;
+  name: string | null;
+  followers: number | null;
+  mediaCount: number | null;
+  biography: string | null;
+  /** Median likes + comments over its newest posts. */
+  typical: number | null;
+  /** Typical likes + comments as % of followers. */
+  engagementPct: number | null;
+  /** Why it couldn't be checked, when not verified. */
+  note: string | null;
+}
+
+export interface GuavaFindResultDto {
+  kind: GuavaFindKind;
+  query: string;
+  accounts: GuavaFoundAccount[];
+}

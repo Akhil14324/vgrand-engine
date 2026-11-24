@@ -5,6 +5,7 @@
 
 import {
   GUAVA_SIGNAL_LABELS,
+  normalizeIgHandle,
   type GuavaReelRank,
   type GuavaReelSignals,
   type GuavaReelTier,
@@ -238,3 +239,31 @@ export function describeSplit(s: GuavaSignalSplit): string {
   const conf = s.confidence === "sure" ? "SURE" : s.confidence === "i_think" ? "I THINK" : "TOO CLOSE TO CALL";
   return `- ${s.withLabel}: typical ${s.withTypical} likes+comments (${s.withCount} posts) vs ${s.withoutLabel.toLowerCase()}: ${s.withoutTypical} (${s.withoutCount} posts) -> ${conf}`;
 }
+
+/* ------------------------------ find accounts ------------------------------ */
+
+export const FIND_MAX_CANDIDATES = 10;
+
+/** Pulls {handle, why} pairs out of the model's JSON answer. */
+export function parseCandidates(raw: string): { handle: string; why: string }[] {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) return [];
+  let json: unknown;
+  try {
+    json = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  const list = (json as { accounts?: unknown }).accounts;
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  return list.flatMap((item) => {
+    const o = (item ?? {}) as { handle?: unknown; why?: unknown };
+    const handle = typeof o.handle === "string" ? normalizeIgHandle(o.handle) : null;
+    if (!handle || seen.has(handle)) return [];
+    seen.add(handle);
+    return [{ handle, why: typeof o.why === "string" ? clip(o.why, 240) : "" }];
+  }).slice(0, FIND_MAX_CANDIDATES);
+}
+

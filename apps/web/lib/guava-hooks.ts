@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InstagramSetupDto,
+  GuavaFindRequest,
+  GuavaFindResultDto,
   InstagramSetupUpdate,
   GuavaContentAuditDto,
   GuavaContentAuditRequest,
@@ -124,5 +126,13 @@ export function useSaveInstagramSetup() {
     mutationFn: (update: InstagramSetupUpdate) =>
       apiFetch<InstagramSetupDto>("/guava/instagram-setup", { method: "PUT", json: update }),
     onSuccess: (dto) => qc.setQueryData(["guava", "instagram-setup", dto.workspaceId], dto),
+  });
+}
+
+/** Search Instagram for rivals or creators (web search, then each account checked on Instagram). */
+export function useFindInstagramAccounts() {
+  return useMutation({
+    mutationFn: (req: GuavaFindRequest) =>
+      apiFetch<GuavaFindResultDto>("/guava/instagram-find", { method: "POST", json: req }),
   });
 }

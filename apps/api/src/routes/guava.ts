@@ -5,6 +5,7 @@ import {
   instagramSetupUpdateSchema,
   guavaAskSchema,
   guavaContentAuditRequestSchema,
+  guavaFindRequestSchema,
   guavaProfileUpdateSchema,
 } from "@catgpt/types";
 import { parseBody } from "../lib/errors.js";
@@ -19,6 +20,7 @@ import {
   saveInstagramSetup,
   startContentAudit,
 } from "../services/guava-content.js";
+import { findInstagramAccounts } from "../services/guava-find.js";
 
 const brandParams = z.object({ brandId: z.string().uuid() });
 const diagnosisParams = z.object({ id: z.string().uuid() });
@@ -104,6 +106,17 @@ export async function guavaRoutes(app: FastifyInstance) {
     if (body.workspaceId) await findWorkspaceForUser(req.userId, body.workspaceId, { ownerOnly: true });
     return saveInstagramSetup(req.userId, body);
   });
+
+  // Search Instagram for rivals or creators: web search for handles, then each one checked on Instagram.
+  app.post(
+    "/guava/instagram-find",
+    { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    async (req) => {
+      const body = parseBody(guavaFindRequestSchema, req.body);
+      if (body.workspaceId) await findWorkspaceForUser(req.userId, body.workspaceId);
+      return findInstagramAccounts(req.userId, body.workspaceId, body.kind, body.query);
+    },
+  );
 
   // Instagram content review: Gemini watches the brand's (and competitors') reels.
   app.get("/guava/brands/:brandId/content-audits", async (req) => {
