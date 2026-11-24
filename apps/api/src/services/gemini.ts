@@ -46,7 +46,7 @@ export async function geminiJson(opts: {
   model?: string;
   temperature?: number;
   /** "low" asks the model to think briefly: classification and note-taking don't need long reasoning, which is what makes calls slow. */
-  thinking?: "low";
+  thinking?: "low" | "medium";
 }): Promise<Record<string, unknown>> {
   const model = opts.model ?? env.GEMINI_MODEL;
   const send = (withThinking: boolean) =>
@@ -59,23 +59,23 @@ export async function geminiJson(opts: {
         generationConfig: {
           responseMimeType: "application/json",
           temperature: opts.temperature ?? 0.4,
-          ...(withThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+          ...(withThinking ? { thinkingConfig: { thinkingLevel: opts.thinking } } : {}),
         },
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  let thinking = opts.thinking === "low";
-  let res = await send(thinking);
+  let thinking: "low" | "medium" | null = opts.thinking ?? null;
+  let res = await send(thinking !== null);
   // A model that doesn't know the thinking setting answers 400: run the same request without it.
   if (res.status === 400 && thinking) {
-    thinking = false;
+    thinking = null;
     res = await send(false);
   }
   // "High demand" (503) and rate limits (429) are temporary on Google's side: wait and try again.
   for (const waitMs of BUSY_RETRY_DELAYS_MS) {
     if (res.status !== 503 && res.status !== 429) break;
     await sleep(waitMs);
-    res = await send(thinking);
+    res = await send(thinking !== null);
   }
   if (!res.ok) throw new GeminiError(`Gemini request failed: ${await readError(res)}`);
   const json = (await res.json()) as {

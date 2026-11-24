@@ -23,7 +23,7 @@ import { badRequest, notFound } from "../lib/errors.js";
 import { findUsableAccount } from "./social/accounts.js";
 import { graphBase } from "./social/oauth/meta.js";
 import { ensureFreshToken } from "./social/tokens.js";
-import { deleteGeminiFile, geminiConfigured, geminiJson, uploadGeminiFile, type GeminiPart } from "./gemini.js";
+import { deleteGeminiFile, GeminiError, geminiConfigured, geminiJson, uploadGeminiFile, type GeminiPart } from "./gemini.js";
 import { loadEffectiveProfile, renderProfileText } from "./guava-profile.js";
 import {
   IG_MEDIA_FIELDS,
@@ -606,7 +606,8 @@ async function runContentAudit(id: string) {
       .filter(Boolean)
       .join("\n");
 
-    const raw = await geminiJson({ system: REPORT_SYSTEM, parts: [{ text: user }] });
+    await setProgress("Writing the review");
+    const raw = await geminiJson({ system: REPORT_SYSTEM, parts: [{ text: user }], thinking: "medium" });
     const report = guavaContentReportSchema.parse(raw);
     if (!report.summary && !report.improvements.length) throw new Error("no usable review in response");
 
@@ -634,7 +635,9 @@ async function runContentAudit(id: string) {
           error:
             err instanceof UserFacingError
               ? err.message
-              : "Brand Strategist couldn't finish the Instagram review. Check the Instagram connection and try again.",
+              : err instanceof GeminiError || (err instanceof Error && err.name === "TimeoutError")
+                ? `Brand Strategist couldn't finish the review (${clip(err instanceof Error ? err.message : "", 160)}). Please try again.`
+                : "Brand Strategist couldn't finish the Instagram review. Check the Instagram connection and try again.",
         },
       })
       .catch(() => {});
