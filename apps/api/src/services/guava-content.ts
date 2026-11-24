@@ -274,7 +274,10 @@ const captionPart = (handle: string, m: IgMedia): GeminiPart => ({
 });
 
 /** Watch the video if possible, else look at the cover image, else read the caption. */
-async function analyseMedia(handle: string, m: IgMedia): Promise<{ notes: GuavaReelNotes; from: GuavaReelSource }> {
+async function analyseMedia(
+  handle: string,
+  m: IgMedia,
+): Promise<{ notes: GuavaReelNotes; from: GuavaReelSource } | { notes: null; from: GuavaReelSource; error: string }> {
   const system = REEL_SYSTEM.replace("{handle}", handle);
   const run = async (parts: GeminiPart[]) => guavaReelNotesSchema.parse(await geminiJson({ system, parts, temperature: 0.2, thinking: "low" }));
 
@@ -305,7 +308,14 @@ async function analyseMedia(handle: string, m: IgMedia): Promise<{ notes: GuavaR
     }
   }
 
-  return { notes: await run([captionPart(handle, m)]), from: "caption" };
+  try {
+    return { notes: await run([captionPart(handle, m)]), from: "caption" };
+  } catch (err) {
+    // One unreadable post must not sink the whole review: it is left out and the rest are reviewed.
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn("[guava-content] post skipped", m.id, reason);
+    return { notes: null, from: "caption", error: reason };
+  }
 }
 
 /* --------------------------------- helpers -------------------------------- */
@@ -496,7 +506,11 @@ async function runContentAudit(id: string) {
     const brand = await prisma.brand.findUniqueOrThrow({ where: { id: row.brandId } });
     const { accessToken } = await ensureFreshToken(account);
 
-    const own = await fetchOwn(accessToken, account.externalAccountId, account.handle ?? "you");
+    const own = await fetchOwn(accessToken, account.externalAccountId, account.handle ?? "you").catch((err: unknown) => {
+      throw new UserFacingError(
+        `Instagram didn't return @${account.handle ?? "your account"}'s posts (${clip(err instanceof Error ? err.message : String(err), 160)}). Reconnect Instagram and try again.`,
+      );
+    });
     if (!own.recent.length) throw new UserFacingError(`@${own.info.handle} has no posts to review yet.`);
 
     // One account may post for several of the user's brands: keep only this brand's posts.
@@ -551,10 +565,16 @@ async function runContentAudit(id: string) {
 
     let watched = 0;
     await setProgress(`Watching reels (0 of ${jobs.length})`);
-    const reels: GuavaReelInsight[] = await mapConcurrent(jobs, REELS_IN_PARALLEL, async (job) => {
-      const { notes, from } = await analyseMedia(job.handle, job.media);
+    let lastReelError = "";
+    const analysed = await mapConcurrent(jobs, REELS_IN_PARALLEL, async (job): Promise<GuavaReelInsight | null> => {
+      const result = await analyseMedia(job.handle, job.media);
       watched += 1;
       await setProgress(`Watching reels (${watched} of ${jobs.length})`);
+      if (!result.notes) {
+        lastReelError = "error" in result ? result.error : "";
+        return null;
+      }
+      const { notes, from } = result;
       return {
         mediaId: job.media.id,
         handle: job.handle,
@@ -569,6 +589,12 @@ async function runContentAudit(id: string) {
         notes,
       };
     });
+    const reels = analysed.filter((r): r is GuavaReelInsight => r !== null);
+    if (!reels.some((r) => r.isOwn)) {
+      throw new UserFacingError(
+        `Gemini couldn't read any of @${own.info.handle}'s posts${lastReelError ? ` (${clip(lastReelError, 160)})` : ""}. Please try again.`,
+      );
+    }
 
     await setProgress("Comparing with your brand");
     const { industry, values } = await loadEffectiveProfile(brand);
@@ -607,9 +633,20 @@ async function runContentAudit(id: string) {
       .join("\n");
 
     await setProgress("Writing the review");
-    const raw = await geminiJson({ system: REPORT_SYSTEM, parts: [{ text: user }], thinking: "medium" });
-    const report = guavaContentReportSchema.parse(raw);
-    if (!report.summary && !report.improvements.length) throw new Error("no usable review in response");
+    // The report is one long JSON answer: if it comes back broken or empty, ask once more before failing.
+    let report: GuavaContentReport | null = null;
+    for (let attempt = 0; attempt < 2 && !report; attempt++) {
+      try {
+        const parsed = guavaContentReportSchema.parse(
+          await geminiJson({ system: REPORT_SYSTEM, parts: [{ text: user }], thinking: "medium" }),
+        );
+        if (!parsed.summary && !parsed.improvements.length) throw new GeminiError("Gemini returned an empty review");
+        report = parsed;
+      } catch (err) {
+        if (attempt === 1 || !(err instanceof GeminiError)) throw err;
+        console.warn("[guava-content] report retry", err.message);
+      }
+    }
 
     await prisma.guavaContentAudit.update({
       where: { id },
@@ -635,9 +672,7 @@ async function runContentAudit(id: string) {
           error:
             err instanceof UserFacingError
               ? err.message
-              : err instanceof GeminiError || (err instanceof Error && err.name === "TimeoutError")
-                ? `Brand Strategist couldn't finish the review (${clip(err instanceof Error ? err.message : "", 160)}). Please try again.`
-                : "Brand Strategist couldn't finish the Instagram review. Check the Instagram connection and try again.",
+              : `Brand Strategist couldn't finish the review (${clip(failureReason(err), 160)}). Please try again.`,
         },
       })
       .catch(() => {});
@@ -645,3 +680,11 @@ async function runContentAudit(id: string) {
 }
 
 class UserFacingError extends Error {}
+
+/** Always say what actually went wrong, so a failed review can be diagnosed from the screen. */
+function failureReason(err: unknown): string {
+  if (err instanceof GeminiError) return err.message;
+  if (err instanceof Error && err.name === "TimeoutError") return "Gemini took too long to answer";
+  if (err instanceof Error) return `${err.name === "Error" ? "" : `${err.name}: `}${err.message}`;
+  return String(err);
+}
