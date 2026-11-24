@@ -3,7 +3,14 @@
  * they can be unit tested. The Graph calls live in guava-content.ts.
  */
 
-import type { GuavaReelRank, GuavaReelTier } from "@catgpt/types";
+import {
+  GUAVA_SIGNAL_LABELS,
+  type GuavaReelRank,
+  type GuavaReelSignals,
+  type GuavaReelTier,
+  type GuavaSignalKey,
+  type GuavaSignalSplit,
+} from "@catgpt/types";
 
 /** The media fields asked for, both for the brand's own account and via business_discovery. */
 export const IG_MEDIA_FIELDS =
@@ -138,3 +145,96 @@ export function matchBrand<T extends { id: string; name: string }>(answer: strin
 }
 
 export const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/* ------------------------------ splits (Petalie-style) ------------------------------ */
+
+/** Likes + comments; null when Instagram hides both. */
+export const engagementOf = (p: { likes: number | null; comments: number | null }) =>
+  p.likes === null && p.comments === null ? null : (p.likes ?? 0) + (p.comments ?? 0);
+
+/** The middle value: a typical post, so one viral post doesn't drag the number. */
+export function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2);
+}
+
+/** A post this many times above the typical post of its account is a spike (a one-off, or possibly boosted). */
+export const SPIKE_TIMES = 3;
+
+/** Posts far above their account's typical post. Needs 4+ posts to say anything. */
+export function findSpikes<T extends { mediaId: string; handle: string; likes: number | null; comments: number | null }>(
+  posts: T[],
+): { mediaId: string; handle: string; timesTypical: number }[] {
+  const out: { mediaId: string; handle: string; timesTypical: number }[] = [];
+  for (const handle of new Set(posts.map((p) => p.handle))) {
+    const scored = posts.flatMap((p) => {
+      const e = engagementOf(p);
+      return p.handle === handle && e !== null ? [{ p, e }] : [];
+    });
+    if (scored.length < 4) continue;
+    for (const { p, e } of scored) {
+      const others = median(scored.filter((x) => x.p !== p).map((x) => x.e));
+      if (others && others > 0 && e >= SPIKE_TIMES * others) {
+        out.push({ mediaId: p.mediaId, handle, timesTypical: Math.round((e / others) * 10) / 10 });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Typical engagement of posts with vs without each thing seen in the footage.
+ * "sure": 3+ posts on each side and one side at least 1.5x the other.
+ * "i_think": 2+ on each side and at least 1.25x. Otherwise "too_close".
+ * Spikes are left out so one viral post can't decide a split.
+ */
+export function signalSplits(
+  posts: { mediaId: string; likes: number | null; comments: number | null; signals: GuavaReelSignals | null | undefined }[],
+  excludeIds: Set<string> = new Set(),
+): GuavaSignalSplit[] {
+  const usable = posts.flatMap((p) => {
+    const e = engagementOf(p);
+    return e !== null && p.signals && !excludeIds.has(p.mediaId) ? [{ e, s: p.signals }] : [];
+  });
+  const keys = Object.keys(GUAVA_SIGNAL_LABELS) as (GuavaSignalKey | "short")[];
+  const out: GuavaSignalSplit[] = [];
+  for (const key of keys) {
+    const value = (s: GuavaReelSignals): boolean | null =>
+      key === "short" ? (s.lengthSec === null ? null : s.lengthSec <= 15) : s[key];
+    const yes = usable.filter((u) => value(u.s) === true).map((u) => u.e);
+    const no = usable.filter((u) => value(u.s) === false).map((u) => u.e);
+    if (!yes.length || !no.length) continue;
+    const a = median(yes)!;
+    const b = median(no)!;
+    const ratio = Math.max(a, b) / Math.max(1, Math.min(a, b));
+    const n = Math.min(yes.length, no.length);
+    const confidence = n >= 3 && ratio >= 1.5 ? "sure" : n >= 2 && ratio >= 1.25 ? "i_think" : "too_close";
+    const labels = GUAVA_SIGNAL_LABELS[key];
+    out.push({
+      key,
+      label: labels.yes,
+      withLabel: labels.yes,
+      withoutLabel: labels.no,
+      withCount: yes.length,
+      withoutCount: no.length,
+      withTypical: a,
+      withoutTypical: b,
+      confidence,
+    });
+  }
+  const rank = { sure: 0, i_think: 1, too_close: 2 } as const;
+  return out.sort(
+    (x, y) =>
+      rank[x.confidence] - rank[y.confidence] ||
+      Math.max(y.withTypical, y.withoutTypical) / Math.max(1, Math.min(y.withTypical, y.withoutTypical)) -
+        Math.max(x.withTypical, x.withoutTypical) / Math.max(1, Math.min(x.withTypical, x.withoutTypical)),
+  );
+}
+
+/** One line per split for the report prompt. */
+export function describeSplit(s: GuavaSignalSplit): string {
+  const conf = s.confidence === "sure" ? "SURE" : s.confidence === "i_think" ? "I THINK" : "TOO CLOSE TO CALL";
+  return `- ${s.withLabel}: typical ${s.withTypical} likes+comments (${s.withCount} posts) vs ${s.withoutLabel.toLowerCase()}: ${s.withoutTypical} (${s.withoutCount} posts) -> ${conf}`;
+}

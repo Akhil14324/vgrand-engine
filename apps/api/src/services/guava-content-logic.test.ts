@@ -4,6 +4,9 @@ import {
   competitorErrorReason,
   computePerformance,
   engagementAverages,
+  findSpikes,
+  median,
+  signalSplits,
   matchBrand,
   pickMedia,
   rankReels,
@@ -154,5 +157,57 @@ describe("rankReels", () => {
     expect(rankReels([{ mediaId: "a", likes: 100, comments: 0 }, { mediaId: "b", likes: 105, comments: 0 }]).map((x) => x.tier)).toEqual(["average", "average"]);
     expect(rankReels([{ mediaId: "a", likes: 5, comments: 1 }])[0]!.tier).toBe("average");
     expect(rankReels([{ mediaId: "a", likes: null, comments: null }])).toEqual([]);
+  });
+});
+
+describe("Petalie-style splits", () => {
+  const sig = (face: boolean, lengthSec: number | null = 20) => ({
+    faceInFirstSecond: face,
+    speaksInFirstSecond: null,
+    textOnScreenBySecondTwo: null,
+    productInUse: null,
+    peopleOnCamera: null,
+    mostlyStillShots: null,
+    voiceover: null,
+    musicOnly: null,
+    lengthSec,
+  });
+  const post = (id: string, likes: number, face: boolean, lengthSec: number | null = 20) => ({
+    mediaId: id,
+    handle: "me",
+    likes,
+    comments: 0,
+    signals: sig(face, lengthSec),
+  });
+
+  it("median is the typical post, not the average", () => {
+    expect(median([1, 2, 100])).toBe(2);
+    expect(median([1, 3])).toBe(2);
+    expect(median([])).toBeNull();
+  });
+
+  it("finds a sure split with 3+ posts each side and a 1.5x gap", () => {
+    const posts = [post("a", 300, true), post("b", 280, true), post("c", 320, true), post("d", 100, false), post("e", 90, false), post("f", 110, false)];
+    const face = signalSplits(posts).find((s) => s.key === "faceInFirstSecond")!;
+    expect(face).toMatchObject({ withTypical: 300, withoutTypical: 100, withCount: 3, withoutCount: 3, confidence: "sure" });
+  });
+
+  it("calls a small gap too close", () => {
+    const posts = [post("a", 105, true), post("b", 100, true), post("c", 100, false), post("d", 98, false)];
+    expect(signalSplits(posts).find((s) => s.key === "faceInFirstSecond")!.confidence).toBe("too_close");
+  });
+
+  it("skips a split when one side has no posts, and uses length for 'short'", () => {
+    const posts = [post("a", 300, true, 10), post("b", 100, true, 40)];
+    const splits = signalSplits(posts);
+    expect(splits.find((s) => s.key === "faceInFirstSecond")).toBeUndefined();
+    expect(splits.find((s) => s.key === "short")).toMatchObject({ withTypical: 300, withoutTypical: 100 });
+  });
+
+  it("flags a spike at 3x the typical post and leaves it out of splits", () => {
+    const posts = [post("a", 100, true), post("b", 110, true), post("c", 90, false), post("d", 1000, false)];
+    expect(findSpikes(posts)).toEqual([{ mediaId: "d", handle: "me", timesTypical: 10 }]);
+    const split = signalSplits(posts, new Set(["d"])).find((s) => s.key === "faceInFirstSecond")!;
+    expect(split.withoutTypical).toBe(90);
   });
 });

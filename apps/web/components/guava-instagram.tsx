@@ -23,6 +23,7 @@ import {
 } from "@/lib/guava-hooks";
 import { cn } from "@/lib/utils";
 import { EvidenceBadge, fmtDate } from "@/components/guava-report";
+import { ReviewRead, RivalRead } from "@/components/guava-instagram-read";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -157,7 +158,8 @@ function AuditReport({ audit }: { audit: GuavaContentAuditDto }) {
   const own = audit.reels.filter((x) => x.isOwn);
   const verdictFor = new Map(r.reelVerdicts.map((v) => [v.mediaId, v]));
   const categoryFor = new Map(audit.split.map((p) => [p.mediaId, p.category]));
-  const [tab, setTab] = useState("performance");
+  const hasRead = r.whatWorks.length > 0 || r.whatLosesPeople.length > 0 || r.doNext.nextVideos.length > 0;
+  const [tab, setTab] = useState(hasRead ? "read" : "performance");
 
   return (
     <div className="space-y-4">
@@ -190,13 +192,20 @@ function AuditReport({ audit }: { audit: GuavaContentAuditDto }) {
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList className="flex-wrap">
+          {hasRead && <TabsTrigger value="read">The read</TabsTrigger>}
           <TabsTrigger value="performance">Performance</TabsTrigger>
           {audit.reelRanking.length > 0 && <TabsTrigger value="compare">Compare reels</TabsTrigger>}
           <TabsTrigger value="fit">Brand fit</TabsTrigger>
-          <TabsTrigger value="improve">Improve ({r.improvements.length})</TabsTrigger>
+          {r.improvements.length > 0 && <TabsTrigger value="improve">Improve ({r.improvements.length})</TabsTrigger>}
           <TabsTrigger value="competitors">Competitors ({r.competitors.length})</TabsTrigger>
           {audit.split.length > 0 && <TabsTrigger value="split">Account split</TabsTrigger>}
         </TabsList>
+
+        {hasRead && (
+          <TabsContent value="read" className="space-y-4">
+            <ReviewRead audit={audit} />
+          </TabsContent>
+        )}
 
         <TabsContent value="performance" className="space-y-4">
           <PerformancePanel audit={audit} perf={audit.performance} />
@@ -447,6 +456,7 @@ function CompetitorCard({
         <p className="text-sm text-muted-foreground">{c.summary}</p>
       </CardHeader>
       <CardContent className="space-y-4">
+        <RivalRead competitor={c} typical={audit.typical.find((t) => !t.isOwn && t.handle.toLowerCase() === handle)?.typical ?? null} />
         <div className="overflow-x-auto">
           <table className="w-full min-w-[420px] text-sm">
             <thead>
