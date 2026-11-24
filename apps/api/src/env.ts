@@ -94,7 +94,7 @@ const envSchema = z.object({
   /** Reel studio generated clips (phase 6). Each provider is optional; its models are unavailable without the key. */
   GOOGLE_AI_API_KEY: opt(z.string().min(1)),
   /** Brand Strategist Instagram review: Gemini model that watches reels (uses GOOGLE_AI_API_KEY). */
-  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  GEMINI_MODEL: z.string().default("gemini-3.8-flash"),
   RUNWAY_API_KEY: opt(z.string().min(1)),
   KLING_API_KEY: opt(z.string().min(1)),
   WORKER_INLINE: bool,
