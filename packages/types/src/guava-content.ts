@@ -173,6 +173,8 @@ export interface GuavaReelInsight {
   comments: number | null;
   analysedFrom: GuavaReelSource;
   notes: GuavaReelNotes;
+  /** Up to 25 newest comments on the owner's post (needs instagram_manage_comments); absent on older reviews. */
+  topComments?: string[];
 }
 
 export interface GuavaIgAccountInfo {
@@ -210,6 +212,10 @@ export const guavaContentReportSchema = z.object({
       ),
     })
     .catch({ keep: [], start: [], stop: [], nextVideos: [] }),
+  /** What people say in the comments on the owner's posts (empty when comments couldn't be read). */
+  comments: z
+    .object({ summary: text, praise: textList, asks: textList, complaints: textList, replyIdeas: textList })
+    .catch({ summary: "", praise: [], asks: [], complaints: [], replyIdeas: [] }),
   /** What the numbers can't decide ("too close to call"). */
   tooCloseToCall: textList,
   summary: text,
@@ -378,6 +384,8 @@ export interface GuavaContentAuditDto extends GuavaContentAuditSummaryDto {
   splits: GuavaSignalSplit[];
   /** Posts far above the account's typical post (a one-off or possibly boosted): not counted as "working". */
   spikes: { mediaId: string; handle: string; timesTypical: number }[];
+  /** How many comments were read on the owner's posts; 0 with comments present means the permission is missing. */
+  commentsRead: number;
   /** Typical (median) likes + comments per post for each account reviewed. */
   typical: { handle: string; isOwn: boolean; typical: number | null; posts: number }[];
   /** Competitors that could not be read (private, personal account, not found). */

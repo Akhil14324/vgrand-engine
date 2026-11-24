@@ -186,6 +186,8 @@ export function ReviewRead({ audit }: { audit: GuavaContentAuditDto }) {
         />
       </div>
 
+      <CommentsRead audit={audit} />
+
       <SplitsTable splits={audit.splits} />
 
       {r.tooCloseToCall.length > 0 && (
@@ -267,6 +269,40 @@ export function ReviewRead({ audit }: { audit: GuavaContentAuditDto }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function CommentsRead({ audit }: { audit: GuavaContentAuditDto }) {
+  const c = audit.report!.comments;
+  const ownComments = audit.reels.filter((r) => r.isOwn).reduce((n, r) => n + (r.comments ?? 0), 0);
+  if (!audit.commentsRead) {
+    if (!ownComments) return null;
+    return (
+      <Card className="p-4 text-sm">
+        <div className="font-medium">What your comments say</div>
+        <p className="mt-1 text-muted-foreground">
+          Your posts have {ownComments.toLocaleString()} comments, but Instagram didn&apos;t let us read them. Reconnect Instagram with the
+          comment permission (the same one Automations uses) and review again.
+        </p>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">What your comments say</CardTitle>
+        <p className="text-xs text-muted-foreground">Read {audit.commentsRead.toLocaleString()} comments on your newest posts.</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {c.summary && <p className="text-sm">{c.summary}</p>}
+        <div className="grid gap-4 md:grid-cols-3">
+          <List title="People ask for" items={c.asks} className="text-primary" />
+          <List title="Praise" items={c.praise} className="text-emerald-700 dark:text-emerald-400" />
+          <List title="Complaints" items={c.complaints} className="text-destructive" />
+        </div>
+        <List title="Reply or make a video about" items={c.replyIdeas} />
+      </CardContent>
+    </Card>
   );
 }
 
