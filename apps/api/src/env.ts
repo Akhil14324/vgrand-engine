@@ -116,6 +116,14 @@ const envSchema = z.object({
   /** Instagram automation webhook: the "Verify Token" you type in Meta App Dashboard > Webhooks. */
   META_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
   /**
+   * WhatsApp can live in a different Meta app (even another Meta account) than Instagram/Facebook.
+   * Meta signs each webhook with ITS app's secret, so set these when that is the case; each one
+   * falls back to the matching META_* value when unset.
+   */
+  WHATSAPP_APP_ID: opt(z.string().min(1)),
+  WHATSAPP_APP_SECRET: opt(z.string().min(1)),
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
+  /**
    * "true" adds the Instagram automation permissions to the Meta login scope (only used when
    * META_LOGIN_CONFIG_ID is not set). Turn on once Meta has approved them, or login fails.
    */

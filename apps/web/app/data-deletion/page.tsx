@@ -73,6 +73,11 @@ export default async function DataDeletionPage({
           <li>Your chats, generated images and text, share links, memories and preferences.</li>
           <li>Uploaded files and documents, brand profiles and their assets.</li>
           <li>
+            WhatsApp numbers you connected, with their contacts, conversations, templates and
+            broadcast history. If you messaged a business that uses CatGPT, email us the phone
+            number you used and we will delete your conversation data.
+          </li>
+          <li>
             Connected social accounts, including the encrypted access and refresh tokens we hold
             for Facebook, Instagram, X and YouTube, and records of your social posts.
           </li>
