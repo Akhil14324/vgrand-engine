@@ -75,7 +75,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-async function downloadImage(url: string, filename: string) {
+export async function downloadImage(url: string, filename: string) {
   const res = await fetch(url);
   const blob = await res.blob();
   const a = document.createElement("a");
@@ -566,6 +566,63 @@ function ImageTools({ generation }: { generation: GenerationDto }) {
  * stay well under the provider's 10-image ceiling. */
 const MAX_EDIT_REFS = 4;
 
+/**
+ * Quick edits for brand images: change only the background, or swap in one of
+ * the image's OWN brand's real product photos (never another brand's).
+ */
+function BrandEditShortcuts({
+  generation,
+  disabled,
+  onBackground,
+  onProduct,
+}: {
+  generation: GenerationDto;
+  disabled: boolean;
+  onBackground: () => void;
+  onProduct: (p: { url: string; label: string | null }) => void;
+}) {
+  const { data: brands } = useBrands();
+  const brandId =
+    typeof generation.metadata?.brandId === "string" ? generation.metadata.brandId : null;
+  const products =
+    brands?.find((b) => b.id === brandId)?.assets.filter((a) => a.kind === "product") ?? [];
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onBackground}
+          className="rounded-md border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          Change background
+        </button>
+      </div>
+      {products.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted-foreground">Replace product with a real brand product:</span>
+          <div className="flex flex-wrap gap-1.5">
+            {products.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => onProduct({ url: p.url, label: p.label })}
+                title={p.label ?? "Product photo"}
+                className="h-10 w-10 overflow-hidden rounded-md border transition-colors hover:border-primary/60 disabled:opacity-50"
+                aria-label={`Use product ${p.label ?? "photo"}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.url} alt={p.label ?? "product"} className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DescribeEditDialog({
   generation,
   open,
@@ -755,6 +812,21 @@ function DescribeEditDialog({
               : "Describe the new image from scratch"
           }
         />
+        {mode === "edit" && (
+          <BrandEditShortcuts
+            generation={generation}
+            disabled={busy}
+            onBackground={() => setEditText("Change only the background to: ")}
+            onProduct={(p) => {
+              setRefUrls((prev) =>
+                prev.includes(p.url) ? prev : [...prev, p.url].slice(0, MAX_EDIT_REFS),
+              );
+              setEditText(
+                `Replace the product in this image with the attached real product photo${p.label ? ` "${p.label}"` : ""}, exactly as photographed - same shape, packaging, labels and colours. Keep everything else unchanged.`,
+              );
+            }}
+          />
+        )}
         {mode === "edit" && (
           <div className="flex flex-wrap items-center gap-2">
             {refUrls.map((u, i) => (

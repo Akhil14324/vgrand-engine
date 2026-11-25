@@ -16,6 +16,7 @@ model User {
   createdAt         DateTime          @default(now())
   /// ChatGPT-style switch: when off, nothing is learned and nothing is injected.
   memoryEnabled     Boolean           @default(true)
+  carousels         Carousel[]
   generations       Generation[]
   memories          Memory[]
   conversations     Conversation[]
@@ -35,6 +36,7 @@ model User {
   reelPlanItems     ReelPlanItem[]
   videoSettings     VideoSettings?
   shortsChannels    ShortsChannel[]
+  shortsReels       ShortsReel[]
   shortsSettings    ShortsSettings?
   shortsReports     ShortsReport[]
 }
@@ -72,6 +74,7 @@ model Brand {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   reelPlanItems       ReelPlanItem[]
+  shortsReels         ShortsReel[]
 
   @@index([userId])
   @@index([workspaceId])
@@ -244,6 +247,8 @@ model Generation {
   campaignPost   CampaignPost?
   memories       Memory[]
   socialPosts    SocialPost[]
+  // Set on the chat turn that hosts a carousel (its slides are their own rows).
+  carousel       Carousel?
   createdAt      DateTime       @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
@@ -1528,4 +1533,105 @@ model WhatsappBroadcastRecipient {
 
   @@unique([broadcastId, contactId])
   @@index([broadcastId, status])
+}
+
+/// Shorts Factory Reel Studio: one AI reel project (brand-based or general topic).
+/// The script (scenes, visual choices, resolved assets) and settings are JSON
+/// validated by packages/types/src/shorts-reels.ts. Rendered through the Shorts job queue.
+model ShortsReel {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandId          String?
+  brand            Brand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  /// "brand" | "general"
+  mode             String
+  reelType         String?
+  topic            String    @default("") @db.Text
+  title            String    @default("")
+  durationSec      Int       @default(30)
+  language         String    @default("en")
+  productUrl       String?   @db.Text
+  script           Json?
+  settings         Json      @default("{}")
+  /// "draft" | "script_ready" | "queued" | "rendering" | "completed" | "failed"
+  status           String    @default("draft")
+  stage            String?
+  progress         Int       @default(0)
+  error            String?   @db.Text
+  warnings         Json      @default("[]")
+  /// Per-scene render facts: [{ id, sec, voiceFile, voiceKey, words }]
+  renderInfo       Json?
+  llmLog           Json?
+  renderCount      Int       @default(0)
+  /// Tracked spend on paid AI calls (script, voice, AI images/clips), all runs, USD.
+  costUsd          Float     @default(0)
+  /// [{ at, run, label, usd }] one entry per paid call, capped.
+  costLog          Json      @default("[]")
+  filePath         String?
+  thumbPath        String?
+  videoDurationSec Float?
+  width            Int?
+  height           Int?
+  fileSizeBytes    Int?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([brandId])
+  @@index([status])
+  @@map("shorts_reels")
+}
+
+// AI carousel: one planned set of separate slide images. The chat shows it
+// through a host Generation (generationId); every slide image is rendered by
+// its own Generation row (CarouselSlide.generationId) through the normal
+// worker, so status, retries and quota behave like any other image job.
+model Carousel {
+  id           String          @id @default(uuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generationId String          @unique
+  generation   Generation      @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  brandId      String?
+  themeId      String?
+  prompt       String          @db.Text
+  title        String          @default("")
+  aspect       String          @default("square") // square | portrait | landscape
+  quality      String          @default("low")
+  design       Json? // shared design system: palette, typography, background, layout, logo
+  status       String          @default("planning") // planning | generating | completed | partial | failed
+  error        String?
+  /// Client idempotency key - a double-clicked Generate never plans twice.
+  requestKey   String?
+  slides       CarouselSlide[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([userId, requestKey])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model CarouselSlide {
+  id           String   @id @default(uuid())
+  carouselId   String
+  carousel     Carousel @relation(fields: [carouselId], references: [id], onDelete: Cascade)
+  position     Int
+  role         String   @default("content") // cover | content | cta
+  title        String   @default("")
+  body         String   @default("") @db.Text
+  visual       String   @default("") @db.Text // what the slide's image shows
+  productLabel String? // brand Product Photo this slide features
+  imageUrl     String?
+  source       String   @default("ai") // ai | upload
+  generationId String? // the Generation rendering the current image
+  status       String   @default("pending") // pending | generating | completed | failed
+  attempts     Int      @default(0)
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([carouselId, position])
+  @@index([generationId])
 }

@@ -381,3 +381,38 @@ the schedule.
   tokens here). Which private-reply path and which `subscribed_fields` Meta accepts for your app
   is handled by the fallbacks above; the Activity table shows Meta's exact error if anything is
   refused.
+
+## Reel Studio (brand-based and general AI reels) — 2026-11-25
+
+- **Lives inside Shorts Factory, not the older `/reels` Video Studio.** Video Studio cuts a brand's own
+  uploaded footage folder; Reel Studio writes the reel from a brand *or any topic* and sources the
+  visuals itself. It reuses the Shorts pieces instead of duplicating them: ffmpeg runner/probe,
+  `groupWords` captions, Pexels/Pixabay search + allow-listed downloader, the Postgres job queue,
+  signed file URLs, the Path C clip adapters and budget ledger, brand access (`findAccessibleBrand`),
+  brand kit fonts/logo (`brand-compose.ts`), and the app's image providers.
+- **One new table** (`shorts_reels`, migration `20261125130000_shorts_reel_studio`, additive only). No
+  channel or `ShortsVideo` row: reels aren't scheduled or uploaded, so the channel state machine
+  doesn't apply. Script/settings are JSON validated by zod on every read and write.
+- **Script first, render second.** The script call is synchronous (the user reviews it before paying
+  for visuals/voice). Brand reels get the brand summary, tone, offer ("use exactly, never change
+  numbers"; no offer = never invent one), forbidden words/claims (re-asked when hit), and the product
+  photo list by index so the model can put the *real* product on screen.
+- **Visual choice per scene, with fallbacks.** Auto order: (AI clip if enabled) → stock video → stock
+  photo → AI image (or AI first with "prefer AI") → brand product photo (brand reels) → brand graphic
+  card. An explicit choice is tried first; if it can't be made the reel still renders and the scene
+  gets a warning. Stock queries are the model's concrete English search words, never abstract terms.
+- **Voice per scene**, so a scene's length is planned time stretched to fit its voiceover and the
+  sync is exact by construction. ElevenLabs gives word timestamps; OpenAI TTS (male/female voices,
+  language + delivery via `instructions`) gets proportional timings. Indian languages: script is
+  written in the language; subtitles need system fonts with those scripts (see below).
+- **Caching**: each scene's resolved visual is keyed by a hash of its choice; each voice clip by text
+  + voice settings. A re-render after editing one scene only regenerates that scene.
+- **AI video clips** are opt-in and metered against the same monthly Path C cap/ledger
+  (`channelId = "reel:<id>"`), resumable after a crash without paying twice.
+- **Music**: shared owner-cleared `music_library` plus per-user uploads (`reel-music/<userId>`).
+  Music is ducked under the voice; voice and music volumes are separate.
+- **Fonts**: subtitles use the bundled Noto Sans (Latin). For Hindi/Tamil/etc. subtitles the server
+  needs Noto fonts for those scripts installed (libass/canvas fall back to system fonts); on Railway set
+  `RAILPACK_DEPLOY_APT_PACKAGES="fonts-noto-core"` (or bundle the Noto Indic TTFs in `apps/api/assets/fonts`).
+- **Render cost**: ~1x realtime per pass at 1080x1920 on a laptop (a 30 s reel took ~2 min locally);
+  720p is offered as the faster option.

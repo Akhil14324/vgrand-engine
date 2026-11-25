@@ -5,6 +5,7 @@ import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
 import { prisma } from "@catgpt/db";
 import { brandProfileSchema, type BrandProfile, type LogoCorner } from "@catgpt/types";
 import { isTrustedImageUrl } from "../lib/urls.js";
+import { brandWantsLogoOverlay } from "../lib/brand-identity.js";
 
 /* ------------------------------ pure layout ------------------------------ */
 
@@ -123,7 +124,7 @@ function ensureFallbackFont(): string {
 
 const fontFamilies = new Map<string, string>();
 /** Registers an uploaded font once per URL; any failure falls back to the bundled font. */
-async function fontFamilyFor(url: string | null): Promise<string> {
+export async function fontFamilyFor(url: string | null): Promise<string> {
   const fallback = ensureFallbackFont();
   if (!url) return fallback;
   const cached = fontFamilies.get(url);
@@ -176,18 +177,33 @@ export async function loadBrandKit(brandId: string): Promise<BrandKit | null> {
   return {
     profile,
     placement: profile.logoPlacement ?? DEFAULT_PLACEMENT,
-    logoUrl: brand.assets.find((a) => a.kind === "logo")?.url ?? null,
+    logoUrl: pickLogoUrl(brand.assets.filter((a) => a.kind === "logo").map((a) => a.url)),
     headingFontUrl: fontUrl(profile.fonts?.heading),
     bodyFontUrl: fontUrl(profile.fonts?.body),
   };
 }
 
-/** Off: generated images are no longer stamped with the logo. Use "Apply brand kit" on an image to add it. */
-const AUTO_STAMP_LOGO = false;
+/**
+ * Which uploaded logo file to stamp: a transparent-capable PNG first, then
+ * SVG, then anything else (oldest upload wins within a format, matching the
+ * brand's "official" first logo).
+ */
+export function pickLogoUrl(urls: string[]): string | null {
+  const ext = (u: string) => u.split(/[?#]/)[0]!.toLowerCase();
+  return (
+    urls.find((u) => ext(u).endsWith(".png")) ??
+    urls.find((u) => ext(u).endsWith(".svg")) ??
+    urls[0] ??
+    null
+  );
+}
 
-/** The kit for generations that have a real brand logo to stamp. */
-export function shouldAutoStampLogo(kit: Pick<BrandKit, "logoUrl"> | null): boolean {
-  return AUTO_STAMP_LOGO && Boolean(kit?.logoUrl);
+/**
+ * Brand images get the brand's REAL logo file composited on after generation
+ * (never an AI redraw), unless the brand explicitly opted out.
+ */
+export function shouldAutoStampLogo(kit: Pick<BrandKit, "logoUrl" | "profile"> | null): boolean {
+  return Boolean(kit?.logoUrl) && brandWantsLogoOverlay(kit?.profile);
 }
 
 export async function loadAutoStampKit(brandId: string | null | undefined): Promise<BrandKit | null> {
@@ -203,6 +219,10 @@ export interface ComposeOptions {
   logo: boolean;
   headline?: string;
   cta?: string;
+  /** Per-image logo position/size; defaults to the brand's saved placement. */
+  placement?: LogoPlacement;
+  /** CTA button colour; must be one of the brand's colours (validated by the route). */
+  accentColor?: string;
 }
 
 /**
@@ -228,7 +248,7 @@ export async function composeBrandKit(
   const ctx = canvas.getContext("2d");
   ctx.drawImage(base, 0, 0, W, H);
 
-  const { placement } = kit;
+  const placement = opts.placement ?? kit.placement;
   const margin = Math.round((W * placement.marginPct) / 100);
 
   if (headline || cta) {
@@ -269,7 +289,7 @@ export async function composeBrandKit(
       ctx.font = `${ctaSize}px "${bodyFamily}"`;
       const padX = Math.round(ctaSize * 1.1);
       const pillW = Math.round(ctx.measureText(cta).width + padX * 2);
-      const fill = kit.profile.colors?.[0] ?? "#ffffff";
+      const fill = opts.accentColor ?? kit.profile.colors?.[0] ?? "#ffffff";
       ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.roundRect(margin, y, pillW, pillH, pillH / 2);
@@ -282,7 +302,9 @@ export async function composeBrandKit(
 
   if (logoBytes) {
     const logo = await loadImage(logoBytes);
-    const r = computeLogoRect(W, H, logo.width, logo.height, placement);
+    // An SVG without intrinsic size can't be scaled faithfully - fail visibly.
+    if (!logo.width || !logo.height) throw new Error("logo file has no usable size");
+    const r =computeLogoRect(W, H, logo.width, logo.height, placement);
     ctx.drawImage(logo, r.x, r.y, r.w, r.h);
   }
 
