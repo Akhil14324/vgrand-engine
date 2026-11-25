@@ -68,6 +68,15 @@ export function sendTemplatePayload(to: string, name: string, language: string, 
   return { messaging_product: "whatsapp", to, type: "template", template: { name, language: { code: language }, components } };
 }
 
+/** Marks the customer's message read and shows "typing…" (for up to ~25 s or until we reply). Best effort: never throws. */
+export async function markReadTyping(token: string, phoneNumberId: string, mid: string): Promise<void> {
+  try {
+    await call("POST", `/${phoneNumberId}/messages`, token, { messaging_product: "whatsapp", status: "read", message_id: mid, typing_indicator: { type: "text" } });
+  } catch {
+    // purely cosmetic
+  }
+}
+
 export interface PhoneInfo {
   displayPhone: string | null;
   verifiedName: string | null;

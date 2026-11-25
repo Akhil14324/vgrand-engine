@@ -5,7 +5,12 @@ import { loadBrandContext } from "../../lib/brand.js";
 import { getClient } from "../chat.js";
 import { findScopeDocuments, retrievePassages } from "../documents.js";
 import { advanceStage, menuItemFromReply, parseAiReply, wantsHuman, REPLY_WINDOW_MS } from "./logic.js";
+import { decryptToken } from "../../lib/social-crypto.js";
+import { markReadTyping } from "./graph.js";
 import { sendImage, sendMenu, sendText } from "./send.js";
+
+const ms = (t0: number) => Date.now() - t0;
+const timing = (event: string, data: Record<string, unknown>) => console.log(JSON.stringify({ ts: new Date().toISOString(), level: "info", scope: "whatsapp", event, ...data }));
 
 /**
  * The inbound lead bot. Modes per number: off | menu | ai | hybrid.
@@ -50,16 +55,19 @@ async function runMenuItem(number: WhatsappNumber, contact: WhatsappContact, ite
 }
 
 export async function handleInbound(messageId: string): Promise<void> {
+  const t0 = Date.now();
   const msg = await prisma.whatsappMessage.findUnique({ where: { id: messageId } });
   if (!msg || msg.direction !== "in") return;
-  const [number, contact] = await Promise.all([
+  const [number, contact, answered] = await Promise.all([
     prisma.whatsappNumber.findUnique({ where: { id: msg.numberId } }),
     prisma.whatsappContact.findUnique({ where: { id: msg.contactId } }),
+    // A reply sent after this message means it was already handled (retry) or a human answered.
+    prisma.whatsappMessage.findFirst({ where: { contactId: msg.contactId, direction: "out", createdAt: { gt: msg.createdAt }, source: { in: ["bot", "human"] } }, select: { id: true } }),
   ]);
-  if (!number || !contact || number.status !== "active" || number.botMode === "off" || contact.botPaused) return;
-  // A reply sent after this message means it was already handled (retry) or a human answered.
-  const answered = await prisma.whatsappMessage.findFirst({ where: { contactId: contact.id, direction: "out", createdAt: { gt: msg.createdAt }, source: { in: ["bot", "human"] } }, select: { id: true } });
-  if (answered) return;
+  if (!number || !contact || number.status !== "active" || number.botMode === "off" || contact.botPaused || answered) return;
+  // Read ticks + "typing…" right away so the customer sees life while we work.
+  if (msg.waMessageId) void markReadTyping(decryptToken(number.accessTokenEnc), number.phoneNumberId, msg.waMessageId);
+  timing("bot.start", { messageId, waitedMs: Date.now() - msg.createdAt.getTime(), setupMs: ms(t0) });
 
   const menu = menuOf(number);
   const tapped = menuItemFromReply(msg.replyId, menu);
@@ -86,16 +94,21 @@ const FIELD_HELP = "name, budget (e.g. 80 lakh), bhk (1/2/3/4), location (prefer
 
 async function aiTurn(number: WhatsappNumber, contact: WhatsappContact, current: WhatsappMessage, hint: string | null): Promise<void> {
   if (!env.OPENAI_API_KEY) return handoff(number, contact);
-  const brand = await loadBrandContext(number.brandId);
+  const t0 = Date.now();
   const question = current.text || hint || "";
+  const [brand, docs, history] = await Promise.all([
+    loadBrandContext(number.brandId),
+    findScopeDocuments({ conversationId: null, workspaceId: null, brandId: number.brandId }).catch(() => []),
+    prisma.whatsappMessage.findMany({ where: { contactId: contact.id }, orderBy: { createdAt: "desc" }, take: 12 }),
+  ]);
+  const tLoad = ms(t0);
   let passages: string[] = [];
   try {
-    const docs = await findScopeDocuments({ conversationId: null, workspaceId: null, brandId: number.brandId });
     passages = await retrievePassages(question, docs.map((d) => d.id));
   } catch (err) {
     console.warn("[whatsapp] retrieval failed", (err as Error).message);
   }
-  const history = await prisma.whatsappMessage.findMany({ where: { contactId: contact.id }, orderBy: { createdAt: "desc" }, take: 12 });
+  const tRag = ms(t0) - tLoad;
   const known = { name: contact.name, ...(contact.fields as Record<string, string>) };
 
   const system = [
@@ -123,9 +136,9 @@ async function aiTurn(number: WhatsappNumber, contact: WhatsappContact, current:
   let raw = "";
   try {
     const res = await getClient().chat.completions.create({
-      model: env.CHAT_MODEL,
+      model: env.WHATSAPP_MODEL,
       temperature: 0.3,
-      max_tokens: 400,
+      max_tokens: 300,
       response_format: { type: "json_object" },
       messages: [{ role: "system", content: system }, ...turns],
     });
@@ -134,8 +147,10 @@ async function aiTurn(number: WhatsappNumber, contact: WhatsappContact, current:
     console.warn("[whatsapp] ai turn failed", (err as Error).message);
     return handoff(number, contact);
   }
+  const tModel = ms(t0) - tLoad - tRag;
   const turn = parseAiReply(raw);
   if (turn.reply) await sendText(number, contact, turn.reply, "bot");
+  timing("bot.ai", { model: env.WHATSAPP_MODEL, loadMs: tLoad, ragMs: tRag, modelMs: tModel, sendMs: ms(t0) - tLoad - tRag - tModel, passages: passages.length });
 
   const fields = { ...(contact.fields as Record<string, string>), ...turn.fields };
   const { name, ...rest } = fields;

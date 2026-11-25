@@ -1,5 +1,5 @@
 import { Prisma, prisma } from "@catgpt/db";
-import { enqueueJob, registerJobHandler, type ShortsJobRow } from "../shorts/jobs.js";
+import { enqueueJob, registerJobHandler, wakeJobWorker, type ShortsJobRow } from "../shorts/jobs.js";
 import { handleInbound } from "./bot.js";
 import { runBroadcast } from "./broadcast.js";
 import { isOptIn, isOptOut, parseWebhook, type InboundMessage, type StatusUpdate } from "./logic.js";
@@ -73,6 +73,7 @@ async function storeInbound(numberId: string, ev: InboundMessage): Promise<boole
     return true;
   }
   await enqueueJob({ type: "wa_bot", key: `wa:bot:${row.id}`, payload: { messageId: row.id }, maxAttempts: 3 });
+  wakeJobWorker(); // answer now, not at the next poll
   return true;
 }
 
