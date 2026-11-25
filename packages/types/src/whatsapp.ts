@@ -111,6 +111,8 @@ export interface WaNumberDto {
   handoffKeywords: string[];
   handoffMessage: string;
   createdAt: string;
+  /** Set on connect / token replace when Meta refused the webhook subscription. */
+  warning?: string | null;
 }
 export interface WaContactDto {
   id: string;

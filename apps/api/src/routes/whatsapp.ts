@@ -21,6 +21,23 @@ function metaFailure(err: unknown): never {
   throw err;
 }
 
+/**
+ * Subscribes the WhatsApp account to our webhook. A token without whatsapp_business_management
+ * (e.g. the temporary one from API Setup) is refused by Meta; connecting still works for sending
+ * and receiving on an already-subscribed account, so that case becomes a warning instead of a failure.
+ */
+async function subscribeOrWarn(token: string, wabaId: string): Promise<string | null> {
+  try {
+    await subscribeWaba(token, wabaId);
+    return null;
+  } catch (err) {
+    if (err instanceof WaError && err.kind === "rejected") {
+      return `Connected, but Meta would not subscribe the account to webhooks (${err.message}). Replies may not arrive and templates will not work until you use a System User token with whatsapp_business_management.`;
+    }
+    return metaFailure(err);
+  }
+}
+
 /** WhatsApp management API: numbers per brand, bot settings, inbox, templates, broadcasts. */
 export async function whatsappRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
@@ -42,17 +59,18 @@ export async function whatsappRoutes(app: FastifyInstance) {
     const brand = await findManageableBrand(req.userId, body.brandId);
     if (await prisma.whatsappNumber.findUnique({ where: { phoneNumberId: body.phoneNumberId } })) throw new HttpError(409, "This WhatsApp number is already connected", "ALREADY_CONNECTED");
     let info;
+    let warning: string | null = null;
     try {
       info = await getPhoneInfo(body.accessToken, body.phoneNumberId); // proves the token + id work together
-      await subscribeWaba(body.accessToken, body.wabaId);
     } catch (err) {
       metaFailure(err);
     }
+    warning = await subscribeOrWarn(body.accessToken, body.wabaId);
     const n = await prisma.whatsappNumber.create({
       data: { brandId: brand.id, createdById: req.userId, phoneNumberId: body.phoneNumberId, wabaId: body.wabaId, accessTokenEnc: encryptToken(body.accessToken), ...info },
       include: { brand: { select: { name: true } } },
     });
-    return reply.code(201).send(toNumberDto(n));
+    return reply.code(201).send({ ...toNumberDto(n), warning });
   });
 
   app.patch<{ Params: { id: string } }>("/whatsapp/numbers/:id", async (req) => {
@@ -72,12 +90,12 @@ export async function whatsappRoutes(app: FastifyInstance) {
     let info;
     try {
       info = await getPhoneInfo(accessToken, n.phoneNumberId);
-      await subscribeWaba(accessToken, n.wabaId);
     } catch (err) {
       metaFailure(err);
     }
+    const warning = await subscribeOrWarn(accessToken, n.wabaId);
     const u = await prisma.whatsappNumber.update({ where: { id: n.id }, data: { accessTokenEnc: encryptToken(accessToken), status: "active", ...info }, include: { brand: { select: { name: true } } } });
-    return toNumberDto(u);
+    return { ...toNumberDto(u), warning };
   });
 
   app.delete<{ Params: { id: string } }>("/whatsapp/numbers/:id", async (req, reply) => {
