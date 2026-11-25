@@ -95,7 +95,8 @@ export async function listMetaTemplates(token: string, wabaId: string): Promise<
 
 /** Meta wants an uploaded-file handle (not a URL) as the header example: resumable upload API. */
 export async function uploadExampleImage(token: string, imageUrl: string): Promise<string> {
-  if (!env.META_APP_ID) throw new WaError("rejected", 400, null, "META_APP_ID is not set");
+  const appId = env.WHATSAPP_APP_ID ?? env.META_APP_ID;
+  if (!appId) throw new WaError("rejected", 400, null, "WHATSAPP_APP_ID (or META_APP_ID) is not set");
   let img: Response;
   try {
     img = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
@@ -106,7 +107,7 @@ export async function uploadExampleImage(token: string, imageUrl: string): Promi
   if (!img.ok || !["image/jpeg", "image/png"].includes(type)) throw new WaError("rejected", 400, null, "Header image must be a public JPEG or PNG");
   const bytes = Buffer.from(await img.arrayBuffer());
   if (bytes.length > 5 * 1024 * 1024) throw new WaError("rejected", 400, null, "Header image must be under 5 MB");
-  const session = await call("POST", `/${env.META_APP_ID}/uploads`, token, undefined, { file_length: String(bytes.length), file_type: type, file_name: "header" });
+  const session = await call("POST", `/${appId}/uploads`, token, undefined, { file_length: String(bytes.length), file_type: type, file_name: "header" });
   let up: Response;
   try {
     up = await fetch(`${endpoints.base()}/${session.id}`, { method: "POST", headers: { Authorization: `OAuth ${token}`, file_offset: "0" }, body: bytes, signal: AbortSignal.timeout(60_000) });

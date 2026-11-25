@@ -7,9 +7,12 @@ import { ingestWebhook } from "../services/whatsapp/processor.js";
  * Meta WhatsApp webhook. No app.authenticate: trust comes from the
  * X-Hub-Signature-256 HMAC (app secret) on each delivery and the verify token on the
  * one-time GET. Callback URL for Meta App Dashboard > WhatsApp > Configuration:
- * <API_PUBLIC_URL>/webhooks/whatsapp (reuses META_WEBHOOK_VERIFY_TOKEN / META_APP_SECRET).
+ * <API_PUBLIC_URL>/webhooks/whatsapp (uses WHATSAPP_WEBHOOK_VERIFY_TOKEN / WHATSAPP_APP_SECRET, falling back to the META_* ones).
  */
 export async function whatsappWebhookRoutes(app: FastifyInstance) {
+  const secret = () => env.WHATSAPP_APP_SECRET ?? env.META_APP_SECRET;
+  const verifyToken = () => env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? env.META_WEBHOOK_VERIFY_TOKEN;
+
   app.addContentTypeParser("application/json", { parseAs: "buffer", bodyLimit: 5 * 1024 * 1024 }, (req, body, done) => {
     (req as FastifyRequest & { rawBody?: Buffer }).rawBody = body as Buffer;
     try {
@@ -20,9 +23,9 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Querystring: Record<string, string | undefined> }>("/webhooks/whatsapp", async (req, reply) => {
-    if (!env.META_WEBHOOK_VERIFY_TOKEN) return reply.code(503).send("Webhook verify token not configured");
+    if (!verifyToken()) return reply.code(503).send("Webhook verify token not configured");
     const q = req.query;
-    if (q["hub.mode"] === "subscribe" && q["hub.verify_token"] === env.META_WEBHOOK_VERIFY_TOKEN && q["hub.challenge"]) {
+    if (q["hub.mode"] === "subscribe" && q["hub.verify_token"] === verifyToken() && q["hub.challenge"]) {
       return reply.type("text/plain").send(q["hub.challenge"]);
     }
     return reply.code(403).send("Verification failed");
@@ -30,12 +33,13 @@ export async function whatsappWebhookRoutes(app: FastifyInstance) {
 
   app.post("/webhooks/whatsapp", async (req, reply) => {
     const raw = (req as FastifyRequest & { rawBody?: Buffer }).rawBody;
-    if (!env.META_APP_SECRET) {
-      req.log.error("whatsapp webhook received but META_APP_SECRET is not set; refusing unsigned processing");
+    const appSecret = secret();
+    if (!appSecret) {
+      req.log.error("whatsapp webhook received but no app secret is set (WHATSAPP_APP_SECRET / META_APP_SECRET); refusing unsigned processing");
       return reply.code(503).send({ ok: false });
     }
     const sig = req.headers["x-hub-signature-256"];
-    if (!raw || !verifySignature(raw, typeof sig === "string" ? sig : undefined, env.META_APP_SECRET)) {
+    if (!raw || !verifySignature(raw, typeof sig === "string" ? sig : undefined, appSecret)) {
       req.log.warn("whatsapp webhook with a missing or invalid signature rejected");
       return reply.code(401).send({ ok: false });
     }

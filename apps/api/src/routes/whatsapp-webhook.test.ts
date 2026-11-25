@@ -42,6 +42,18 @@ describe("whatsapp webhook route", () => {
     expect(ingest).not.toHaveBeenCalled();
   });
 
+  it("uses the WhatsApp app secret when it differs from the Instagram one", async () => {
+    Object.assign(env, { WHATSAPP_APP_SECRET: "wa-secret" });
+    try {
+      const a = await app();
+      const headers = { "content-type": "application/json" };
+      expect((await a.inject({ method: "POST", url: "/webhooks/whatsapp", headers: { ...headers, "x-hub-signature-256": sign(body) }, payload: body })).statusCode).toBe(401);
+      expect((await a.inject({ method: "POST", url: "/webhooks/whatsapp", headers: { ...headers, "x-hub-signature-256": sign(body, "wa-secret") }, payload: body })).statusCode).toBe(200);
+    } finally {
+      Object.assign(env, { WHATSAPP_APP_SECRET: undefined });
+    }
+  });
+
   it("ingests a correctly signed delivery", async () => {
     const a = await app();
     const res = await a.inject({ method: "POST", url: "/webhooks/whatsapp", headers: { "content-type": "application/json", "x-hub-signature-256": sign(body) }, payload: body });

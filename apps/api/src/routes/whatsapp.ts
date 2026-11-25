@@ -27,8 +27,8 @@ export async function whatsappRoutes(app: FastifyInstance) {
 
   app.get("/whatsapp/status", async (): Promise<WaWebhookStatusDto> => ({
     callbackUrl: webhookCallbackUrl(),
-    verifyTokenSet: !!env.META_WEBHOOK_VERIFY_TOKEN,
-    appSecretSet: !!env.META_APP_SECRET,
+    verifyTokenSet: !!(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? env.META_WEBHOOK_VERIFY_TOKEN),
+    appSecretSet: !!(env.WHATSAPP_APP_SECRET ?? env.META_APP_SECRET),
     tokenKeySet: hasValidTokenKey(),
   }));
 

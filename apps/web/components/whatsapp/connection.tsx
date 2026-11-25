@@ -40,8 +40,8 @@ function WebhookInfo() {
         </Button>
       </div>
       <ul className="space-y-1">
-        <Row ok={s.verifyTokenSet} label="META_WEBHOOK_VERIFY_TOKEN is set on the server" />
-        <Row ok={s.appSecretSet} label="META_APP_SECRET is set (signatures are checked)" />
+        <Row ok={s.verifyTokenSet} label="WHATSAPP_WEBHOOK_VERIFY_TOKEN (or META_WEBHOOK_VERIFY_TOKEN) is set" />
+        <Row ok={s.appSecretSet} label="WHATSAPP_APP_SECRET (or META_APP_SECRET) is set, so signatures are checked" />
         <Row ok={s.tokenKeySet} label="SOCIAL_TOKEN_KEY is set (tokens are stored encrypted)" />
       </ul>
     </Card>
