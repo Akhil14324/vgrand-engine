@@ -32,6 +32,15 @@ export default function PrivacyPage() {
           We only request the permissions needed to publish the content you approve.
         </p>
         <p>
+          <strong className="text-foreground">WhatsApp conversations.</strong> If you connect a
+          WhatsApp Business number, we process the messages people send to that number through
+          Meta’s WhatsApp Business Platform: their phone number, WhatsApp profile name, message
+          content, delivery and read status, and details they share in chat (for example budget
+          or preferred location). This is used to answer enquiries, let your team reply, and send
+          messages that people have agreed to receive. Marketing messages are only sent to people
+          who opted in, and anyone can stop them by replying STOP.
+        </p>
+        <p>
           <strong className="text-foreground">Usage and technical data.</strong> Basic logs such
           as request timestamps, IP address, browser type and error information, used to keep the
           Service secure and reliable and to enforce usage limits.
@@ -54,7 +63,7 @@ export default function PrivacyPage() {
 
       <Section title="3. Social platform data and tokens">
         <p>
-          Tokens issued by Meta, X and Google are encrypted at rest using AES-256-GCM, are
+          Tokens issued by Meta (including WhatsApp), X and Google are encrypted at rest using AES-256-GCM, are
           decrypted only on our servers at the moment they are needed, and are never sent to your
           browser or written to our logs. We use each platform’s data solely to connect your
           account and publish the content you approve, and to show the status of those posts.

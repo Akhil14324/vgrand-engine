@@ -24,6 +24,8 @@ const envSchema = z.object({
   OPENAI_BASE_URL: opt(z.string().url()),
   /** Chat + intent-classification model — cheap tier, not the image models. */
   CHAT_MODEL: opt(z.string().min(1)),
+  /** WhatsApp bot replies: use a fast model; falls back to CHAT_MODEL. */
+  WHATSAPP_MODEL: opt(z.string().min(1)),
   /** Model for code_interpreter runs — needs a capable tier (mini lacks it). */
   CODE_MODEL: opt(z.string().min(1)),
   /** Campaign Builder strategy model - long, structured output needs a capable tier. */
@@ -116,10 +118,20 @@ const envSchema = z.object({
   /** Instagram automation webhook: the "Verify Token" you type in Meta App Dashboard > Webhooks. */
   META_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
   /**
+   * WhatsApp can live in a different Meta app (even another Meta account) than Instagram/Facebook.
+   * Meta signs each webhook with ITS app's secret, so set these when that is the case; each one
+   * falls back to the matching META_* value when unset.
+   */
+  WHATSAPP_APP_ID: opt(z.string().min(1)),
+  WHATSAPP_APP_SECRET: opt(z.string().min(1)),
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
+  /**
    * "true" adds the Instagram automation permissions to the Meta login scope (only used when
    * META_LOGIN_CONFIG_ID is not set). Turn on once Meta has approved them, or login fails.
    */
   META_AUTOMATION_SCOPES: bool,
+  /** Ask for instagram_manage_insights when connecting Instagram (needed for the Instagram Insights page). */
+  META_INSIGHTS_SCOPES: bool,
   X_CLIENT_ID: opt(z.string().min(1)),
   X_CLIENT_SECRET: opt(z.string().min(1)),
   GOOGLE_CLIENT_ID: opt(z.string().min(1)),
@@ -163,6 +175,7 @@ export const env = {
   ...parsed,
   REDIS_URL: parsed.REDIS_URL ?? "redis://localhost:6379",
   CHAT_MODEL: parsed.CHAT_MODEL ?? "gpt-4o-mini",
+  WHATSAPP_MODEL: parsed.WHATSAPP_MODEL ?? parsed.CHAT_MODEL ?? "gpt-4o-mini",
   OCR_MODEL: parsed.OCR_MODEL ?? parsed.CHAT_MODEL ?? "gpt-4o-mini",
   EDIT_MODEL: parsed.EDIT_MODEL ?? parsed.CHAT_MODEL ?? "gpt-4o-mini",
   CODE_MODEL: parsed.CODE_MODEL ?? "gpt-4o",

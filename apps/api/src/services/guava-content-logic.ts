@@ -145,7 +145,24 @@ export function matchBrand<T extends { id: string; name: string }>(answer: strin
   return brands.find((b) => squash(b.name) === a) ?? null;
 }
 
-export const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** Shortens text to n characters. Never cuts an emoji (a surrogate pair) in half: a lone surrogate makes Postgres reject the JSON it is saved in. */
+export function clip(s: string, n: number): string {
+  if (s.length <= n) return s;
+  let end = n - 1;
+  const last = s.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${s.slice(0, end)}…`;
+}
+
+/** Replaces lone surrogates and drops NUL characters, which Postgres JSON columns reject. */
+export function wellFormed(s: string): string {
+  return s.split("\u0000").join("").replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+}
+
+/** A copy of `v` safe to store in a JSON column: every string is made well-formed. */
+export function cleanForJson<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "string" ? wellFormed(x) : x))) as T;
+}
 
 /* ------------------------------ splits (Petalie-style) ------------------------------ */
 

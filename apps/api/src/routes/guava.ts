@@ -13,6 +13,7 @@ import { findAccessibleBrand, findManageableBrand } from "../lib/brand.js";
 import { findWorkspaceForUser } from "../lib/workspace-access.js";
 import { buildProfileDto, saveProfileUpdate } from "../services/guava-profile.js";
 import { askFollowUp, getDiagnosis, listDiagnoses, startDiagnosis } from "../services/guava-diagnosis.js";
+import { generateInstagramStrategy, getInstagramInsights } from "../services/ig-insights.js";
 import {
   getInstagramSetup,
   getContentAudit,
@@ -115,6 +116,24 @@ export async function guavaRoutes(app: FastifyInstance) {
       const body = parseBody(guavaFindRequestSchema, req.body);
       if (body.workspaceId) await findWorkspaceForUser(req.userId, body.workspaceId);
       return findInstagramAccounts(req.userId, body.workspaceId, body.kind, body.query);
+    },
+  );
+
+  // Instagram Insights (views, reach, watch time) for the account saved on the Instagram page.
+  app.get("/guava/instagram-insights", async (req) => {
+    const q = parseBody(z.object({ workspaceId: z.string().uuid().optional(), refresh: z.coerce.boolean().optional() }), req.query);
+    if (q.workspaceId) await findWorkspaceForUser(req.userId, q.workspaceId);
+    return getInstagramInsights(req.userId, q.workspaceId ?? null, { refresh: q.refresh });
+  });
+
+  // AI "next strategy" for one brand, from those insights.
+  app.post(
+    "/guava/brands/:brandId/instagram-insights/strategy",
+    { config: { rateLimit: { max: 3, timeWindow: "1 minute" } } },
+    async (req) => {
+      const { brandId } = parseBody(brandParams, req.params);
+      const brand = await findManageableBrand(req.userId, brandId);
+      return generateInstagramStrategy(brand, req.userId, brand.workspaceId);
     },
   );
 

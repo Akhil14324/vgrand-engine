@@ -47,6 +47,31 @@ export async function geminiJson(opts: {
   temperature?: number;
   /** "low" asks the model to think briefly: classification and note-taking don't need long reasoning, which is what makes calls slow. */
   thinking?: "low" | "medium";
+  /** Upper bound for the answer (thinking included). Long answers like the full review need a high value, or they are cut off mid-JSON. */
+  maxOutputTokens?: number;
+  /** Per-request timeout; defaults to 180s. Short jobs (sorting posts) use less so a stuck call fails fast. */
+  timeoutMs?: number;
+}): Promise<Record<string, unknown>> {
+  // A cut-off or malformed answer is retried once: it is usually a one-off.
+  try {
+    return await geminiJsonOnce(opts);
+  } catch (err) {
+    if (!(err instanceof GeminiUnreadable)) throw err;
+    return geminiJsonOnce(opts);
+  }
+}
+
+/** The answer arrived but isn't valid JSON (usually cut off at the output limit). */
+class GeminiUnreadable extends GeminiError {}
+
+async function geminiJsonOnce(opts: {
+  system: string;
+  parts: GeminiPart[];
+  model?: string;
+  temperature?: number;
+  thinking?: "low" | "medium";
+  maxOutputTokens?: number;
+  timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
   const model = opts.model ?? env.GEMINI_MODEL;
   const send = (withThinking: boolean) =>
@@ -59,10 +84,11 @@ export async function geminiJson(opts: {
         generationConfig: {
           responseMimeType: "application/json",
           temperature: opts.temperature ?? 0.4,
+          ...(opts.maxOutputTokens ? { maxOutputTokens: opts.maxOutputTokens } : {}),
           ...(withThinking ? { thinkingConfig: { thinkingLevel: opts.thinking } } : {}),
         },
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
   let thinking: "low" | "medium" | null = opts.thinking ?? null;
   let res = await send(thinking !== null);
@@ -79,20 +105,20 @@ export async function geminiJson(opts: {
   }
   if (!res.ok) throw new GeminiError(`Gemini request failed: ${await readError(res)}`);
   const json = (await res.json().catch(() => {
-    throw new GeminiError("Gemini sent an unreadable answer");
+    throw new GeminiUnreadable("Gemini sent an unreadable answer");
   })) as {
-    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+    candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
     promptFeedback?: { blockReason?: string };
   };
   if (json.promptFeedback?.blockReason) throw new GeminiError(`Gemini blocked the request (${json.promptFeedback.blockReason})`);
   const raw = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
-  const finish = json.candidates?.[0]?.finishReason;
-  if (!raw) throw new GeminiError(`Gemini returned an empty response${finish ? ` (${finish})` : ""}`);
+  const finish = json.candidates?.[0]?.finishReason ?? "unknown";
+  if (!raw) throw new GeminiUnreadable(`Gemini returned an empty response (${finish})`);
   try {
     return parseJsonObject(raw);
   } catch (err) {
     if (err instanceof GeminiError) throw err;
-    throw new GeminiError(`Gemini returned broken JSON${finish && finish !== "STOP" ? ` (${finish})` : ""}`);
+    throw new GeminiUnreadable(`Gemini's answer was cut off or unreadable (${finish})`);
   }
 }
 

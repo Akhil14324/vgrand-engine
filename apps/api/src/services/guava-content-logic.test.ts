@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { guavaContentAuditRequestSchema, guavaContentReportSchema, normalizeIgHandle } from "@catgpt/types";
 import {
+  cleanForJson,
+  clip,
   competitorErrorReason,
   computePerformance,
   engagementAverages,
@@ -224,5 +226,23 @@ describe("find accounts: parseCandidates", () => {
   it("returns nothing for broken or missing JSON", () => {
     expect(parseCandidates("no json here")).toEqual([]);
     expect(parseCandidates('{"accounts": [ {"handle": ')).toEqual([]);
+  });
+});
+
+const lone = (s: string) => !/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(s);
+
+describe("saving captions with emoji", () => {
+  it("clip never leaves half an emoji", () => {
+    const s = "ab" + "😀".repeat(5);
+    for (let n = 2; n <= 10; n++) expect(lone(clip(s, n))).toBe(true);
+    expect(clip("short", 10)).toBe("short");
+  });
+  it("cleanForJson fixes lone surrogates and NUL so Postgres accepts the JSON", () => {
+    const bad = { caption: "hi \ud83d there\u0000", nested: ["\ude00"] };
+    const ok = cleanForJson(bad);
+    expect(lone(ok.caption)).toBe(true);
+    expect(ok.caption).not.toContain("\u0000");
+    expect(lone(ok.nested[0]!)).toBe(true);
+    expect(cleanForJson({ a: "😀 fine", n: 3 })).toEqual({ a: "😀 fine", n: 3 });
   });
 });

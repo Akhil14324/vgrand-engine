@@ -16,10 +16,11 @@ describe("geminiJson failures are GeminiErrors with a reason", () => {
   });
 
   it("cut-off JSON", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(answer('{"summary":"half', "MAX_TOKENS"));
+    // A cut-off answer is retried once (main's behaviour), so both calls get the same cut-off answer.
+    vi.mocked(fetch).mockImplementation(async () => answer('{"summary":"half', "MAX_TOKENS"));
     const err = await geminiJson({ system: "s", parts: [{ text: "x" }] }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(GeminiError);
-    expect((err as Error).message).toBe("Gemini returned broken JSON (MAX_TOKENS)");
+    expect((err as Error).message).toBe("Gemini's answer was cut off or unreadable (MAX_TOKENS)");
   });
 
   it("dropped connection", async () => {
@@ -30,7 +31,7 @@ describe("geminiJson failures are GeminiErrors with a reason", () => {
   });
 
   it("empty answer names the finish reason", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(answer("", "SAFETY"));
+    vi.mocked(fetch).mockImplementation(async () => answer("", "SAFETY"));
     await expect(geminiJson({ system: "s", parts: [{ text: "x" }] })).rejects.toThrow("Gemini returned an empty response (SAFETY)");
   });
 });
