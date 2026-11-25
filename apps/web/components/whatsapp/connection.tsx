@@ -80,7 +80,7 @@ export function ConnectCard({ first, onDone, onCancel }: { first: boolean; onDon
             onClick={() =>
               connect.mutate(
                 { brandId: chosen, phoneNumberId, wabaId, accessToken },
-                { onSuccess: () => { toast.success("WhatsApp connected"); setToken(""); onDone(); }, onError: (e) => toast.error(errText(e, "Could not connect")) },
+                { onSuccess: (n) => { if (n.warning) toast.error(n.warning); else toast.success("WhatsApp connected"); setToken(""); onDone(); }, onError: (e) => toast.error(errText(e, "Could not connect")) },
               )
             }
           >
@@ -114,7 +114,7 @@ export function ConnectionTab({ number }: { number: WaNumberDto }) {
           variant="outline"
           disabled={replace.isPending || token.length < 20}
           onClick={() =>
-            replace.mutate(token, { onSuccess: () => { setToken(""); toast.success("Token replaced"); }, onError: (e) => toast.error(errText(e, "Meta did not accept this token")) })
+            replace.mutate(token, { onSuccess: (n) => { setToken(""); if (n.warning) toast.error(n.warning); else toast.success("Token replaced"); }, onError: (e) => toast.error(errText(e, "Meta did not accept this token")) })
           }
         >
           {replace.isPending ? "Checking with Meta…" : "Replace token"}
