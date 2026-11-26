@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toaster";
+import { InstagramFind } from "@/components/instagram-find";
 
 /**
  * Brand Engine → Instagram: your one Instagram account and up to three rival
@@ -37,7 +38,7 @@ export function InstagramSetupView() {
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl px-3 py-4 sm:px-4 sm:py-6">
+          <div className="mx-auto w-full max-w-2xl space-y-4 px-3 py-4 sm:px-4 sm:py-6">
             <SetupForm />
           </div>
         </main>
@@ -83,74 +84,87 @@ function SetupForm() {
   const onConnect = () =>
     connect.mutate({ platform: "instagram", workspaceId }, { onError: (e) => toast.error(e.message) });
 
+  const addRival = (handle: string) => {
+    if (rivals.some((r) => r.trim().replace(/^@/, "").toLowerCase() === handle)) return toast.success(`@${handle} is already a rival`);
+    const free = rivals.findIndex((r) => !r.trim());
+    if (free < 0) return toast.error(`You can have up to ${GUAVA_MAX_COMPETITORS} rivals. Clear one first.`);
+    setRivals((prev) => prev.map((v, j) => (j === free ? `@${handle}` : v)));
+    toast.success(`@${handle} added. Press Save to keep it.`);
+  };
+
   return (
-    <Card className="space-y-5 p-4 sm:p-6">
-      <div className="space-y-1.5 text-sm">
-        <div className="flex items-center gap-2 font-semibold">
-          <Instagram className="h-5 w-5 text-primary" /> Your Instagram account
-        </div>
-        {igAccounts.length ? (
-          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} disabled={!canEdit}>
-            <option value="">Not set</option>
-            {igAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                @{(a.handle ?? a.displayName ?? "instagram").replace(/^@/, "")}
-                {a.status !== "active" ? " (reconnect needed)" : ""}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <p className="text-muted-foreground">Connect your Instagram Business or Creator account (linked to a Facebook Page).</p>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant={igAccounts.length ? "outline" : "default"} disabled={connect.isPending || !canEdit} onClick={onConnect}>
-            <Plus className="h-4 w-4" /> {igAccounts.length ? "Connect a different account" : "Connect Instagram"}
-          </Button>
-          {setup.data?.accountHandle && <Badge variant="secondary">Saved: @{setup.data.accountHandle.replace(/^@/, "")}</Badge>}
-        </div>
-      </div>
-
-      <div className="space-y-1.5 text-sm">
-        <div className="font-semibold">Rival accounts (up to {GUAVA_MAX_COMPETITORS})</div>
-        {rivals.map((r, i) => (
-          <div key={i} className="flex gap-2">
-            <Input
-              value={r}
-              placeholder={`Rival ${i + 1}: @handle or instagram.com/link`}
-              disabled={!canEdit}
-              onChange={(e) => setRivals((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))}
-            />
-            {r && canEdit && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Clear rival ${i + 1}`}
-                onClick={() => setRivals((prev) => prev.map((v, j) => (j === i ? "" : v)))}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
+    <>
+      <Card className="space-y-5 p-4 sm:p-6">
+        <div className="space-y-1.5 text-sm">
+          <div className="flex items-center gap-2 font-semibold">
+            <Instagram className="h-5 w-5 text-primary" /> Your Instagram account
           </div>
-        ))}
-        <p className="text-xs text-muted-foreground">Rivals must be public Business or Creator accounts.</p>
-      </div>
+          {igAccounts.length ? (
+            <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} disabled={!canEdit}>
+              <option value="">Not set</option>
+              {igAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  @{(a.handle ?? a.displayName ?? "instagram").replace(/^@/, "")}
+                  {a.status !== "active" ? " (reconnect needed)" : ""}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <p className="text-muted-foreground">Connect your Instagram Business or Creator account (linked to a Facebook Page).</p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant={igAccounts.length ? "outline" : "default"} disabled={connect.isPending || !canEdit} onClick={onConnect}>
+              <Plus className="h-4 w-4" /> {igAccounts.length ? "Connect a different account" : "Connect Instagram"}
+            </Button>
+            {setup.data?.accountHandle && <Badge variant="secondary">Saved: @{setup.data.accountHandle.replace(/^@/, "")}</Badge>}
+          </div>
+        </div>
 
-      <p className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
-        You don&apos;t set anything per brand. In Brand Strategist, pick Vgrand Infra, Planet, Restaurant or any other brand: Gemini
-        picks that brand&apos;s posts out of this account and reviews them against that brand and your rivals.
-      </p>
+        <div className="space-y-1.5 text-sm">
+          <div className="font-semibold">Rival accounts (up to {GUAVA_MAX_COMPETITORS})</div>
+          {rivals.map((r, i) => (
+            <div key={i} className="flex gap-2">
+              <Input
+                value={r}
+                placeholder={`Rival ${i + 1}: @handle or instagram.com/link`}
+                disabled={!canEdit}
+                onChange={(e) => setRivals((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))}
+              />
+              {r && canEdit && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Clear rival ${i + 1}`}
+                  onClick={() => setRivals((prev) => prev.map((v, j) => (j === i ? "" : v)))}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">Rivals must be public Business or Creator accounts.</p>
+        </div>
 
-      <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center">
-        <Button onClick={onSave} disabled={!canEdit || !dirty || save.isPending}>
-          {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
-        </Button>
-        <Button variant="outline" asChild>
-          <Link href="/guava">
-            <Compass className="h-4 w-4" /> See results in Brand Strategist
-          </Link>
-        </Button>
-        {!canEdit && <span className="text-xs text-muted-foreground">Only the workspace owner can change this.</span>}
-      </div>
-    </Card>
+        <p className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
+          You don&apos;t set anything per brand. In Brand Strategist, pick Vgrand Infra, Planet, Restaurant or any other brand: Gemini
+          picks that brand&apos;s posts out of this account and reviews them against that brand and your rivals.
+        </p>
+
+        <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center">
+          <Button onClick={onSave} disabled={!canEdit || !dirty || save.isPending}>
+            {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/guava">
+              <Compass className="h-4 w-4" /> See results in Brand Strategist
+            </Link>
+          </Button>
+          {!canEdit && <span className="text-xs text-muted-foreground">Only the workspace owner can change this.</span>}
+        </div>
+      </Card>
+      {setup.data?.accountId && (
+        <InstagramFind workspaceId={workspaceId} canEdit={canEdit} onAddRival={addRival} rivalsFull={rivals.every((r) => r.trim())} />
+      )}
+    </>
   );
 }

@@ -99,13 +99,12 @@ describe("insights text for the strategy prompt", () => {
         reachFollowers: 200,
         reachNonFollowers: 782,
       },
-      demographics: { gender: [{ label: "M", value: 60 }], age: [], city: [{ label: "Ongole", value: 40 }] },
+      demographics: { gender: [{ label: "M", value: 60 }], age: [] },
       reels: [toReel({ id: "r1", caption: "Villa tour", timestamp: "2026-11-01T00:00:00+0000" }, { views: 900, reach: 500 })],
     });
     expect(text).toContain("views: 1632");
     expect(text).toContain("interactions: n/a");
     expect(text).toContain("reach from non-followers: 782");
-    expect(text).toContain("Audience top cities: Ongole 40");
     expect(text).toContain("Reel r1");
     expect(text).toContain("avg watch n/a");
   });

@@ -150,10 +150,9 @@ function InsightsBody({ dto, workspaceId, brand }: { dto: IgInsightsDto; workspa
       <ReelsTable reels={dto.reels} />
 
       {dto.demographics && (
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2">
           <Demo title="Gender" rows={dto.demographics.gender} />
           <Demo title="Age" rows={dto.demographics.age} />
-          <Demo title="Top cities" rows={dto.demographics.city} />
         </div>
       )}
 

@@ -75,7 +75,7 @@ async function geminiJsonOnce(opts: {
 }): Promise<Record<string, unknown>> {
   const model = opts.model ?? env.GEMINI_MODEL;
   const send = (withThinking: boolean) =>
-    fetch(`${BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+    guardedFetch(`${BASE}/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
       headers: { "x-goog-api-key": key(), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -104,7 +104,9 @@ async function geminiJsonOnce(opts: {
     res = await send(thinking !== null);
   }
   if (!res.ok) throw new GeminiError(`Gemini request failed: ${await readError(res)}`);
-  const json = (await res.json()) as {
+  const json = (await res.json().catch(() => {
+    throw new GeminiUnreadable("Gemini sent an unreadable answer");
+  })) as {
     candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
     promptFeedback?: { blockReason?: string };
   };
@@ -117,6 +119,16 @@ async function geminiJsonOnce(opts: {
   } catch (err) {
     if (err instanceof GeminiError) throw err;
     throw new GeminiUnreadable(`Gemini's answer was cut off or unreadable (${finish})`);
+  }
+}
+
+/** fetch, but a dropped connection becomes a GeminiError with a readable reason (a timeout stays a TimeoutError). */
+async function guardedFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") throw err;
+    throw new GeminiError(`Could not reach Gemini (${err instanceof Error ? err.message : String(err)})`);
   }
 }
 
@@ -136,7 +148,7 @@ export interface GeminiFile {
 
 /** Uploads bytes to the Files API and waits until Gemini can use them. Files expire on their own after 48h. */
 export async function uploadGeminiFile(bytes: Uint8Array, mimeType: string, displayName: string): Promise<GeminiFile> {
-  const start = await fetch(`${UPLOAD_BASE}/files`, {
+  const start = await guardedFetch(`${UPLOAD_BASE}/files`, {
     method: "POST",
     headers: {
       "x-goog-api-key": key(),
@@ -152,7 +164,7 @@ export async function uploadGeminiFile(bytes: Uint8Array, mimeType: string, disp
   const uploadUrl = start.headers.get("x-goog-upload-url");
   if (!start.ok || !uploadUrl) throw new GeminiError(`Gemini upload could not start: ${await readError(start)}`);
 
-  const done = await fetch(uploadUrl, {
+  const done = await guardedFetch(uploadUrl, {
     method: "POST",
     headers: {
       "Content-Length": String(bytes.byteLength),
@@ -170,7 +182,7 @@ export async function uploadGeminiFile(bytes: Uint8Array, mimeType: string, disp
   while (file.state === "PROCESSING") {
     if (Date.now() > deadline) throw new GeminiError("Gemini took too long to process the video");
     await sleep(FILE_POLL_MS);
-    const res = await fetch(`${BASE}/${file.name}`, {
+    const res = await guardedFetch(`${BASE}/${file.name}`, {
       headers: { "x-goog-api-key": key() },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });

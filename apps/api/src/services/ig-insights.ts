@@ -126,8 +126,8 @@ async function demographics(token: string, igId: string) {
       return []; // accounts under 100 followers, or no data yet
     }
   };
-  const [gender, age, city] = await Promise.all([one("gender"), one("age"), one("city")]);
-  return gender.length || age.length || city.length ? { gender, age, city } : null;
+  const [gender, age] = await Promise.all([one("gender"), one("age")]);
+  return gender.length || age.length ? { gender, age } : null;
 }
 
 async function reelInsights(token: string, igId: string): Promise<IgInsightsReel[]> {

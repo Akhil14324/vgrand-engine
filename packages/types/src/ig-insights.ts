@@ -50,7 +50,6 @@ export interface IgDemographicRow {
 export interface IgInsightsDemographics {
   gender: IgDemographicRow[];
   age: IgDemographicRow[];
-  city: IgDemographicRow[];
 }
 
 export interface IgInsightsDto {

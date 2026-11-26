@@ -118,7 +118,6 @@ export function insightsText(dto: Pick<IgInsightsDto, "account" | "reels" | "dem
     const fmt = (rows: IgDemographicRow[]) => rows.slice(0, 5).map((r) => `${r.label} ${r.value}`).join(", ");
     if (d.gender.length) lines.push(`Audience gender: ${fmt(d.gender)}`);
     if (d.age.length) lines.push(`Audience age: ${fmt(d.age)}`);
-    if (d.city.length) lines.push(`Audience top cities: ${fmt(d.city)}`);
   }
   lines.push("\n## Reels (newest first)");
   for (const r of dto.reels) {

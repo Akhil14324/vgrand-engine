@@ -220,37 +220,61 @@ let stopping = false;
 
 export const SHORTS_WORKER_CONCURRENCY = Number(process.env.SHORTS_WORKER_CONCURRENCY ?? 2) || 2;
 
-export function startShortsJobWorker(pollMs = 5_000): void {
+let tickNow: (() => void) | null = null;
+
+/** Runs a claim pass right now (e.g. after enqueuing a latency-sensitive job) instead of waiting for the next poll. No-op in a process that isn't running the worker. */
+export function wakeJobWorker(): void {
+  tickNow?.();
+}
+
+export function startShortsJobWorker(pollMs = Number(process.env.SHORTS_POLL_MS ?? 2_000) || 2_000): void {
   if (timer) return;
   stopping = false;
+  let ticking = false;
+  let again = false;
   const tick = async () => {
     if (stopping) return;
-    const free = SHORTS_WORKER_CONCURRENCY - active;
-    if (free <= 0) return;
-    let jobs: ShortsJobRow[] = [];
-    try {
-      const types = registeredJobTypes();
-      if (!types.length) return;
-      jobs = await claimJobs(free, { types });
-    } catch (err) {
-      log.error("worker.claim_failed", { error: String(err) });
+    if (ticking) {
+      again = true; // a wake arrived mid-claim: go round once more when this pass ends
       return;
     }
-    for (const job of jobs) {
-      active++;
-      void runClaimedJob(job).finally(() => {
-        active--;
-      });
+    ticking = true;
+    try {
+      const free = SHORTS_WORKER_CONCURRENCY - active;
+      if (free <= 0) return;
+      let jobs: ShortsJobRow[] = [];
+      try {
+        const types = registeredJobTypes();
+        if (!types.length) return;
+        jobs = await claimJobs(free, { types });
+      } catch (err) {
+        log.error("worker.claim_failed", { error: String(err) });
+        return;
+      }
+      for (const job of jobs) {
+        active++;
+        void runClaimedJob(job).finally(() => {
+          active--;
+        });
+      }
+    } finally {
+      ticking = false;
+      if (again) {
+        again = false;
+        void tick();
+      }
     }
   };
+  tickNow = () => void tick();
   timer = setInterval(() => void tick(), pollMs);
   timer.unref();
   void tick();
-  log.info("worker.started", { workerId, concurrency: SHORTS_WORKER_CONCURRENCY });
+  log.info("worker.started", { workerId, concurrency: SHORTS_WORKER_CONCURRENCY, pollMs });
 }
 
 export function stopShortsJobWorker(): void {
   stopping = true;
   if (timer) clearInterval(timer);
   timer = null;
+  tickNow = null;
 }

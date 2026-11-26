@@ -1144,5 +1144,6 @@ export * from "./video";
 export * from "./shorts";
 export * from "./shorts-reels";
 export * from "./ig-automation";
+export * from "./whatsapp";
 export * from "./ig-insights";
 export * from "./carousel";
