@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { z } from "zod";
 import { prisma } from "@catgpt/db";
 import {
   createGenerationSchema,
@@ -36,17 +37,23 @@ import {
   refundImageUsage,
 } from "../lib/usage.js";
 import { isCampaignConversation, isCampaignPrompt, prepareCampaignCalendar } from "../services/campaign.js";
-import { planCarousel, spawnImageBatch, splitImageBatch } from "../services/image-batch.js";
-import { carouselSlideCount, isCarouselRequest } from "../services/carousel-logic.js";
+import { spawnImageBatch, splitImageBatch } from "../services/image-batch.js";
+import { isCarouselRequest, requestedCarouselSlides } from "../services/carousel-logic.js";
+import { reconcileCarousel, runCarouselPlanning } from "../services/carousel.js";
 import {
   brandImageGuidance,
   brandReferenceUrls,
   loadBrandContext,
 } from "../lib/brand.js";
+import { checkBrandReadiness } from "../lib/brand-identity.js";
 import type { BrandProfile } from "@catgpt/types";
 import { findWorkspaceForUser } from "../lib/workspace-access.js";
 import { env } from "../env.js";
 import { isTrustedImageUrl } from "../lib/urls.js";
+import {
+  imageRequestHash,
+  type ReferenceCandidate,
+} from "../lib/image-brief-logic.js";
 import {
   requestsImageFromProductImage,
   resolveProductImageReference,
@@ -218,10 +225,16 @@ export async function generationRoutes(app: FastifyInstance) {
     // The classifier only runs in this narrow branch, not on every message.
     let effectiveParentId: string | null = body.parentId ?? null;
     let inferredParentImageUrl: string | null = null;
-    // "Generate a carousel" asks for a fresh set of slides, never an edit of
-    // the last image - so it skips the follow-up-edit inference below.
+    // "Generate a carousel" (typed, or a slide count picked in the composer)
+    // asks for a fresh set of separate slides, never an edit of the last
+    // image - so it skips the follow-up-edit inference below.
+    const promptAsksCarousel = isCarouselRequest(body.prompt);
     const wantsCarousel =
-      !body.voice && isCarouselRequest(body.prompt) && !isCampaignPrompt(body.prompt);
+      !body.voice &&
+      !body.parentId &&
+      !body.variationOf &&
+      (promptAsksCarousel || (body.imageCount ?? 1) > 1) &&
+      !isCampaignPrompt(body.prompt);
     // Campaign chats never take this path: "make 5 more images" there means
     // new campaign creatives, not an edit of the last image. Likewise an
     // explicit "recreate it completely" (or a UI recreate flag) is a fresh
@@ -292,10 +305,10 @@ export async function generationRoutes(app: FastifyInstance) {
     // worth paying on every turn that isn't already resolved above.
     const carouselRequested =
       wantsCarousel && !visionOnly && !effectiveParentId && !(await inCampaignChat());
-    let inferredImage = requestsImageFromProductImage(
-      body.prompt,
-      productImageResolution,
-    );
+    // "Generate again" of an earlier image is always an image job.
+    let inferredImage =
+      Boolean(body.variationOf) ||
+      requestsImageFromProductImage(body.prompt, productImageResolution);
     if (
       !inferredImage &&
       !body.voice &&
@@ -349,15 +362,18 @@ export async function generationRoutes(app: FastifyInstance) {
     // cannot actually call the image tool more than once, so it used to
     // narrate the request back with sample code instead of ever producing
     // one. Only worth checking once we already know this is an image ask.
-    // A carousel is planned instead of split: the message rarely lists the
-    // slides, so the model writes them (shared style + one brief per slide).
-    const batchBriefs = carouselRequested
-      ? await planCarousel(
-          body.prompt,
-          conversationId ? await loadChatHistory(conversationId, undefined, 60) : [],
-          carouselSlideCount(body.prompt),
-          userRefs,
-        )
+    // A carousel is its own pipeline (services/carousel.ts): a planned set of
+    // separate slide images, one render job per slide - never N variations
+    // of one prompt in a single call (which used to come back as one image).
+    const carouselSlides = carouselRequested
+      ? requestedCarouselSlides({
+          prompt: body.prompt,
+          imageCount: body.imageCount,
+          promptAsksCarousel,
+        })
+      : 0;
+    const batchBriefs = carouselSlides
+      ? []
       : inferredImage
         ? await splitImageBatch(
             calendarNote ? `${body.prompt}\n\n${calendarNote}` : body.prompt,
@@ -365,7 +381,6 @@ export async function generationRoutes(app: FastifyInstance) {
           )
         : [];
     const isBatch = batchBriefs.length > 1;
-    const carouselSetId = carouselRequested && isBatch ? randomUUID() : undefined;
 
     // Strict gate: an image only on explicit request — "create an image" in
     // the prompt, attached references, or a regenerate/edit chain (explicit
@@ -405,17 +420,155 @@ export async function generationRoutes(app: FastifyInstance) {
         ? productImageResolution.asset
         : null;
 
-    // A ready-made carousel set: only for a fresh, non-edit-chain image
-    // request that wasn't already split into distinct per-item briefs.
-    const imageCount =
-      kind === "image" && !effectiveParentId && !isBatch
-        ? Math.min(Math.max(body.imageCount ?? 1, 1), SOCIAL_MAX_CAROUSEL_IMAGES)
-        : 1;
+    // Brand validation: a brand-based image must carry the selected brand's
+    // identity. Nothing brand-specific saved at all -> refuse clearly instead
+    // of producing an unbranded image; partial gaps travel with the job as
+    // visible warnings (response + metadata) rather than being silent.
+    const brandCheck =
+      kind === "image" && brand
+        ? checkBrandReadiness({
+            id: brand.id,
+            name: brand.name,
+            summary: brand.summary,
+            profile: (brand.profile ?? {}) as BrandProfile,
+            assets: brand.assets,
+          })
+        : null;
+    if (brandCheck?.blocking) throw badRequest(brandCheck.blocking);
 
-    // A carousel is only useful whole, so check the full set up front rather
-    // than generating a few slides and running out of quota mid-set.
+    // Multi-image requests are carousels (handled below); every other image
+    // job renders exactly one image.
+    const imageCount = 1;
+
+    if (kind === "image" && carouselSlides > 0) {
+      // Double-submit guard: the same client request key plans only once.
+      if (body.requestKey) {
+        const existing = await prisma.carousel.findUnique({
+          where: { userId_requestKey: { userId: req.userId, requestKey: body.requestKey } },
+          select: { id: true, generationId: true, generation: { select: { conversationId: true } } },
+        });
+        if (existing) {
+          return reply.code(202).send({
+            generationId: existing.generationId,
+            conversationId: existing.generation.conversationId,
+            carouselId: existing.id,
+            status: "processing",
+            kind: "image",
+          });
+        }
+      }
+      // A carousel is only useful whole: check the full set up front rather
+      // than generating a few slides and running out of quota mid-set.
+      await assertImageQuota(req.userId, carouselSlides);
+      const aspect =
+        body.carouselAspect ??
+        (body.size === "1088x1360" || body.size === "1024x1536"
+          ? "portrait"
+          : body.size === "1536x1024"
+            ? "landscape"
+            : "square");
+      const history = conversationId ? await loadChatHistory(conversationId, undefined, 60) : [];
+      const isNewChat = !conversationId;
+      const chatId: string =
+        conversationId ??
+        (
+          await prisma.conversation.create({
+            data: {
+              userId: req.userId,
+              title: deriveTitle(body.prompt),
+              workspaceId: body.workspaceId ?? null,
+            },
+          })
+        ).id;
+      conversationId = chatId;
+      if (!isNewChat) {
+        await prisma.conversation.update({ where: { id: chatId }, data: { updatedAt: new Date() } });
+      }
+      const carouselId = randomUUID();
+      const host = await prisma.generation.create({
+        data: {
+          userId: req.userId,
+          brandId: brand?.id ?? null,
+          themeId: theme?.id ?? null,
+          conversationId: chatId,
+          kind: "image",
+          prompt: body.prompt,
+          finalPrompt: body.prompt,
+          provider: "openai",
+          status: "processing",
+          metadata: {
+            carouselHost: true,
+            carouselId,
+            slideCount: carouselSlides,
+            carouselAspect: aspect,
+            quality: body.quality ?? "low",
+            referenceImageUrls: userRefs,
+            ...(brand ? { brandId: brand.id } : {}),
+            ...(brandCheck
+              ? {
+                  brandCheck: {
+                    brandId: brandCheck.brandId,
+                    brandName: brandCheck.brandName,
+                    hasLogo: brandCheck.hasLogo,
+                    colors: brandCheck.colors,
+                    warnings: brandCheck.warnings,
+                  },
+                }
+              : {}),
+          },
+        },
+      });
+      try {
+        await prisma.carousel.create({
+          data: {
+            id: carouselId,
+            userId: req.userId,
+            generationId: host.id,
+            brandId: brand?.id ?? null,
+            themeId: theme?.id ?? null,
+            prompt: body.prompt,
+            aspect,
+            quality: body.quality ?? "low",
+            requestKey: body.requestKey ?? null,
+          },
+        });
+      } catch (err) {
+        await prisma.generation.delete({ where: { id: host.id } }).catch(() => {});
+        // Lost a race with an identical double-submit: answer with the winner.
+        if ((err as { code?: string }).code === "P2002" && body.requestKey) {
+          const winner = await prisma.carousel.findUnique({
+            where: { userId_requestKey: { userId: req.userId, requestKey: body.requestKey } },
+            select: { id: true, generationId: true, generation: { select: { conversationId: true } } },
+          });
+          if (winner) {
+            return reply.code(202).send({
+              generationId: winner.generationId,
+              conversationId: winner.generation.conversationId,
+              carouselId: winner.id,
+              status: "processing",
+              kind: "image",
+            });
+          }
+        }
+        throw err;
+      }
+      void runCarouselPlanning(carouselId, {
+        count: carouselSlides,
+        history,
+        attachedImages: userRefs,
+      }).catch((err) => console.error("[generations] carousel planning failed:", err));
+      return reply.code(202).send({
+        generationId: host.id,
+        conversationId: chatId,
+        status: "processing",
+        carouselId,
+        kind: "image",
+        ...(brandCheck ? { brandWarnings: brandCheck.warnings } : {}),
+      });
+    }
+
     if (kind === "image") {
-      await assertImageQuota(req.userId, carouselSetId ? batchBriefs.length : imageCount);
+      await assertImageQuota(req.userId, imageCount);
     }
 
     const parentImageUrl = effectiveParentId
@@ -426,13 +579,46 @@ export async function generationRoutes(app: FastifyInstance) {
     if (effectiveParentId && !parentImageUrl) {
       throw badRequest("Parent generation has no image to edit");
     }
-    const brandRefs =
-      brand && kind === "image"
-        ? brandReferenceUrls(
-            brand.assets,
-            brand.mascot?.asset.url,
-            selectedProduct?.url,
-          )
+    // Fresh drafts no longer get the brand's/theme's stored images attached
+    // wholesale — that turned every request into an edit of whatever sat in
+    // the image collection. Only images the user explicitly chose (uploads,
+    // a named Product Image) are hard references; the brand/theme images
+    // become candidates the worker keeps only if they match the brief.
+    const curate = kind === "image" && !effectiveParentId;
+    const candidateReferences: ReferenceCandidate[] =
+      curate && !selectedProduct
+        ? [
+            // Brand mode: EVERY product photo is a candidate (newest first) so
+            // the worker can pick the one the prompt names, not just the two
+            // newest; mascot/references follow. The logo is never a model
+            // input - the real file is stamped on after generation.
+            ...(brand
+              ? [
+                  ...[...brand.assets]
+                    .reverse()
+                    .filter((a) => a.kind === "product")
+                    .map((a) => a.url),
+                  ...brandReferenceUrls(
+                    brand.assets.filter((a) => a.kind !== "product"),
+                    brand.mascot?.asset.url,
+                  ),
+                ].map((url) => {
+                  const asset = brand.assets.find((a) => a.url === url);
+                  return {
+                    url,
+                    kind: asset?.kind ?? "mascot",
+                    label:
+                      asset?.label ??
+                      (url === brand.mascot?.asset.url ? `${brand.mascot?.name ?? ""} mascot` : null),
+                  };
+                })
+              : []),
+            ...themeReferenceUrls(req, theme).map((url) => ({
+              url,
+              kind: "theme",
+              label: url.split("/").pop()?.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]+/g, " ") ?? null,
+            })),
+          ].filter((c) => !userRefs.includes(c.url))
         : [];
     const referenceImageUrls =
       kind === "image"
@@ -446,12 +632,27 @@ export async function generationRoutes(app: FastifyInstance) {
             ].slice(0, 10)
           : [
               ...new Set([
-                ...brandRefs,
-                ...themeReferenceUrls(req, theme),
+                ...(selectedProduct ? [selectedProduct.url] : []),
                 ...userRefs,
               ]),
             ].slice(0, 10)
         : [];
+    // "Generate again" must be the caller's own earlier image.
+    const variationSource =
+      curate && body.variationOf ? await loadOwned(req, body.variationOf) : null;
+    const requestHash =
+      curate && !variationSource && !isBatch
+        ? imageRequestHash({
+            prompt: body.prompt,
+            brandId: brand?.id,
+            themeId: theme?.id,
+            style: body.style,
+            size: body.size,
+            quality: body.quality,
+            imageCount,
+            references: referenceImageUrls,
+          })
+        : undefined;
 
     // Plain writes, not an interactive $transaction: behind the Supabase
     // transaction pooler (pgbouncer) interactive transactions time out with
@@ -528,15 +729,32 @@ export async function generationRoutes(app: FastifyInstance) {
             size: body.size ?? "auto",
             ...(body.webSearch ? { webSearch: true } : {}),
             ...(brand ? { brandId: brand.id } : {}),
+            ...(brandCheck
+              ? {
+                  brandCheck: {
+                    brandId: brandCheck.brandId,
+                    brandName: brandCheck.brandName,
+                    hasLogo: brandCheck.hasLogo,
+                    logoOverlay: brandCheck.logoOverlay,
+                    colors: brandCheck.colors,
+                    productCount: brandCheck.productCount,
+                    productNames: brandCheck.productNames,
+                    hasFonts: brandCheck.hasFonts,
+                    warnings: brandCheck.warnings,
+                  },
+                }
+              : {}),
             ...(selectedProduct ? { selectedProductAssetId: selectedProduct.id } : {}),
             ...(body.voice ? { voice: true } : {}),
             ...(visionOnly ? { visionImageUrls: userRefs.slice(0, 4) } : {}),
-            ...(imageCount > 1 ? { imageCount } : {}),
             ...(calendarNote ? { calendarNote } : {}),
-            ...(carouselSetId
+            ...(curate
               ? {
-                  imageBatch: { label: batchBriefs[0]!.label },
-                  carousel: { setId: carouselSetId, index: 0, total: batchBriefs.length },
+                  curate: true,
+                  candidateReferences,
+                  style: body.style ?? "auto",
+                  ...(requestHash ? { requestHash } : {}),
+                  ...(variationSource ? { variationOf: variationSource.id } : {}),
                 }
               : {}),
           },
@@ -603,6 +821,8 @@ export async function generationRoutes(app: FastifyInstance) {
         brandId: brand?.id ?? null,
         provider: generation.provider,
         referenceImageUrls,
+        candidateReferences,
+        style: body.style ?? "auto",
         ...(selectedProduct
           ? {
               productImage: {
@@ -614,7 +834,6 @@ export async function generationRoutes(app: FastifyInstance) {
           : {}),
         quality: body.quality ?? "low",
         size: body.size ?? "auto",
-        carouselSetId,
       }).catch((err) =>
         console.error("[generations] image batch spawn failed:", err),
       );
@@ -624,6 +843,7 @@ export async function generationRoutes(app: FastifyInstance) {
       conversationId,
       status: "pending",
       kind,
+      ...(brandCheck ? { brandWarnings: brandCheck.warnings } : {}),
     });
   });
 
@@ -692,6 +912,44 @@ export async function generationRoutes(app: FastifyInstance) {
    * and an in-flight worker aborts at its next check; the image quota is
    * refunded either way (the ledger row only exists for image jobs).
    */
+  /**
+   * "Select image": the chosen image of a multi-image result becomes the
+   * primary one (imageUrls[0]) that share, download, edit and social posting
+   * use. Nothing is regenerated or deleted - the set is only reordered.
+   */
+  app.post("/generations/:id/select-image", async (req) => {
+    const { id } = req.params as { id: string };
+    const { index } = parseBody(
+      z.object({ index: z.number().int().min(0).max(SOCIAL_MAX_CAROUSEL_IMAGES - 1) }),
+      req.body,
+    );
+    const generation = await loadOwned(req, id);
+    const chosen = generation.imageUrls[index];
+    if (!chosen) throw badRequest("No image at that position");
+    const meta = (generation.metadata ?? {}) as Record<string, unknown>;
+    const scores = Array.isArray(meta.relevanceScores) ? [...(meta.relevanceScores as unknown[])] : null;
+    if (scores && index < scores.length) scores.unshift(...scores.splice(index, 1));
+    // Keep the clean (logo-free) originals aligned with imageUrls.
+    const unbranded = Array.isArray(meta.unbrandedImageUrls) ? [...(meta.unbrandedImageUrls as unknown[])] : null;
+    if (unbranded && index < unbranded.length) unbranded.unshift(...unbranded.splice(index, 1));
+    const updated = await prisma.generation.update({
+      where: { id },
+      data: {
+        imageUrls: [chosen, ...generation.imageUrls.filter((_, i) => i !== index)],
+        metadata: {
+          ...meta,
+          selectedImageUrl: chosen,
+          ...(scores ? { relevanceScores: scores } : {}),
+          ...(unbranded ? { unbrandedImageUrls: unbranded } : {}),
+        } as object,
+      },
+      include: {
+        theme: { select: { id: true, slug: true, label: true, icon: true } },
+      },
+    });
+    return toGenerationDto(updated);
+  });
+
   app.post("/generations/:id/cancel", async (req, reply) => {
     const { id } = req.params as { id: string };
     await loadOwned(req, id);
@@ -702,6 +960,12 @@ export async function generationRoutes(app: FastifyInstance) {
     if (count > 0) {
       await refundImageUsage(id).catch(() => {});
       publishGenerationEvent({ generationId: id, status: "cancelled" });
+      // Stopping a carousel also stops its slide jobs.
+      const carousel = await prisma.carousel.findUnique({
+        where: { generationId: id },
+        select: { id: true },
+      });
+      if (carousel) await reconcileCarousel(carousel.id);
     }
     return reply.code(204).send();
   });
@@ -711,8 +975,16 @@ export async function generationRoutes(app: FastifyInstance) {
     const generation = await loadOwned(req, id);
     await prisma.generation.delete({ where: { id } });
     // Reclaim the generated images — references/uploads are shared inputs and
-    // are deliberately left alone.
-    await deleteStoredFiles(generation.imageUrls);
+    // are deliberately left alone. An identical request can reuse another
+    // generation's stored images, so keep any file still used elsewhere.
+    const stillUsed = generation.imageUrls.length
+      ? await prisma.generation.findMany({
+          where: { imageUrls: { hasSome: generation.imageUrls } },
+          select: { imageUrls: true },
+        })
+      : [];
+    const shared = new Set(stillUsed.flatMap((g) => g.imageUrls));
+    await deleteStoredFiles(generation.imageUrls.filter((u) => !shared.has(u)));
     return reply.code(204).send();
   });
 
@@ -726,10 +998,21 @@ export async function generationRoutes(app: FastifyInstance) {
     const body = parseBody(regenerateGenerationSchema, req.body);
     const operation = body.operation ?? "edit";
 
-    const parentImageUrl = parent.imageUrls[0];
-    if (!parentImageUrl) {
+    const stampedParentUrl = parent.imageUrls[0];
+    if (!stampedParentUrl) {
       throw badRequest("Parent generation has no image to edit");
     }
+    // A parent carrying the stamped real logo is edited from its clean
+    // (logo-free) original, and the worker re-stamps the real logo after -
+    // otherwise the model would redraw a distorted copy of the logo.
+    const parentMetaRaw = (parent.metadata ?? {}) as Record<string, unknown>;
+    const unbranded = Array.isArray(parentMetaRaw.unbrandedImageUrls)
+      ? (parentMetaRaw.unbrandedImageUrls as unknown[])
+      : [];
+    const cleanParentUrl =
+      typeof unbranded[0] === "string" && isTrustedImageUrl(unbranded[0]) ? unbranded[0] : null;
+    const parentImageUrl = cleanParentUrl ?? stampedParentUrl;
+    const restampLogo = Boolean(cleanParentUrl) && !body.referenceImageUrl;
     const referenceImageUrl = body.referenceImageUrl ?? parentImageUrl;
     if (body.referenceImageUrl && !isTrustedImageUrl(body.referenceImageUrl)) {
       throw badRequest("edit base must be uploaded through the app");
@@ -833,6 +1116,7 @@ export async function generationRoutes(app: FastifyInstance) {
           quality: body.quality ?? parentMeta.quality ?? "low",
           size: body.size ?? parentMeta.size ?? "auto",
           ...(brand ? { brandId: brand.id } : {}),
+          ...(brand && restampLogo ? { restampLogo: true } : {}),
           ...(selectedProduct ? { selectedProductAssetId: selectedProduct.id } : {}),
         },
       },

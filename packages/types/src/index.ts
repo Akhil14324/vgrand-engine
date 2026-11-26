@@ -17,6 +17,43 @@ export const IMAGE_SIZES = [
 ] as const;
 export type ImageSize = (typeof IMAGE_SIZES)[number];
 
+/** Visual style for a fresh image. "auto" lets the prompt analyser pick one. */
+export const IMAGE_STYLES = [
+  "auto",
+  "realistic",
+  "cinematic",
+  "traditional",
+  "modern",
+  "3d",
+  "artistic",
+] as const;
+export type ImageStyle = (typeof IMAGE_STYLES)[number];
+
+/**
+ * What the prompt analyser understood about an image request before any
+ * pixels were generated. Stored on the generation (metadata.imageBrief) so the
+ * gallery can show the occasion/style and "Generate again" can vary it.
+ */
+export interface VisualBrief {
+  subject: string;
+  /** Normalised occasion id (birthday, wedding, diwali, ...) or a custom label. */
+  occasion: string | null;
+  theme: string;
+  style: Exclude<ImageStyle, "auto">;
+  background: string;
+  colors: string[];
+  culturalContext: string | null;
+  requiredObjects: string[];
+  aspect: "square" | "portrait" | "landscape";
+  /** True when the user explicitly asked for words on the image. */
+  wantsText: boolean;
+  avoid: string[];
+  /** The detailed scene description the image model is given. */
+  visualDescription: string;
+  /** "llm" when the chat model analysed it, "heuristic" for the offline fallback. */
+  source: "llm" | "heuristic";
+}
+
 export const GENERATION_STATUSES = [
   "pending",
   "processing",
@@ -270,9 +307,9 @@ export const createGenerationSchema = z.object({
   /** Existing chat to append to. Omit to start a new conversation. */
   conversationId: z.string().uuid().optional(),
   /**
-   * How many images to generate for this one prompt (1 = normal, 2-10 = a
-   * ready-made carousel set). Only honored for a fresh, non-edit image
-   * request - ignored on edits/regenerates and on a multi-brief batch.
+   * How many slides to generate (1 = a normal single image, 2-10 = a planned
+   * carousel: every slide is its own separate image). Only honored for a
+   * fresh, non-edit image request.
    */
   imageCount: z.coerce.number().int().min(1).max(SOCIAL_MAX_CAROUSEL_IMAGES).optional(),
   /** Workspace a brand-new conversation should live inside. */
@@ -297,6 +334,20 @@ export const createGenerationSchema = z.object({
    * sent right after an image becomes a fresh draft, not an edit of it.
    */
   recreate: z.boolean().optional(),
+  /** Visual style for a fresh image ("auto" = inferred from the prompt). */
+  style: z.enum(IMAGE_STYLES).optional(),
+  /**
+   * "Generate again": a fresh take on this earlier generation's brief. Skips
+   * the identical-request reuse and asks for a different composition.
+   */
+  variationOf: z.string().uuid().optional(),
+  /**
+   * Carousel format when imageCount > 1 (or the prompt asks for a carousel):
+   * square 1080x1080, portrait 1080x1350, landscape 1080x566.
+   */
+  carouselAspect: z.enum(["square", "portrait", "landscape"]).optional(),
+  /** Client idempotency key: a double-submitted carousel is planned once. */
+  requestKey: z.string().min(8).max(80).optional(),
 });
 export type CreateGenerationRequest = z.infer<typeof createGenerationSchema>;
 
@@ -440,6 +491,8 @@ export interface GenerationEvent {
   delta?: string;
   /** Progressive preview (data URL) pushed while an image renders. */
   partialImage?: string;
+  /** Human-readable step of an image job ("Understanding your request…"). */
+  stage?: string;
   imageUrls?: string[];
   textResponse?: string | null;
   error?: string | null;
@@ -640,6 +693,16 @@ export const applyBrandKitSchema = z.object({
   logo: z.boolean().default(true),
   headline: z.string().trim().max(120).optional(),
   cta: z.string().trim().max(40).optional(),
+  /** Per-image logo position/size; defaults to the brand's saved placement. */
+  placement: z
+    .object({
+      corner: z.enum(LOGO_CORNERS),
+      sizePct: z.number().min(6).max(40),
+      marginPct: z.number().min(1).max(12),
+    })
+    .optional(),
+  /** Button colour, picked from the brand's own palette (never an off-brand colour). */
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
 export type ApplyBrandKitRequest = z.input<typeof applyBrandKitSchema>;
 
@@ -1079,5 +1142,7 @@ export * from "./bcamp";
 export * from "./growth";
 export * from "./video";
 export * from "./shorts";
+export * from "./shorts-reels";
 export * from "./ig-automation";
 export * from "./ig-insights";
+export * from "./carousel";

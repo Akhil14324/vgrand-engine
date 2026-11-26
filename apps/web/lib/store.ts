@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { DocumentDto, ImageSize, Quality, ThemeDto } from "@catgpt/types";
+import type { CarouselAspect, DocumentDto, ImageSize, ImageStyle, Quality, ThemeDto } from "@catgpt/types";
 
 /** Optimistic copy of a just-sent turn — renders before the server answers. */
 export interface PendingTurn {
@@ -37,9 +37,17 @@ interface StudioState {
   size: ImageSize;
   setSize: (s: ImageSize) => void;
 
-  /** How many images the next fresh image request should produce (1 = normal, 2-10 = a carousel set). */
+  /** Visual style for the next fresh image — "auto" lets the AI infer it from the prompt. */
+  imageStyle: ImageStyle;
+  setImageStyle: (s: ImageStyle) => void;
+
+  /** Slides for the next fresh image request (1 = a single image, 2-10 = an AI carousel of separate slides). */
   imageCount: number;
   setImageCount: (n: number) => void;
+
+  /** Carousel format: square 1080x1080, portrait 1080x1350, landscape 1080x566. */
+  carouselAspect: CarouselAspect;
+  setCarouselAspect: (a: CarouselAspect) => void;
 
   /** Desktop sidebar collapsed via the PanelLeft button. */
   sidebarCollapsed: boolean;
@@ -97,8 +105,14 @@ export const useStudio = create<StudioState>((set) => ({
   size: "auto",
   setSize: (size) => set({ size }),
 
+  imageStyle: "auto",
+  setImageStyle: (imageStyle) => set({ imageStyle }),
+
   imageCount: 1,
   setImageCount: (imageCount) => set({ imageCount }),
+
+  carouselAspect: "portrait",
+  setCarouselAspect: (carouselAspect) => set({ carouselAspect }),
 
   sidebarCollapsed: false,
   toggleSidebar: () =>

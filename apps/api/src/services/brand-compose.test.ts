@@ -6,6 +6,7 @@ import {
   composeBrandKit,
   computeLogoRect,
   DEFAULT_PLACEMENT,
+  pickLogoUrl,
   readableTextColor,
   shouldAutoStampLogo,
   wrapText,
@@ -79,9 +80,12 @@ const kit = (over: Partial<BrandKit> = {}): BrandKit => ({
 });
 
 describe("shouldAutoStampLogo", () => {
-  it("never auto-stamps the logo onto generated images", () => {
+  it("stamps the real logo on brand images unless the brand opted out", () => {
+    expect(shouldAutoStampLogo(kit({ logoUrl: "logo.png" }))).toBe(true);
+    expect(shouldAutoStampLogo(kit({ profile: { overlayDefault: true }, logoUrl: "logo.png" }))).toBe(true);
     expect(shouldAutoStampLogo(kit({ profile: { overlayDefault: false }, logoUrl: "logo.png" }))).toBe(false);
     expect(shouldAutoStampLogo(kit({ logoUrl: null }))).toBe(false);
+    expect(shouldAutoStampLogo(null)).toBe(false);
   });
 });
 
@@ -124,5 +128,39 @@ describe("composeBrandKit", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("pickLogoUrl", () => {
+  it("prefers a transparent-capable PNG, then SVG, then the first upload", () => {
+    expect(pickLogoUrl(["a/logo.jpg", "a/logo.svg", "a/logo.PNG?x=1"])).toBe("a/logo.PNG?x=1");
+    expect(pickLogoUrl(["a/logo.jpg", "a/logo.svg"])).toBe("a/logo.svg");
+    expect(pickLogoUrl(["a/logo.jpg", "a/logo2.webp"])).toBe("a/logo.jpg");
+    expect(pickLogoUrl([])).toBeNull();
+  });
+});
+
+describe("composeBrandKit per-image options", () => {
+  it("fills the CTA button with the chosen brand colour", async () => {
+    const out = await composeBrandKit(
+      solid(800, 800, "#ffffff"),
+      kit({ profile: { colors: ["#ff0000", "#0000ff"] }, placement: { corner: "top-right", sizePct: 18, marginPct: 4 } }),
+      { logo: false, cta: "Shop now", accentColor: "#0000ff" },
+    );
+    expect(out).not.toBeNull();
+    // Pill starts at the left margin (32px) near the bottom; sample just inside its left end.
+    const img = await loadImage(out!);
+    const c = createCanvas(img.width, img.height);
+    const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, img.width, img.height).data;
+    let blue = 0;
+    let red = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 255) blue++;
+      if (data[i] === 255 && data[i + 1] === 0 && data[i + 2] === 0) red++;
+    }
+    expect(blue).toBeGreaterThan(100);
+    expect(red).toBe(0);
   });
 });

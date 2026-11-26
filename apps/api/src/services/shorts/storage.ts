@@ -14,6 +14,9 @@ export const paths = {
   ingestDone: (slug: string) => path.join(storageRoot(), "ingest", slug, "processed"),
   ingestRejected: (slug: string) => path.join(storageRoot(), "ingest", slug, "rejected"),
   musicLibrary: () => path.join(storageRoot(), "music_library"),
+  reelDir: (reelId: string) => path.join(storageRoot(), "reels", reelId),
+  /** Tracks a user uploaded for their own reels. */
+  userMusic: (userId: string) => path.join(storageRoot(), "reel-music", userId),
 };
 
 export async function ensureDir(dir: string): Promise<string> {
@@ -70,4 +73,17 @@ export function verifyFileSignature(videoId: string, exp: number, sig: string): 
 export function signedFileUrl(videoId: string, ttlSec = 6 * 3600): string {
   const exp = Math.floor(Date.now() / 1000) + ttlSec;
   return `${env.API_PUBLIC_URL.replace(/\/+$/, "")}/shorts/files/${videoId}.mp4?exp=${exp}&sig=${signFile(videoId, exp)}`;
+}
+
+/** Signed URL for a file inside a Reel Studio project folder (preview, download, scene thumbnails). */
+export function signedReelFileUrl(reelId: string, name: string, opts: { download?: boolean; ttlSec?: number } = {}): string {
+  const exp = Math.floor(Date.now() / 1000) + (opts.ttlSec ?? 6 * 3600);
+  const sig = signFile(`reel:${reelId}:${name}`, exp);
+  return `${env.API_PUBLIC_URL.replace(/\/+$/, "")}/shorts/reel-files/${reelId}/${name.split("/").map(encodeURIComponent).join("/")}?exp=${exp}&sig=${sig}${opts.download ? "&download=1" : ""}`;
+}
+
+/** Signed URL for a track in the music library (preview in the editor). */
+export function signedMusicUrl(userId: string, key: string, ttlSec = 6 * 3600): string {
+  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  return `${env.API_PUBLIC_URL.replace(/\/+$/, "")}/shorts/music-files/${userId}/${encodeURIComponent(key)}?exp=${exp}&sig=${signFile(`music:${userId}:${key}`, exp)}`;
 }

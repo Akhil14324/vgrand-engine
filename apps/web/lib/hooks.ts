@@ -52,6 +52,7 @@ import type {
   WorkspaceDetailDto,
   WorkspaceDto,
 } from "@catgpt/types";
+import { toast } from "@/components/ui/toaster";
 import {
   ApiRequestError,
   SOCIAL_CHANNEL,
@@ -133,6 +134,10 @@ interface CreateGenerationResponse {
   conversationId: string;
   status: string;
   kind: GenerationKind;
+  /** Brand validation gaps (missing logo / colours / products) - shown, never silent. */
+  brandWarnings?: string[];
+  /** Set when the request became an AI carousel (the turn hosts its slides). */
+  carouselId?: string;
 }
 
 export function useCreateGeneration() {
@@ -144,6 +149,7 @@ export function useCreateGeneration() {
         json: body,
       }),
     onSuccess: (res, body) => {
+      for (const w of res.brandWarnings ?? []) toast.info(w);
       // Seed the open chat's own list directly instead of only invalidating -
       // invalidating alone means the optimistic pendingTurn bubble sits there
       // for a whole extra round-trip (refetch) after the POST already told us
@@ -161,9 +167,9 @@ export function useCreateGeneration() {
         provider: "openai",
         model: null,
         imageUrls: [],
-        status: "pending",
+        status: res.carouselId ? "processing" : "pending",
         error: null,
-        metadata: null,
+        metadata: res.carouselId ? { carouselHost: true, carouselId: res.carouselId } : null,
         parentId: body.parentId ?? null,
         createdAt: new Date().toISOString(),
       };
@@ -219,6 +225,32 @@ export function useRegenerate() {
       qc.invalidateQueries({ queryKey: ["generations"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["usage"] });
+    },
+  });
+}
+
+/** "Select image": make one image of a multi-image result the primary one. */
+export function useSelectImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, index }: { id: string; index: number }) =>
+      apiFetch<GenerationDto>(`/generations/${id}/select-image`, {
+        method: "POST",
+        json: { index },
+      }),
+    onSuccess: (updated) => {
+      qc.setQueryData(["generation", updated.id], updated);
+      qc.setQueriesData<InfiniteData<Paginated<GenerationDto>> | Paginated<GenerationDto>>(
+        { queryKey: ["generations"] },
+        (old) => {
+          if (!old) return old;
+          const swap = (p: Paginated<GenerationDto>) => ({
+            ...p,
+            items: p.items.map((g) => (g.id === updated.id ? updated : g)),
+          });
+          return "pages" in old ? { ...old, pages: old.pages.map(swap) } : swap(old);
+        },
+      );
     },
   });
 }

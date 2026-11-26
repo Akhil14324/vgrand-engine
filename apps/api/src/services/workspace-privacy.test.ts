@@ -23,6 +23,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.brandAsset.findMany.mockResolvedValue([]);
   m.socialPost.findMany.mockResolvedValue([]);
+  // The "still in use by another generation" check (reused identical images).
+  m.generation.findMany.mockResolvedValue([]);
   m.findWorkspaceForUser.mockResolvedValue({ id: "w1", name: "Acme" });
 });
 
@@ -53,6 +55,14 @@ describe("purgeExpiredMedia", () => {
     expect(m.deleteStoredFiles).toHaveBeenCalledWith(["https://s/a.png", "https://s/b.png"]);
   });
 
+  it("keeps a file that a reused identical image in another generation still shows", async () => {
+    m.generation.findMany
+      .mockResolvedValueOnce([{ id: "g1", imageUrls: ["https://s/a.png", "https://s/shared.png"] }])
+      .mockResolvedValueOnce([{ imageUrls: ["https://s/shared.png"] }]);
+    await svc.purgeExpiredMedia("w1", 30, NOW);
+    expect(m.deleteStoredFiles).toHaveBeenCalledWith(["https://s/a.png"]);
+  });
+
   it("does nothing when nothing has expired", async () => {
     m.generation.findMany.mockResolvedValueOnce([]);
     expect(await svc.purgeExpiredMedia("w1", 30, NOW)).toBe(0);
@@ -69,7 +79,7 @@ describe("deleteWorkspaceContent", () => {
   });
 
   it("deletes chats and reports counts once confirmed", async () => {
-    m.generation.findMany.mockResolvedValue([{ imageUrls: ["https://s/a.png", "https://s/b.png"], kind: "image" }, { imageUrls: [], kind: "text" }]);
+    m.generation.findMany.mockResolvedValueOnce([{ imageUrls: ["https://s/a.png", "https://s/b.png"], kind: "image" }, { imageUrls: [], kind: "text" }]);
     m.document.findMany.mockResolvedValue([{ storageUrl: "https://s/d.pdf" }, { storageUrl: null }]);
     m.conversation.count.mockResolvedValue(3);
     const res = await svc.deleteWorkspaceContent("u1", "w1", " Acme ");

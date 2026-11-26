@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, BarChart3, Clapperboard, Hand, ListVideo, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BarChart3, Clapperboard, Film, Hand, ListVideo, Wallet } from "lucide-react";
 import { RequireAuth } from "@/components/require-auth";
 import { Button } from "@/components/ui/button";
 import { useShortsHealth } from "@/lib/shorts-hooks";
 import { cn } from "@/lib/utils";
 
 const TABS = [
+  { key: "reels", href: "/shorts/reels", label: "Reel Studio", icon: Film },
   { key: "channels", href: "/shorts", label: "Channels", icon: Clapperboard },
   { key: "pipeline", href: "/shorts/pipeline", label: "Pipeline", icon: ListVideo },
   { key: "manual", href: "/shorts/manual", label: "Manual queue", icon: Hand },
@@ -30,7 +31,7 @@ export function ShortsShell({ current, children }: { current: ShortsTab; childre
           </Button>
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-lg font-semibold leading-tight tracking-tight">Shorts Factory</h1>
-            <p className="truncate text-xs text-muted-foreground">10 channels, one experiment: which formats travel</p>
+            <p className="truncate text-xs text-muted-foreground">AI reels for your brands and any topic, plus the 10-channel Shorts experiment</p>
           </div>
           <nav className="flex max-w-full overflow-x-auto rounded-md border p-0.5" aria-label="Shorts Factory">
             {TABS.map((t) => (
@@ -50,7 +51,8 @@ export function ShortsShell({ current, children }: { current: ShortsTab; childre
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-6xl space-y-4 px-3 py-4 sm:px-4 sm:py-6">
-            <HealthBanner />
+            {/* Reel Studio shows its own setup notice; the channel banner (YouTube, Path C) doesn't apply there. */}
+            {current !== "reels" && <HealthBanner />}
             {children}
           </div>
         </main>

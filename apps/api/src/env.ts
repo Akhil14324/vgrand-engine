@@ -85,6 +85,14 @@ const envSchema = z.object({
 
   /** Max image generations per user per UTC day. Chat is unlimited. */
   IMAGE_DAILY_LIMIT: z.coerce.number().int().positive().default(100),
+  /**
+   * Vision check of each fresh image against its brief ("on" | "off"). When
+   * on, multi-image sets are ordered best-first and a single off-brief image
+   * (score < 5/10) is regenerated once at no quota cost.
+   */
+  IMAGE_RELEVANCE_CHECK: z.enum(["on", "off"]).default("on"),
+  /** Reuse an identical earlier image request (same user, prompt, settings) within this many hours. 0 disables. */
+  IMAGE_REUSE_HOURS: z.coerce.number().min(0).default(24),
   /** Reel studio voiceover (phase 4). Stock voices only; cloning needs the consent flow. */
   ELEVENLABS_API_KEY: opt(z.string().min(1)),
   ELEVENLABS_DEFAULT_VOICE_ID: opt(z.string().min(1)),

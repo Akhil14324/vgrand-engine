@@ -154,8 +154,21 @@ export async function conversationRoutes(app: FastifyInstance) {
       }),
     ]);
     await prisma.conversation.delete({ where: { id } });
+    // A reused identical image shares its files with a generation in another
+    // chat - keep any file that is still referenced after the cascade.
+    const imageUrls = generations.flatMap((g) => g.imageUrls);
+    const stillUsed = imageUrls.length
+      ? new Set(
+          (
+            await prisma.generation.findMany({
+              where: { imageUrls: { hasSome: imageUrls } },
+              select: { imageUrls: true },
+            })
+          ).flatMap((g) => g.imageUrls),
+        )
+      : new Set<string>();
     await deleteStoredFiles([
-      ...generations.flatMap((g) => g.imageUrls),
+      ...imageUrls.filter((u) => !stillUsed.has(u)),
       ...docs.map((d) => d.storageUrl),
     ]);
     return reply.code(204).send();

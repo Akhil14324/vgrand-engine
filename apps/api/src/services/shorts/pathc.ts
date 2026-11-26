@@ -93,7 +93,7 @@ export async function monthSpend(dryRun = false): Promise<number> {
 }
 
 /** Reserves `estimate` against the monthly cap atomically. Returns the ledger row id, or null when over the cap. */
-async function reserve(input: { videoId: string; channelId: string; provider: string; seconds: number; estimate: number; budget: number; currency: string; beatIndex: number }) {
+async function reserve(input: { videoId: string | null; channelId: string; provider: string; seconds: number; estimate: number; budget: number; currency: string; beatIndex: number }) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('shorts-pathc-budget'))`;
     const agg = await tx.shortsCost.aggregate({
@@ -230,4 +230,74 @@ export async function pathCBudgetStatus(userId: string) {
     pricePerSecond: model ? pricePerSecond({ setting: settings?.pathCPricePerSecond ?? null, currency, model }) : (settings?.pathCPricePerSecond ?? null),
     priceIsOwnerSet: settings?.pathCPricePerSecond !== null && settings?.pathCPricePerSecond !== undefined,
   };
+}
+
+/* ------------------------------- Reel Studio clips ------------------------------- */
+
+/** True when a video model and the monthly budget are configured (AI clips can be requested). */
+export function aiClipsConfigured(): boolean {
+  const p = env.VIDEO_GEN_PROVIDER?.trim().toLowerCase();
+  return Boolean(p && env.VIDEO_GEN_API_KEY && (VIDEO_GEN_PROVIDERS as readonly string[]).includes(p) && parseBudget(env.PATH_C_MONTHLY_BUDGET) !== null && env.BUDGET_CURRENCY);
+}
+
+/**
+ * One AI clip for a Reel Studio scene, metered against the same monthly Path C
+ * cap and ledger (channelId is "reel:<reelId>", no video row). A crash after
+ * submit resumes the task recorded in the ledger instead of paying again.
+ * Throws PathCFallback when it can't run; the caller then uses another source.
+ */
+export async function generateReelClip(input: { userId: string; reelId: string; sceneId: string; prompt: string; seconds: number; dest: string }): Promise<{ provider: string; model: string; license: string }> {
+  const gen = liveGen();
+  const budget = parseBudget(env.PATH_C_MONTHLY_BUDGET);
+  const currency = (env.BUDGET_CURRENCY ?? "").toUpperCase();
+  if (budget === null || !currency) throw new PathCFallback("not_configured", "PATH_C_MONTHLY_BUDGET / BUDGET_CURRENCY not set");
+  const settings = await prisma.shortsSettings.findUnique({ where: { userId: input.userId } });
+  const price = pricePerSecond({ setting: settings?.pathCPricePerSecond ?? null, currency, model: gen.model });
+  if (price === null) throw new PathCFallback("price_unset", `No price per second set for ${currency}. Set it on the Costs page.`);
+  const channelId = `reel:${input.reelId}`;
+  const seconds = clipSecondsFor(gen.model, input.seconds);
+  const prompt = `${input.prompt.slice(0, 600)} Vertical 9:16, single continuous shot, natural motion, no on-screen text, no logos, no watermarks, no recognisable real people.`;
+
+  const prior = (await prisma.shortsCost.findMany({ where: { channelId, status: "spent" } })).find((c) => {
+    const n = JSON.parse(c.note ?? "{}") as { sceneId?: string; taskId?: string; prompt?: string };
+    return n.sceneId === input.sceneId && n.taskId && n.prompt === prompt;
+  });
+  let taskId = prior ? (JSON.parse(prior.note!) as { taskId: string }).taskId : null;
+  if (!taskId) {
+    const estimate = round2(seconds * price);
+    const { row, check } = await reserve({ videoId: null, channelId, provider: gen.provider, seconds, estimate, budget, currency, beatIndex: -1 });
+    if (!row) throw new PathCFallback("budget_cap", `Monthly AI clip budget reached: ${check.spent} of ${budget} ${currency} spent, next clip needs ${check.estimate}`);
+    try {
+      taskId = await gen.submit(prompt, seconds);
+    } catch (err) {
+      await prisma.shortsCost.update({ where: { id: row.id }, data: { status: "released", note: JSON.stringify({ sceneId: input.sceneId, error: String(err).slice(0, 300) }) } });
+      throw new PathCFallback("generation_failed", `AI clip request failed: ${err instanceof Error ? err.message : err}`);
+    }
+    await prisma.shortsCost.update({ where: { id: row.id }, data: { status: "spent", note: JSON.stringify({ sceneId: input.sceneId, taskId, model: gen.model, prompt }) } });
+    log.info("reel.clip_spend", { reelId: input.reelId, provider: gen.provider, seconds, cost: estimate, currency });
+  }
+  const deadline = Date.now() + 10 * 60_000;
+  let status: ClipStatus;
+  for (;;) {
+    status = await gen.poll(taskId);
+    if (status.state !== "running") break;
+    if (Date.now() > deadline) throw new PathCFallback("generation_failed", "AI clip took longer than 10 minutes");
+    await sleep(gen.pollMs);
+  }
+  if (status.state === "failed") throw new PathCFallback("generation_failed", `Provider could not make the clip: ${status.message}`);
+  await gen.fetch(status, taskId, seconds, input.dest);
+  return { provider: gen.provider, model: gen.model, license: gen.license };
+}
+
+/** USD price per second of a Reel Studio AI clip for this user (for the pre-render estimate), or null when unknown. */
+export async function reelClipPriceUsd(userId: string): Promise<number | null> {
+  if (!aiClipsConfigured()) return null;
+  const currency = (env.BUDGET_CURRENCY ?? "").toUpperCase();
+  if (currency !== "USD") return null;
+  try {
+    const settings = await prisma.shortsSettings.findUnique({ where: { userId } });
+    return pricePerSecond({ setting: settings?.pathCPricePerSecond ?? null, currency, model: liveGen().model });
+  } catch {
+    return null;
+  }
 }

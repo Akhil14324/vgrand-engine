@@ -267,18 +267,30 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
   const [logo, setLogo] = useState(true);
   const [headline, setHeadline] = useState("");
   const [cta, setCta] = useState("");
+  const [placement, setPlacement] = useState(DEFAULT_PLACEMENT);
+  const [accent, setAccent] = useState("");
 
   const usable = brands ?? [];
+  // Never mix brands: an image made for a brand only takes that brand's kit.
+  const imageBrandId = typeof generation.metadata?.brandId === "string" ? generation.metadata.brandId : null;
   const active = resolveActiveBrand(brands, chosen);
-  const selected = usable.find((b) => b.id === (brandId || active?.id || usable[0]?.id));
+  const selected = usable.find((b) => b.id === (imageBrandId || brandId || active?.id || usable[0]?.id));
   if (!usable.length) return null;
 
   const hasLogo = !!selected?.assets.some((a) => a.kind === "logo");
-  // Generations stamped at creation (or already branded) carry the logo: don't add a second one.
-  const meta = generation.metadata as { brandKitStamped?: unknown; brandKit?: { logo?: unknown } } | null;
-  const alreadyHasLogo = meta?.brandKitStamped === true || meta?.brandKit?.logo === true;
+  // A stamped image whose clean original is kept can have its logo moved/resized;
+  // without the clean original a second logo must not be added.
+  const meta = generation.metadata as {
+    brandKitStamped?: unknown;
+    brandKit?: { logo?: unknown };
+    unbrandedImageUrls?: unknown;
+  } | null;
+  const hasClean = Array.isArray(meta?.unbrandedImageUrls) && meta.unbrandedImageUrls.length > 0;
+  const stamped = meta?.brandKitStamped === true || meta?.brandKit?.logo === true;
+  const alreadyHasLogo = stamped && !hasClean;
   const addLogo = logo && hasLogo && !alreadyHasLogo;
   const canApply = !!selected && (addLogo || headline.trim() || cta.trim());
+  const palette = selected?.profile.colors ?? [];
 
   const submit = () => {
     if (!selected) return;
@@ -289,6 +301,8 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
         logo: addLogo,
         headline: headline.trim() || undefined,
         cta: cta.trim() || undefined,
+        ...(addLogo ? { placement } : {}),
+        ...(accent ? { accentColor: accent } : {}),
       },
       {
         onSuccess: () => {
@@ -305,7 +319,11 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (v) setCta(selected?.profile.defaultCta ?? "");
+        if (v) {
+          setCta(selected?.profile.defaultCta ?? "");
+          setPlacement(selected?.profile.logoPlacement ?? DEFAULT_PLACEMENT);
+          setAccent("");
+        }
       }}
     >
       <Tooltip>
@@ -328,7 +346,12 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Brand
-            <Select value={selected?.id ?? ""} onChange={(e) => setBrandId(e.target.value)}>
+            <Select
+              value={selected?.id ?? ""}
+              onChange={(e) => setBrandId(e.target.value)}
+              disabled={!!imageBrandId}
+              title={imageBrandId ? "This image was made for this brand" : undefined}
+            >
               {usable.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
@@ -341,9 +364,37 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
               Add logo
               {!hasLogo && <span className="ml-1 text-xs text-muted-foreground">(this brand has no logo yet)</span>}
               {alreadyHasLogo && <span className="ml-1 text-xs text-muted-foreground">(already on this image)</span>}
+              {stamped && hasClean && <span className="ml-1 text-xs text-muted-foreground">(re-placed on the clean original)</span>}
             </span>
             <Switch checked={addLogo} onCheckedChange={setLogo} disabled={!hasLogo || alreadyHasLogo} aria-label="Add logo" />
           </div>
+          {addLogo && (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Logo position
+                <Select
+                  value={placement.corner}
+                  onChange={(e) => setPlacement({ ...placement, corner: e.target.value as LogoCorner })}
+                >
+                  {LOGO_CORNERS.map((c) => (
+                    <option key={c} value={c}>
+                      {CORNER_LABEL[c]}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Logo size: {placement.sizePct}%
+                <input
+                  type="range"
+                  min={6}
+                  max={40}
+                  value={placement.sizePct}
+                  onChange={(e) => setPlacement({ ...placement, sizePct: Number(e.target.value) })}
+                />
+              </label>
+            </div>
+          )}
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Headline (optional)
             <Input value={headline} maxLength={120} onChange={(e) => setHeadline(e.target.value)} placeholder="Fresh drops this Friday" />
@@ -352,6 +403,27 @@ export function ApplyBrandKitButton({ generation }: { generation: GenerationDto 
             Button text (optional)
             <Input value={cta} maxLength={40} onChange={(e) => setCta(e.target.value)} placeholder="Shop now" />
           </label>
+          {cta.trim() && palette.length > 1 && (
+            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Button colour (brand palette)
+              <div className="flex gap-1.5">
+                {palette.map((c, i) => {
+                  const on = (accent || palette[0]) === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setAccent(i === 0 ? "" : c)}
+                      className={`h-6 w-6 rounded-full border-2 ${on ? "border-primary" : "border-transparent"}`}
+                      style={{ background: c }}
+                      aria-label={`Use brand colour ${c}`}
+                      title={c}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <Button onClick={submit} disabled={!canApply || apply.isPending}>
             {apply.isPending && <Loader2 className="animate-spin" />}
             Apply

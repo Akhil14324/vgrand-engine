@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
   GenerationDto,
@@ -128,6 +128,31 @@ function scheduleMemoryRecheck(qc: QueryClient) {
 }
 
 /**
+ * Live step of an image job ("Understanding your request…", "Checking the
+ * result…"). Kept outside the query cache so the 4s list polling can't wipe
+ * it between events.
+ */
+const stages = new Map<string, string>();
+const stageListeners = new Set<() => void>();
+function setStage(id: string, stage: string | null) {
+  if (stage) stages.set(id, stage);
+  else if (!stages.delete(id)) return;
+  stageListeners.forEach((l) => l());
+}
+const subscribeStages = (l: () => void) => {
+  stageListeners.add(l);
+  return () => stageListeners.delete(l);
+};
+
+export function useGenerationStage(id: string): string | null {
+  return useSyncExternalStore(
+    subscribeStages,
+    () => stages.get(id) ?? null,
+    () => null,
+  );
+}
+
+/**
  * Streams /generations/:id/events while a generation is pending/processing so
  * cards flip from shimmer to image without polling — and chat replies render
  * token-by-token via delta events. EventSource can't set headers, so the
@@ -159,7 +184,9 @@ export function useGenerationStream(
       es.onmessage = (msg) => {
         try {
           const evt = JSON.parse(msg.data) as GenerationEvent;
-          if (evt.delta) {
+          if (evt.stage && evt.status === "processing") {
+            setStage(evt.generationId, evt.stage);
+          } else if (evt.delta) {
             queueDelta(qc, evt.generationId, evt.delta);
           } else if (evt.partialImage) {
             applyPartialImage(qc, evt.generationId, evt.partialImage);
@@ -178,6 +205,7 @@ export function useGenerationStream(
             // Terminal state — land every buffered token before the refetch.
             flushDeltas(qc);
             streamBuffers.delete(evt.generationId);
+            setStage(evt.generationId, null);
             if (evt.status === "completed" && evt.kind === "text") {
               scheduleMemoryRecheck(qc);
             }
