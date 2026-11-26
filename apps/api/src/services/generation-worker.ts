@@ -6,9 +6,12 @@ import {
   type GenerationMode,
 } from "@catgpt/image-providers";
 import {
+  IMAGE_STYLES,
   PROVIDERS,
   SOCIAL_MAX_CAROUSEL_IMAGES,
+  type ImageStyle,
   type ProviderName,
+  type VisualBrief,
   type Quality,
   type ImageSize,
   type ImageEditOperation,
@@ -54,6 +57,18 @@ import { evaluateSafe } from "./jev.js";
 import { loadLearnedMemories, rememberTurn } from "./learned-memory.js";
 import { refundImageUsage } from "../lib/usage.js";
 import { loadBrandContext } from "../lib/brand.js";
+import { brandBriefContext } from "../lib/brand-identity.js";
+import type { BrandProfile } from "@catgpt/types";
+import {
+  VARIATION_ANGLES,
+  briefPrompt,
+  occasionById,
+  rankByScore,
+  selectRelevantReferences,
+  sizeForAspect,
+  type ReferenceCandidate,
+} from "../lib/image-brief-logic.js";
+import { analyzeImagePrompt, scoreImageRelevance } from "./image-brief.js";
 import {
   generateCampaignPostCopy,
   isCampaignConversation,
@@ -222,6 +237,9 @@ async function sweepStaleWork() {
   });
   for (const gen of stale) {
     const meta = (gen.metadata ?? {}) as GenerationMetadata;
+    // A carousel turn stays "processing" while its slides render; the
+    // carousel sweep below checks it instead.
+    if (meta.carouselHost === true) continue;
     const attempts = (meta.workerAttempts ?? 0) + 1;
     if (attempts <= MAX_SWEEP_RETRIES) {
       // Back to pending so runGeneration's atomic claim picks it up cleanly.
@@ -267,6 +285,10 @@ async function sweepStaleWork() {
     await requeueGeneration(gen.id).catch(() => {});
   }
 
+  await import("./carousel.js")
+    .then((m) => m.sweepCarousels())
+    .catch((err) => console.error("[worker] carousel sweep failed:", err));
+
   await prisma.document
     .updateMany({
       where: { status: "processing", createdAt: { lt: cutoff } },
@@ -308,7 +330,83 @@ async function recoverPendingGenerations() {
   }
 }
 
+/**
+ * Avoid paying twice for the exact same image: an identical fresh request
+ * (same user, prompt, brand, theme, style, size, quality, references) that
+ * already completed recently is served from the stored result, and the quota
+ * slot is refunded. "Generate again" never sets requestHash, so it always
+ * renders a new image.
+ */
+async function reuseIdenticalImage(
+  generation: { id: string; userId: string },
+  meta: GenerationMetadata,
+): Promise<boolean> {
+  if (typeof meta.requestHash !== "string" || env.IMAGE_REUSE_HOURS <= 0) {
+    return false;
+  }
+  const prior = await prisma.generation.findFirst({
+    where: {
+      userId: generation.userId,
+      id: { not: generation.id },
+      kind: "image",
+      status: "completed",
+      createdAt: { gte: new Date(Date.now() - env.IMAGE_REUSE_HOURS * 3_600_000) },
+      metadata: { path: ["requestHash"], equals: meta.requestHash },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!prior || prior.imageUrls.length === 0) return false;
+  const priorMeta = (prior.metadata ?? {}) as Record<string, unknown>;
+  const note =
+    "Reused your identical image from earlier instead of generating a duplicate. Use **Generate again** for a fresh variation.";
+  const textResponse = [prior.textResponse, `_${note}_`].filter(Boolean).join("\n\n");
+  const done = await prisma.generation.updateMany({
+    where: { id: generation.id, status: "processing" },
+    data: {
+      status: "completed",
+      imageUrls: prior.imageUrls,
+      textResponse,
+      provider: prior.provider,
+      model: prior.model,
+      finalPrompt: prior.finalPrompt,
+      metadata: {
+        ...meta,
+        ...(priorMeta.imageBrief ? { imageBrief: priorMeta.imageBrief } : {}),
+        ...(priorMeta.relevanceScores ? { relevanceScores: priorMeta.relevanceScores } : {}),
+        reusedFrom: prior.id,
+      } as object,
+    },
+  });
+  if (done.count === 0) return true; // cancelled meanwhile - nothing to do
+  await refundImageUsage(generation.id).catch(() => {});
+  publishGenerationEvent({
+    generationId: generation.id,
+    status: "completed",
+    kind: "image",
+    imageUrls: prior.imageUrls,
+    textResponse,
+  });
+  return true;
+}
+
 export async function runGeneration(generationId: string): Promise<void> {
+  try {
+    await runGenerationJob(generationId);
+  } finally {
+    // A carousel slide job settled (or was skipped): let the carousel move
+    // on - record the image, retry a failure, or start the next slides.
+    void prisma.carouselSlide
+      .findFirst({ where: { generationId }, select: { carouselId: true } })
+      .then(async (slide) => {
+        if (!slide) return;
+        const { reconcileCarousel } = await import("./carousel.js");
+        await reconcileCarousel(slide.carouselId);
+      })
+      .catch((err) => console.error("[worker] carousel hook failed:", err));
+  }
+}
+
+async function runGenerationJob(generationId: string): Promise<void> {
   // Atomic claim — a single conditional UPDATE instead of read-then-write.
   // A BullMQ stalled-retry, the recovery sweep and a live enqueue can all
   // reach this row concurrently; only one can flip pending -> processing, so
@@ -325,6 +423,17 @@ export async function runGeneration(generationId: string): Promise<void> {
     include: { theme: true },
   });
   if (!generation) return;
+
+  // A carousel's chat turn is not a render job: its slides are their own
+  // generations. A recovery/sweep that re-queued it just re-checks the set.
+  if ((generation.metadata as GenerationMetadata | null)?.carouselHost === true) {
+    const carouselId = (generation.metadata as GenerationMetadata).carouselId;
+    if (typeof carouselId === "string") {
+      const { reconcileCarousel } = await import("./carousel.js");
+      await reconcileCarousel(carouselId);
+    }
+    return;
+  }
 
   publishGenerationEvent({ generationId, status: "processing" });
 
@@ -351,13 +460,13 @@ export async function runGeneration(generationId: string): Promise<void> {
 
   const startedAt = Date.now();
   const meta = (generation.metadata ?? {}) as GenerationMetadata;
-  const mode: GenerationMode =
+  let mode: GenerationMode =
     generation.parentId ||
     meta.referenceImageUrl ||
     meta.referenceImageUrls?.length
       ? "edit"
       : "draft";
-  const referenceImageUrls = meta.referenceImageUrls?.length
+  let referenceImageUrls = meta.referenceImageUrls?.length
     ? meta.referenceImageUrls
     : meta.referenceImageUrl
       ? [meta.referenceImageUrl]
@@ -829,22 +938,142 @@ export async function runGeneration(generationId: string): Promise<void> {
       );
     }
 
-    const result = await generateWithFallback(providerName, {
-      prompt: generation.finalPrompt,
+    // Intelligent curation for fresh drafts: understand the request, keep
+    // only stored images that genuinely match it, and turn it into a
+    // detailed brief - never an edit of an arbitrary image from the
+    // collection. Edits/regenerates of an exact image skip all of this.
+    let finalPrompt = generation.finalPrompt;
+    let size: ImageSize = meta.size ?? "auto";
+    let brief: VisualBrief | null = null;
+    const curation: Record<string, unknown> = {};
+    if (meta.curate === true && !generation.parentId && !meta.editOperation) {
+      if (await reuseIdenticalImage(generation, meta)) return;
+
+      publishGenerationEvent({
+        generationId,
+        status: "processing",
+        kind: "image",
+        stage: "Understanding your request…",
+      });
+      const brandId =
+        generation.brandId ??
+        (typeof meta.brandId === "string" ? meta.brandId : null);
+      const [brandCtx, previous] = await Promise.all([
+        brandId
+          ? loadBrandContext(brandId, generation.userId).catch(() => null)
+          : Promise.resolve(null),
+        typeof meta.variationOf === "string"
+          ? prisma.generation.findFirst({
+              where: { id: meta.variationOf, userId: generation.userId },
+              select: { metadata: true },
+            })
+          : Promise.resolve(null),
+      ]);
+      const previousBrief =
+        ((previous?.metadata ?? null) as { imageBrief?: VisualBrief } | null)
+          ?.imageBrief ?? null;
+      const style = (IMAGE_STYLES as readonly string[]).includes(String(meta.style))
+        ? (meta.style as ImageStyle)
+        : "auto";
+      brief = await analyzeImagePrompt(generation.prompt, {
+        style,
+        size,
+        themeLabel: generation.theme?.label ?? null,
+        // The selected brand drives the scene (palette, real products,
+        // style); the occasion only sets the theme.
+        brandSummary: brandCtx
+          ? brandBriefContext({
+              id: brandCtx.id,
+              name: brandCtx.name,
+              summary: brandCtx.summary,
+              profile: (brandCtx.profile ?? {}) as BrandProfile,
+              assets: brandCtx.assets,
+            })
+          : null,
+        brandMode: Boolean(brandCtx),
+        brandColors: ((brandCtx?.profile ?? {}) as BrandProfile).colors,
+        previousBrief,
+      });
+      const candidates = Array.isArray(meta.candidateReferences)
+        ? (meta.candidateReferences as ReferenceCandidate[])
+        : [];
+      const { selected, rejected } = selectRelevantReferences(
+        brief,
+        generation.prompt,
+        candidates,
+        { brandMode: Boolean(brandCtx) },
+      );
+      referenceImageUrls = [
+        ...new Set([...referenceImageUrls, ...selected.map((c) => c.url)]),
+      ].slice(0, 10);
+      mode = referenceImageUrls.length > 0 ? "edit" : "draft";
+      size = sizeForAspect(meta.size, brief.aspect);
+      const variationIndex = previous
+        ? await prisma.generation.count({
+            where: {
+              userId: generation.userId,
+              metadata: { path: ["variationOf"], equals: meta.variationOf as string },
+            },
+          })
+        : 0;
+      finalPrompt =
+        generation.finalPrompt +
+        briefPrompt(brief, previous ? { index: Math.max(variationIndex - 1, 0) } : null) +
+        (brandCtx && selected.some((c) => c.kind === "product")
+          ? `\nThe supplied product photos are ${brandCtx.name}'s REAL products (${selected
+              .filter((c) => c.kind === "product")
+              .map((c) => c.label?.trim() || "unnamed product")
+              .join(", ")}): place them as the clearly visible hero, exactly as photographed - same shape, packaging, labels and colours - inside a newly generated background and decorations that follow the brief. Do not invent any other product.`
+          : "") +
+        (selected.some((c) => !brandCtx || c.kind !== "product")
+          ? "\nThe other supplied reference images are relevant assets from the user's own collection: use them for the matching elements only, inside a newly composed scene that follows the brief."
+          : "") +
+        (imageCount > 1
+          ? `\nThis is a set of ${imageCount} images: every image must follow the brief but be clearly different from the others - vary the composition across ${VARIATION_ANGLES.slice(0, imageCount).join(", ")}. No two images may look alike.`
+          : "");
+      Object.assign(curation, {
+        imageBrief: brief,
+        size,
+        referenceImageUrl: referenceImageUrls[0],
+        referenceImageUrls,
+        selectedReferences: selected,
+        rejectedReferenceCount: rejected.length,
+      });
+      // Persist the brief + exact prompt now, so a failed render still shows
+      // what was understood and "Generate again" can build on it.
+      await prisma.generation
+        .update({
+          where: { id: generationId },
+          data: { finalPrompt, metadata: { ...meta, ...curation } as object },
+        })
+        .catch(() => {});
+      const occasionLabel = brief.occasion
+        ? `${occasionById(brief.occasion)?.label ?? brief.occasion} `
+        : "";
+      publishGenerationEvent({
+        generationId,
+        status: "processing",
+        kind: "image",
+        stage: `Generating ${occasionLabel}${imageCount > 1 ? `${imageCount} images` : "image"}…`,
+      });
+    }
+
+    const genParams = {
+      prompt: finalPrompt,
       mode,
       referenceImageUrl: referenceImageUrls[0],
       referenceImageUrls,
       operation: meta.editOperation,
       maskImageUrl: meta.maskImageUrl,
       quality: meta.quality ?? "low",
-      size: meta.size ?? "auto",
+      size,
       n: imageCount,
       // Progressive previews stream through SSE as they arrive from the
       // model — each one is also a checkpoint for Stop, so a cancelled image
       // job aborts at the next partial instead of running to completion.
       // A multi-image (carousel) request skips previews (see the OpenAI
       // adapter) - only a single-image job ever calls this.
-      onPartialImage: (b64) => {
+      onPartialImage: (b64: string) => {
         pollCancelled();
         // Provider-specific abort error — it survives the provider's
         // stream-failure fallback instead of triggering a retry.
@@ -856,22 +1085,100 @@ export async function runGeneration(generationId: string): Promise<void> {
           partialImage: `data:image/png;base64,${b64}`,
         });
       },
-    });
+    };
+    let result = await generateWithFallback(providerName, genParams);
+
+    // Relevance check (curated drafts only): score each image against the
+    // brief, put the best first, and redo a single clearly off-brief image
+    // once. Scoring is best-effort - null means "unknown", never a failure.
+    let relevance: (number | null)[] = [];
+    if (brief && !cancelFlag && env.IMAGE_RELEVANCE_CHECK === "on") {
+      const activeBrief = brief;
+      publishGenerationEvent({
+        generationId,
+        status: "processing",
+        kind: "image",
+        stage: "Checking the result matches your request…",
+      });
+      const scoreAll = (images: typeof result.images) =>
+        Promise.all(
+          images.map((img) =>
+            scoreImageRelevance({ url: img.url, b64: img.b64Json }, activeBrief),
+          ),
+        );
+      let scores = await scoreAll(result.images);
+      const first = scores[0];
+      if (imageCount === 1 && first && first.score < 5 && !cancelFlag) {
+        publishGenerationEvent({
+          generationId,
+          status: "processing",
+          kind: "image",
+          stage: "Refining - the first try missed part of your request…",
+        });
+        const retry = await generateWithFallback(providerName, {
+          ...genParams,
+          prompt:
+            finalPrompt +
+            (first.missing.length
+              ? `\nIMPORTANT: the image must clearly include: ${first.missing.join("; ")}.`
+              : "\nIMPORTANT: follow every element of the brief exactly."),
+          onPartialImage: undefined,
+        }).catch(() => null);
+        if (retry?.images.length) {
+          const retryScores = await scoreAll(retry.images);
+          if ((retryScores[0]?.score ?? 0) >= first.score) {
+            result = retry;
+            scores = retryScores;
+          }
+        }
+      }
+      const raw = scores.map((s) => s?.score ?? null);
+      result = { ...result, images: rankByScore(result.images, raw) };
+      relevance = [...raw].sort((a, b) => (b ?? -1) - (a ?? -1));
+    }
 
     // Stop pressed while the provider was rendering — bail before storage
     // so we never pay to persist images nobody will see.
     if (cancelFlag) throw new GenerationCancelled();
 
-    // Brand kit: stamp the REAL logo on fresh brand images (never on edit
-    // chains, whose reference may already carry it, or on mascot candidates).
+    // Carousel slides must all share the exact Instagram dimensions: crop
+    // and resize before the logo is stamped, so the logo is never cut off.
+    const exactSize = meta.exactSize as { width?: number; height?: number } | undefined;
+    if (exactSize?.width && exactSize.height) {
+      const { fitImageToSize } = await import("../lib/image-fit.js");
+      const { width, height } = exactSize as { width: number; height: number };
+      result = {
+        ...result,
+        images: await Promise.all(
+          result.images.map(async (img) => {
+            const raw = img.b64Json
+              ? Buffer.from(img.b64Json, "base64")
+              : Buffer.from(
+                  await (await fetch(img.url!, { signal: AbortSignal.timeout(30_000) })).arrayBuffer(),
+                );
+            const fitted = await fitImageToSize(raw, width, height);
+            return { b64Json: fitted.toString("base64"), mimeType: "image/png" };
+          }),
+        ),
+      };
+    }
+
+    // Brand kit: stamp the brand's REAL logo file (never an AI redraw) on
+    // brand images after generation. Fresh drafts always; edits only when
+    // they were built from a stamped parent's clean original (restampLogo),
+    // so a logo is never doubled. Mascot candidates are raw assets - skipped.
+    // The clean, logo-free original is stored too, so later edits and
+    // logo repositioning start from it instead of the stamped copy.
+    const stampBrandId =
+      generation.brandId ?? (typeof meta.brandId === "string" ? meta.brandId : null);
     const stampKit =
-      !generation.parentId && !meta.editOperation && !(meta as { mascotCandidate?: unknown }).mascotCandidate
-        ? await loadAutoStampKit(generation.brandId ?? (typeof meta.brandId === "string" ? meta.brandId : null)).catch(
-            () => null,
-          )
+      ((!generation.parentId && !meta.editOperation) || meta.restampLogo === true) &&
+      !(meta as { mascotCandidate?: unknown }).mascotCandidate
+        ? await loadAutoStampKit(stampBrandId).catch(() => null)
         : null;
 
     let brandKitStamped = false;
+    const unbrandedImageUrls: string[] = [];
     const imageUrls = await Promise.all(
       result.images.map(async (img, i) => {
         let buffer: Buffer | undefined = img.b64Json ? Buffer.from(img.b64Json, "base64") : undefined;
@@ -883,13 +1190,19 @@ export async function runGeneration(generationId: string): Promise<void> {
               buffer ?? Buffer.from(await (await fetch(img.url!, { signal: AbortSignal.timeout(30_000) })).arrayBuffer());
             const stamped = await composeBrandKit(raw, stampKit, { logo: true });
             if (stamped) {
+              unbrandedImageUrls[i] = await storeImage({
+                buffer: raw,
+                mimeType: img.mimeType,
+                keyPrefix: `generations/${generationId}/${i}-clean`,
+              });
               buffer = stamped;
               brandKitStamped = true;
               sourceUrl = undefined;
               mimeType = "image/png";
             }
           } catch (err) {
-            // Fail open: an unstamped image beats a failed generation.
+            // Fail open, but never silently: the image is kept and flagged
+            // (brandApplied.logo = false) so the UI warns the logo is missing.
             console.warn("[worker] brand-kit stamp skipped:", err instanceof Error ? err.message : err);
           }
         }
@@ -901,6 +1214,45 @@ export async function runGeneration(generationId: string): Promise<void> {
         });
       }),
     );
+    // A product named in the prompt is attached directly (not via curation).
+    const namedProduct =
+      stampBrandId && typeof meta.selectedProductAssetId === "string"
+        ? await prisma.brandAsset
+            .findFirst({
+              where: { id: meta.selectedProductAssetId, brandId: stampBrandId },
+              select: { label: true },
+            })
+            .catch(() => null)
+        : null;
+    // What brand identity actually reached this image - shown on the card.
+    const brandApplied = stampBrandId
+      ? {
+          brandId: stampBrandId,
+          logo: brandKitStamped,
+          logoExpected: Boolean(stampKit),
+          products: referenceImageUrls.filter((u) =>
+            ((meta.candidateReferences as { url: string; kind: string }[] | undefined) ?? []).some(
+              (c) => c.url === u && c.kind === "product",
+            ),
+          ).length + (typeof meta.selectedProductAssetId === "string" ? 1 : 0),
+          productNames: [
+            ...(namedProduct ? [namedProduct.label?.trim() || "unnamed product"] : []),
+            ...((curation.selectedReferences as ReferenceCandidate[] | undefined) ?? [])
+              .filter((c) => c.kind === "product")
+              .map((c) => c.label?.trim() || "unnamed product"),
+          ],
+          colors:
+            stampKit?.profile.colors ??
+            (meta.brandCheck as { colors?: string[] } | undefined)?.colors ??
+            [],
+          warnings: [
+            ...((meta.brandCheck as { warnings?: string[] } | undefined)?.warnings ?? []),
+            ...(stampKit && !brandKitStamped
+              ? ["The brand logo could not be applied to this image - use Apply brand kit to add it."]
+              : []),
+          ],
+        }
+      : null;
 
     let campaignPostCopy: string | null = null;
     if (
@@ -933,7 +1285,7 @@ export async function runGeneration(generationId: string): Promise<void> {
     const noteBrand = noteBrandId
       ? await loadBrandContext(noteBrandId, generation.userId).catch(() => null)
       : null;
-    const valueNote = await describeImageValue({
+    const valueNote = meta.carouselSlide ? null : await describeImageValue({
       prompt: generation.prompt,
       themeSlug: generation.theme?.slug ?? null,
       mode,
@@ -964,7 +1316,18 @@ export async function runGeneration(generationId: string): Promise<void> {
         metadata: {
           ...meta,
           ...result.metadata,
-          ...(brandKitStamped ? { brandKitStamped: true } : {}),
+          ...curation,
+          ...(relevance.length ? { relevanceScores: relevance } : {}),
+          ...(brandKitStamped
+            ? {
+                brandKitStamped: true,
+                ...(unbrandedImageUrls.length === imageUrls.length &&
+                unbrandedImageUrls.every(Boolean)
+                  ? { unbrandedImageUrls }
+                  : {}),
+              }
+            : {}),
+          ...(brandApplied ? { brandApplied } : {}),
           latencyMs: Date.now() - startedAt,
         },
       },
@@ -989,7 +1352,7 @@ export async function runGeneration(generationId: string): Promise<void> {
     // this generation later, not just the image. Bookkeeping must never
     // downgrade a completed job: a failure here used to mark the row failed
     // and refund quota for images that exist.
-    try {
+    if (!meta.carouselSlide) try {
       await prisma.memory.create({
       data: {
         userId: generation.userId,
@@ -1000,7 +1363,7 @@ export async function runGeneration(generationId: string): Promise<void> {
         sourceGenId: generationId,
         metadata: {
           prompt: generation.prompt,
-          finalPrompt: generation.finalPrompt,
+          finalPrompt,
           themeSlug: generation.theme?.slug ?? null,
           provider: result.providerUsed,
           model: result.metadata.model ?? null,

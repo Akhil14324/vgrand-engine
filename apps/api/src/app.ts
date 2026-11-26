@@ -13,6 +13,7 @@ import { queueStats } from "./services/queue.js";
 import { authPlugin, rateLimitKey } from "./plugins/auth.js";
 import { themeRoutes } from "./routes/themes.js";
 import { generationRoutes } from "./routes/generations.js";
+import { carouselRoutes } from "./routes/carousels.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { shareRoutes } from "./routes/share.js";
@@ -38,6 +39,7 @@ import { videoStudioRoutes } from "./routes/video-studio.js";
 import { videoPlanRoutes } from "./routes/video-plan.js";
 import { shortsRoutes } from "./routes/shorts.js";
 import { shortsPublicRoutes } from "./routes/shorts-public.js";
+import { shortsReelRoutes } from "./routes/shorts-reels.js";
 import { igAutomationRoutes } from "./routes/ig-automation.js";
 import { igWebhookRoutes } from "./routes/ig-webhook.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
@@ -130,6 +132,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(themeRoutes);
   await app.register(generationRoutes);
+  await app.register(carouselRoutes);
   await app.register(conversationRoutes);
   await app.register(workspaceRoutes);
   await app.register(shareRoutes);
@@ -154,6 +157,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(videoStudioRoutes);
   await app.register(videoPlanRoutes);
   await app.register(shortsRoutes);
+  await app.register(shortsReelRoutes);
   await app.register(shortsPublicRoutes);
   await app.register(igAutomationRoutes);
   await app.register(igWebhookRoutes);

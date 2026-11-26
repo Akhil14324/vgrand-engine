@@ -36,11 +36,17 @@ export async function setRetention(userId: string, workspaceId: string, days: nu
 export async function deleteFilesUnlessInUse(urls: string[]): Promise<void> {
   const unique = [...new Set(urls.filter(Boolean))];
   if (unique.length === 0) return;
-  const [assets, posts] = await Promise.all([
+  const [assets, posts, gens] = await Promise.all([
     prisma.brandAsset.findMany({ where: { url: { in: unique } }, select: { url: true } }),
     prisma.socialPost.findMany({ where: { mediaUrls: { hasSome: unique } }, select: { mediaUrls: true } }),
+    // Identical image requests can reuse another generation's stored files.
+    prisma.generation.findMany({ where: { imageUrls: { hasSome: unique } }, select: { imageUrls: true } }),
   ]);
-  const used = new Set([...assets.map((a) => a.url), ...posts.flatMap((p) => p.mediaUrls)]);
+  const used = new Set([
+    ...assets.map((a) => a.url),
+    ...posts.flatMap((p) => p.mediaUrls),
+    ...gens.flatMap((g) => g.imageUrls),
+  ]);
   await deleteStoredFiles(unique.filter((u) => !used.has(u)));
 }
 

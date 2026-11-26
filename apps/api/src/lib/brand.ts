@@ -16,6 +16,7 @@ import {
 import { notFound } from "./errors.js";
 import { isTrustedImageUrl } from "./urls.js";
 import { workspaceAccess } from "./workspace-access.js";
+import { brandWantsLogoOverlay, paletteDirective } from "./brand-identity.js";
 
 /** Caps that keep a brand's footprint (rows, embeddings, prompt size) small. */
 export const MAX_BRAND_ASSETS = 20;
@@ -274,11 +275,9 @@ export async function loadBrandContext(brandId: string, userId?: string) {
       },
     },
   });
-  // When the real logo is stamped on afterwards (brand kit), the model must not
-  // receive it as a reference or it would draw a second, distorted copy.
-  if (brand && (brand.profile as BrandProfile | null)?.overlayDefault) {
-    return { ...brand, assets: brand.assets.filter((a) => a.kind !== "logo") };
-  }
+  // The logo stays in the list so validation knows it exists; it is never sent
+  // to the model (brandReferenceUrls / candidate building skip kind "logo") -
+  // the real file is composited on after generation instead.
   return brand;
 }
 
@@ -309,7 +308,12 @@ export function brandReferenceUrls(
   ].slice(0, MAX_BRAND_REFERENCES);
 }
 
-/** Style guidance appended to image prompts in brand mode. `includeMarketingPurpose` stays on for marketing visuals; pass false when generating a raw brand asset (e.g. a mascot candidate) that has no marketing job of its own. */
+/**
+ * Style guidance appended to image prompts in brand mode. `includeMarketingPurpose`
+ * stays on for marketing visuals; pass false when generating a raw brand asset
+ * (e.g. a mascot candidate) that has no marketing job and never gets the logo
+ * overlay. The occasion may change the creative theme, never the brand identity.
+ */
 export function brandImageGuidance(
   name: string,
   profile: BrandProfile,
@@ -318,14 +322,12 @@ export function brandImageGuidance(
   hasProducts?: boolean,
   includeMarketingPurpose = true,
 ): string {
-  const parts = [`\nBrand: ${name}. Keep the creative on-brand.`];
-  if (profile.overlayDefault && profile.logoPlacement) {
-    parts.push(
-      `The real logo is added afterwards in the ${profile.logoPlacement.corner} corner: do not draw any logo, watermark or brand lettering, and keep that corner uncluttered.`,
-    );
-  }
+  const parts = [
+    `\nBrand: ${name}. This is a ${name}-branded creative: the occasion or theme sets the scene, never the brand identity - every image must stay recognisably ${name}.`,
+  ];
   if (profile.colors?.length) {
     parts.push(`Brand colours: ${profile.colors.join(", ")}.`);
+    parts.push(paletteDirective(profile.colors));
   }
   if (profile.tagline) parts.push(`Tagline: "${profile.tagline}".`);
   if (profile.tone) parts.push(`Feel: ${profile.tone}.`);
@@ -333,7 +335,7 @@ export function brandImageGuidance(
   if (profile.photographyStyle) {
     parts.push(`Photo style: ${profile.photographyStyle}.`);
   }
-  if (profile.typography) parts.push(`Typography feel: ${profile.typography}.`);
+  if (profile.typography) parts.push(`Typography feel (for any text the user asked for): ${profile.typography}.`);
   if (profile.logoRules) parts.push(`Logo rules: ${profile.logoRules}.`);
   if (profile.requiredPhrases?.length) {
     parts.push(`Approved phrases: ${profile.requiredPhrases.join(" | ")}.`);
@@ -350,14 +352,19 @@ export function brandImageGuidance(
       `Optional mascot "${mascot.name}": ${mascot.description}. It is a supporting brand character, never the main subject — include it only as a small cameo or corner accent when a character naturally fits the brief, and never let it dominate the composition. If it appears, match the mascot reference image exactly (silhouette, palette, facial features); do not redesign it.`,
     );
   }
-  if (hasLogo) {
+  if (hasLogo && includeMarketingPurpose && brandWantsLogoOverlay(profile)) {
+    const corner = profile.logoPlacement?.corner ?? "bottom-right";
+    parts.push(
+      `The brand's real logo file is placed onto the finished image afterwards in the ${corner} corner: do not draw any logo, watermark, emblem or brand lettering anywhere, and keep that corner calm and uncluttered so the logo stays visible.`,
+    );
+  } else if (hasLogo) {
     parts.push(
       "The uploaded brand logo is not a model input and is not added automatically. Do not draw, recreate, alter, or add a logo, watermark or brand lettering anywhere in the creative.",
     );
   }
   if (hasProducts) {
     parts.push(
-      "Product-photo references are this brand's real products - show the actual product faithfully (shape, colours, packaging, labels); never substitute a generic look-alike.",
+      "Product-photo references are this brand's real products: keep each one clearly visible and exactly as photographed (shape, colours, packaging, labels, proportions) - never substitute, redesign or invent a product, and build the new background and decorations around them.",
     );
   }
   if (includeMarketingPurpose) {

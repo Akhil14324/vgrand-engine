@@ -26,12 +26,17 @@ import {
 } from "lucide-react";
 import {
   SOCIAL_MAX_CAROUSEL_IMAGES,
+  CAROUSEL_ASPECTS,
+  CAROUSEL_DIMENSIONS,
+  CAROUSEL_SLIDE_OPTIONS,
   type DocumentDto,
   type GenerationDto,
+  type ImageStyle,
   type Quality,
   type ThemeDto,
 } from "@catgpt/types";
 import { apiFetch, ApiRequestError } from "@/lib/api";
+import { STYLE_LABEL } from "@/lib/image-style";
 import { MAX_UPLOAD_MB } from "@/lib/config";
 import {
   useAddBrandAsset,
@@ -81,8 +86,8 @@ const QUALITY_LABEL: Record<Quality, string> = {
   high: "High · costly",
 };
 
-/** Preset counts for "generate a carousel" — capped at Instagram/Facebook's carousel limit. */
-const IMAGE_COUNT_OPTIONS = [1, 2, 3, 4, 6, SOCIAL_MAX_CAROUSEL_IMAGES];
+/** Carousel slide counts (1 = a normal single image) - capped at Instagram's 10-slide limit. */
+const IMAGE_COUNT_OPTIONS = [1, ...CAROUSEL_SLIDE_OPTIONS].filter((n) => n <= SOCIAL_MAX_CAROUSEL_IMAGES);
 
 /** Rotating idle placeholders — quietly demo what the composer can do. */
 const PLACEHOLDERS = [
@@ -103,6 +108,10 @@ export function Composer() {
     setSize,
     imageCount,
     setImageCount,
+    carouselAspect,
+    setCarouselAspect,
+    imageStyle,
+    setImageStyle,
     select,
     activeConversationId,
     openConversation,
@@ -565,7 +574,13 @@ export function Composer() {
         themeSlug: armedTheme?.slug,
         quality,
         size,
+        style: imageStyle !== "auto" ? imageStyle : undefined,
         imageCount: imageCount > 1 ? imageCount : undefined,
+        // Carousel: format for every slide + a one-time key so a double
+        // submit can never plan (and pay for) the same carousel twice.
+        ...(imageCount > 1
+          ? { carouselAspect, requestKey: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }
+          : {}),
         referenceImageUrls: refImages.length ? refImages : undefined,
         documentIds: docs.length ? docs.map((d) => d.id) : undefined,
         webSearch: webSearch || undefined,
@@ -595,7 +610,7 @@ export function Composer() {
         },
       },
     );
-  }, [value, create, armedTheme, quality, size, imageCount, setImageCount, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
+  }, [value, create, armedTheme, quality, size, imageStyle, imageCount, setImageCount, carouselAspect, webSearch, activeBrand, refImages, docs, activeConversationId, openConversation, select, setPendingTurn, resolvePendingTurn, clearPendingTurn, workspaceContextId]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && filtered.length > 0) {
@@ -882,10 +897,17 @@ export function Composer() {
                   >
                     {QUALITY_LABEL[quality]}
                     {size !== "auto" ? ` · ${channelLabel(size)}` : ""}
-                    {imageCount > 1 ? ` · ${imageCount}x` : ""}
+                    {imageStyle !== "auto" ? ` · ${STYLE_LABEL[imageStyle]}` : ""}
+                    {imageCount > 1 ? ` · carousel ${imageCount} slides` : ""}
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
+                <DropdownMenuContent
+                  align="start"
+                  // Long menu (quality, canvas, style, carousel): never taller
+                  // than the space Radix found - scroll inside it instead.
+                  collisionPadding={8}
+                  className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto"
+                >
                   <DropdownMenuLabel>Image quality</DropdownMenuLabel>
                   {(Object.keys(QUALITY_LABEL) as Quality[]).map((q) => (
                     <DropdownMenuItem key={q} onClick={() => setQuality(q)}>
@@ -909,15 +931,37 @@ export function Composer() {
                       )}
                     </DropdownMenuItem>
                   ))}
-                  <DropdownMenuLabel>Images (carousel)</DropdownMenuLabel>
+                  <DropdownMenuLabel>Style</DropdownMenuLabel>
+                  {(Object.keys(STYLE_LABEL) as ImageStyle[]).map((st) => (
+                    <DropdownMenuItem key={st} onClick={() => setImageStyle(st)}>
+                      {STYLE_LABEL[st]}
+                      {st === imageStyle && (
+                        <span className="ml-auto text-primary">●</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuLabel>Carousel generation</DropdownMenuLabel>
                   {IMAGE_COUNT_OPTIONS.map((n) => (
                     <DropdownMenuItem key={n} onClick={() => setImageCount(n)}>
-                      {n === 1 ? "1 · single image" : `${n} · carousel set`}
+                      {n === 1 ? "Off · single image" : `${n} slides · separate images`}
                       {n === imageCount && (
                         <span className="ml-auto text-primary">●</span>
                       )}
                     </DropdownMenuItem>
                   ))}
+                  {imageCount > 1 && (
+                    <>
+                      <DropdownMenuLabel>Carousel format</DropdownMenuLabel>
+                      {CAROUSEL_ASPECTS.map((a) => (
+                        <DropdownMenuItem key={a} onClick={() => setCarouselAspect(a)}>
+                          {CAROUSEL_DIMENSIONS[a].label}
+                          {a === carouselAspect && (
+                            <span className="ml-auto text-primary">●</span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
 

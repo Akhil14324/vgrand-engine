@@ -7,6 +7,7 @@ import { registerSyncHandlers } from "./sync.js";
 import { registerYoutubeHandlers } from "./youtube.js";
 import { registerIngestHandlers } from "./ingest.js";
 import { registerAnalyticsHandlers } from "./analytics.js";
+import { registerReelHandlers } from "./reel-service.js";
 import { registerIgAutomationHandlers } from "../ig-automation/processor.js";
 import { registerWhatsappHandlers } from "../whatsapp/processor.js";
 
@@ -18,6 +19,7 @@ export function registerShortsHandlers(): void {
   registerYoutubeHandlers();
   registerIngestHandlers();
   registerAnalyticsHandlers();
+  registerReelHandlers();
 }
 
 let started = false;

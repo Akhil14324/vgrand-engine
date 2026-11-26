@@ -15,13 +15,15 @@ import {
   X,
 } from "lucide-react";
 import type { GenerationDto, WebSource } from "@catgpt/types";
-import { useGenerationStream } from "@/lib/sse";
+import { useGenerationStage, useGenerationStream } from "@/lib/sse";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { friendlyEngineLabel } from "@/lib/model-labels";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "./markdown";
 import { ActionRow } from "./generation-actions";
+import { CuratedGallery } from "./curated-gallery";
+import { CarouselPanel } from "./carousel-panel";
 import { SourceChips } from "./source-chips";
 
 gsap.registerPlugin(useGSAP);
@@ -105,6 +107,57 @@ function useSmoothReveal(text: string, active: boolean): string {
  * generation object hasn't changed (the SSE cache patch keeps every other
  * turn's object reference stable - see lib/sse.ts).
  */
+interface BrandApplied {
+  logo?: boolean;
+  logoExpected?: boolean;
+  products?: number;
+  productNames?: string[];
+  colors?: string[];
+  warnings?: string[];
+}
+
+/** What of the selected brand's identity actually reached this image - and what didn't. */
+function BrandAppliedNote({ meta }: { meta: Record<string, unknown> }) {
+  const applied = meta.brandApplied as BrandApplied | undefined;
+  if (!applied || typeof applied !== "object") return null;
+  const brandName = (meta.brandCheck as { brandName?: string } | undefined)?.brandName;
+  const warnings = applied.warnings ?? [];
+  return (
+    <div className="flex w-full max-w-md flex-col gap-1.5 rounded-lg border bg-card/60 px-3 py-2 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex items-center gap-1 font-medium text-foreground">
+          <Store className="h-3 w-3" />
+          {brandName ?? "Brand"}
+        </span>
+        <span>{applied.logo ? "✓ Official logo" : "✗ No logo"}</span>
+        {applied.colors && applied.colors.length > 0 && (
+          <span className="flex items-center gap-1">
+            Colours
+            {applied.colors.slice(0, 6).map((c) => (
+              <span key={c} className="inline-block h-2.5 w-2.5 rounded-full border" style={{ background: c }} title={c} />
+            ))}
+          </span>
+        )}
+        <span>
+          {applied.products
+            ? `✓ ${applied.products} real product${applied.products === 1 ? "" : "s"}${applied.productNames?.length ? ` (${applied.productNames.join(", ")})` : ""}`
+            : "No product photos used"}
+        </span>
+      </div>
+      {warnings.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-amber-600 dark:text-amber-400">
+          {warnings.map((w) => (
+            <li key={w} className="flex items-start gap-1">
+              <AlertCircle className="mt-px h-3 w-3 shrink-0" />
+              {w}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export const ChatTurn = memo(function ChatTurn({
   generation,
   priority = false,
@@ -127,6 +180,7 @@ export const ChatTurn = memo(function ChatTurn({
   const inFlight =
     generation.status === "pending" || generation.status === "processing";
   useGenerationStream(generation.id, inFlight);
+  const stage = useGenerationStage(generation.id);
 
   // Entrance: plays once, the moment this turn mounts (memo means it won't
   // re-run on later re-renders of the same turn). Replaces the old
@@ -208,6 +262,9 @@ export const ChatTurn = memo(function ChatTurn({
   const sources = (meta.sources as WebSource[] | undefined) ?? [];
   const files = Array.isArray(meta.files) ? (meta.files as ReplyFile[]) : [];
   const searching = meta.searching === true;
+  // An AI carousel turn: its separate slides live in the carousel panel.
+  const carouselId =
+    meta.carouselHost === true && typeof meta.carouselId === "string" ? meta.carouselId : null;
   const creative = meta.campaignCreative as
     | { index: number; total: number; title?: string }
     | undefined;
@@ -289,7 +346,9 @@ export const ChatTurn = memo(function ChatTurn({
 
       {/* Assistant turn — image or text reply inline in the thread */}
       <div className="flex flex-col items-start gap-2">
-        {generation.status === "failed" ? (
+        {carouselId ? (
+          <CarouselPanel carouselId={carouselId} />
+        ) : generation.status === "failed" ? (
           <div className="flex max-w-md items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <p className="break-words text-xs leading-relaxed text-muted-foreground">
@@ -373,11 +432,20 @@ export const ChatTurn = memo(function ChatTurn({
           <div className="shimmer flex aspect-square w-full max-w-md items-center justify-center rounded-xl border">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {generation.status === "processing" ? "Generating…" : "Queued…"}
+              {generation.status === "processing"
+                ? (stage ?? "Generating…")
+                : "Queued…"}
             </div>
           </div>
         )}
-        {images.length > 1 && (
+        {generation.kind === "image" && !carouselId && (
+          <CuratedGallery
+            generation={generation}
+            activeImage={activeImage}
+            onActiveImage={setActiveImage}
+          />
+        )}
+        {!carouselId && images.length > 1 && generation.parentId && (
           <div className="flex max-w-md flex-wrap gap-1.5">
             {images.map((url, i) => (
               <button
@@ -397,20 +465,21 @@ export const ChatTurn = memo(function ChatTurn({
             ))}
           </div>
         )}
-        {image && generation.textResponse && (
+        {!carouselId && image && generation.textResponse && (
           <div className="w-full max-w-md rounded-xl border bg-card p-4">
             <Markdown>{generation.textResponse}</Markdown>
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {!carouselId && image && <BrandAppliedNote meta={meta} />}
+        {!carouselId && <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <ActionRow generation={generation} />
           <span className="text-[10px] text-muted-foreground">
             {friendlyEngineLabel(generation.model ?? generation.provider)}
             {typeof meta.latencyMs === "number" &&
               ` · ${(meta.latencyMs / 1000).toFixed(1)}s`}
           </span>
-        </div>
+        </div>}
       </div>
 
       {/* Full-size preview — generated image or an attached reference.

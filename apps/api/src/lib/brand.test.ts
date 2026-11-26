@@ -55,13 +55,27 @@ describe("brandReferenceUrls", () => {
 });
 
 describe("brandImageGuidance", () => {
-  it("reserves logo rendering for the exact post-generation brand overlay", () => {
+  it("tells the model the REAL logo is stamped afterwards and never to draw one", () => {
     const prompt = brandImageGuidance("Acme", { colors: ["#123456"] }, true);
-    expect(prompt).toContain("is not added automatically");
-    expect(prompt).toContain("Do not draw, recreate, alter, or add a logo");
+    expect(prompt).toContain("real logo file is placed onto the finished image afterwards in the bottom-right corner");
+    expect(prompt).toContain("do not draw any logo");
     expect(prompt).toContain("Brand colours: #123456.");
-    expect(
-      brandImageGuidance("Acme", { overlayDefault: true }, false),
-    ).not.toContain("is not added automatically");
+    expect(prompt).toContain("#123456 (primary)");
+    expect(prompt).toContain("never the brand identity");
+  });
+
+  it("falls back to the no-overlay wording when the brand opted out of the overlay", () => {
+    const prompt = brandImageGuidance("Acme", { overlayDefault: false }, true);
+    expect(prompt).toContain("is not added automatically");
+    expect(prompt).not.toContain("placed onto the finished image");
+  });
+
+  it("does not promise a logo when the brand has none, or for raw assets", () => {
+    expect(brandImageGuidance("Acme", {}, false)).not.toContain("logo file is placed");
+    expect(brandImageGuidance("Acme", {}, true, null, false, false)).not.toContain("logo file is placed");
+  });
+
+  it("requires real products to stay faithful", () => {
+    expect(brandImageGuidance("Acme", {}, false, null, true)).toContain("never substitute, redesign or invent");
   });
 });

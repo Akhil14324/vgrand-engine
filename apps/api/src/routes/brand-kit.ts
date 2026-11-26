@@ -7,6 +7,7 @@ import { badRequest, forbidden, notFound, parseBody } from "../lib/errors.js";
 import { findManageableBrand, loadBrandContext, MAX_BRAND_ASSETS } from "../lib/brand.js";
 import { composeBrandKit, fetchOwnBytes, isUsableFont, loadBrandKit } from "../services/brand-compose.js";
 import { storeImage } from "../services/storage.js";
+import { isTrustedImageUrl } from "../lib/urls.js";
 
 const MAX_FONT_BYTES = 5 * 1024 * 1024;
 const MAX_BRAND_FONTS = 4;
@@ -63,6 +64,10 @@ export async function brandKitRoutes(app: FastifyInstance) {
       const sourceUrl = source.imageUrls[0];
       if (source.status !== "completed" || !sourceUrl) throw badRequest("Only finished images can get the brand kit");
 
+      // Never mix brands: an image made for one brand only takes that brand's kit.
+      if (source.brandId && source.brandId !== body.brandId) {
+        throw badRequest("This image was made for a different brand - apply that brand's kit, or generate a new image for this brand");
+      }
       // The caller must be able to use this brand (own or workspace member).
       if (!(await loadBrandContext(body.brandId, req.userId))) throw notFound("Brand not found");
       const kit = await loadBrandKit(body.brandId);
@@ -70,8 +75,18 @@ export async function brandKitRoutes(app: FastifyInstance) {
 
       // Images that already carry the logo (auto-stamped at generation, or a
       // previous brand kit) must not get a second copy.
-      const sourceMeta = (source.metadata ?? {}) as { brandKitStamped?: unknown; brandKit?: { logo?: unknown } };
-      const alreadyHasLogo = sourceMeta.brandKitStamped === true || sourceMeta.brandKit?.logo === true;
+      const sourceMeta = (source.metadata ?? {}) as {
+        brandKitStamped?: unknown;
+        brandKit?: { logo?: unknown };
+        unbrandedImageUrls?: unknown;
+      };
+      // With the clean (logo-free) original on hand the kit is re-applied to
+      // it, so the logo can be moved/resized without ever being doubled.
+      const clean = Array.isArray(sourceMeta.unbrandedImageUrls) ? sourceMeta.unbrandedImageUrls[0] : null;
+      const cleanUrl = typeof clean === "string" && isTrustedImageUrl(clean) ? clean : null;
+      const baseUrl = cleanUrl ?? sourceUrl;
+      const alreadyHasLogo =
+        !cleanUrl && (sourceMeta.brandKitStamped === true || sourceMeta.brandKit?.logo === true);
       const logo = (body.logo ?? true) && !alreadyHasLogo;
       if ((body.logo ?? true) && alreadyHasLogo && !body.headline && !body.cta) {
         throw badRequest("This image already has your logo - add a headline or button text instead");
@@ -80,12 +95,21 @@ export async function brandKitRoutes(app: FastifyInstance) {
         throw badRequest("Upload a logo to this brand first, or add a headline");
       }
 
+      if (
+        body.accentColor &&
+        !(kit.profile.colors ?? []).some((c) => c.toLowerCase() === body.accentColor!.toLowerCase())
+      ) {
+        throw badRequest("Pick the button colour from this brand's own colours");
+      }
+
       let out: Buffer | null;
       try {
-        out = await composeBrandKit(await fetchOwnBytes(sourceUrl), kit, {
+        out = await composeBrandKit(await fetchOwnBytes(baseUrl), kit, {
           logo,
           headline: body.headline,
           cta: body.cta,
+          placement: body.placement,
+          accentColor: body.accentColor,
         });
       } catch (err) {
         console.error("[brand-kit] compose failed:", err instanceof Error ? err.message : err);
@@ -111,7 +135,23 @@ export async function brandKitRoutes(app: FastifyInstance) {
           status: "completed",
           metadata: {
             brandId: body.brandId,
-            brandKit: { logo, headline: body.headline ?? null, cta: body.cta ?? null },
+            brandKit: {
+              logo,
+              headline: body.headline ?? null,
+              cta: body.cta ?? null,
+              placement: body.placement ?? kit.placement,
+            },
+            ...(logo ? { brandKitStamped: true } : {}),
+            unbrandedImageUrls: [baseUrl],
+            brandApplied: {
+              brandId: body.brandId,
+              logo,
+              logoExpected: logo,
+              products:
+                typeof (source.metadata as { brandApplied?: { products?: unknown } } | null)?.brandApplied?.products === "number"
+                  ? (source.metadata as { brandApplied: { products: number } }).brandApplied.products
+                  : 0,
+            },
           },
         },
       });
