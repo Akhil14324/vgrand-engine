@@ -44,6 +44,7 @@ import { igAutomationRoutes } from "./routes/ig-automation.js";
 import { igWebhookRoutes } from "./routes/ig-webhook.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { crmRoutes } from "./routes/crm.js";
+import { websiteRoutes } from "./routes/website.js";
 import { whatsappWebhookRoutes } from "./routes/whatsapp-webhook.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -164,6 +165,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(igWebhookRoutes);
   await app.register(whatsappRoutes);
   await app.register(crmRoutes);
+  await app.register(websiteRoutes);
   await app.register(whatsappWebhookRoutes);
   await app.register(socialCallbackRoutes);
 

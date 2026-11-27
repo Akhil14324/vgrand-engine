@@ -134,6 +134,14 @@ const envSchema = z.object({
   WHATSAPP_APP_SECRET: opt(z.string().min(1)),
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
   /**
+   * "Website to CatGPT integration": read-only access to the company website's own Supabase
+   * project (leads, site_events, consent_logs). Use that project's URL and service-role key.
+   * WEBSITE_VIEWER_EMAILS = comma-separated CatGPT login emails allowed to see it (phone numbers).
+   */
+  WEBSITE_SUPABASE_URL: opt(z.string().url()),
+  WEBSITE_SUPABASE_SERVICE_KEY: opt(z.string().min(1)),
+  WEBSITE_VIEWER_EMAILS: opt(z.string().min(1)),
+  /**
    * "true" adds the Instagram automation permissions to the Meta login scope (only used when
    * META_LOGIN_CONFIG_ID is not set). Turn on once Meta has approved them, or login fails.
    */
