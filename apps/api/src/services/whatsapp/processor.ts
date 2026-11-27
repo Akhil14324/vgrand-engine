@@ -1,4 +1,5 @@
 import { Prisma, prisma } from "@catgpt/db";
+import { captureWhatsappLead, captureWhatsappLeadForMessage } from "../crm/capture.js";
 import { enqueueJob, registerJobHandler, wakeJobWorker, type ShortsJobRow } from "../shorts/jobs.js";
 import { handleInbound } from "./bot.js";
 import { runBroadcast } from "./broadcast.js";
@@ -59,6 +60,8 @@ async function storeInbound(numberId: string, ev: InboundMessage): Promise<boole
   }
   if (!contact.name && ev.profileName) await prisma.whatsappContact.update({ where: { id: contact.id }, data: { name: ev.profileName } });
 
+  await captureWhatsappLead(contact.id); // never throws
+
   // Consent keywords are handled before the bot ever sees the message.
   if (ev.text && isOptOut(ev.text)) {
     await prisma.whatsappContact.update({ where: { id: contact.id }, data: { optedIn: false, optedOutAt: new Date() } });
@@ -80,7 +83,12 @@ async function storeInbound(numberId: string, ev: InboundMessage): Promise<boole
 export function registerWhatsappHandlers(): void {
   registerJobHandler("wa_bot", async (job: ShortsJobRow) => {
     const id = (job.payload as { messageId?: string }).messageId;
-    if (id) await handleInbound(id);
+    if (!id) return;
+    try {
+      await handleInbound(id);
+    } finally {
+      await captureWhatsappLeadForMessage(id); // the bot may have moved the stage or learned details
+    }
   });
   registerJobHandler("wa_broadcast", runBroadcast);
 }

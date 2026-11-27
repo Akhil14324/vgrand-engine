@@ -1,5 +1,6 @@
 import { Prisma, prisma, type SocialAccount } from "@catgpt/db";
 import { decryptToken } from "../../lib/social-crypto.js";
+import { captureInstagramLead } from "../crm/capture.js";
 import { enqueueJob, PermanentJobError, registerJobHandler, type ShortsJobRow } from "../shorts/jobs.js";
 import { GraphError, GraphNetworkError, replyToComment, sendDm, sendOptionReply, sendPrivateReply } from "./graph.js";
 import {
@@ -314,7 +315,13 @@ export function registerIgAutomationHandlers(): void {
     "ig_event",
     async (job) => {
       const eventId = (job.payload as { eventId?: string }).eventId;
-      if (eventId) await processEvent(eventId);
+      if (!eventId) return;
+      try {
+        await processEvent(eventId);
+      } finally {
+        // A matched rule makes this person a CRM lead, whether or not the reply went out.
+        await captureInstagramLead(eventId);
+      }
     },
     onDead,
   );

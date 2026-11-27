@@ -32,7 +32,9 @@ export const menuOf = (n: WhatsappNumber): WaMenuItem[] => {
 };
 
 async function handoff(number: WhatsappNumber, contact: WhatsappContact): Promise<void> {
-  await prisma.whatsappContact.update({ where: { id: contact.id }, data: { botPaused: true, stage: contact.stage === "new" ? "engaged" : contact.stage } });
+  await prisma.whatsappContact.update({ where: { id: contact.id }, data: { botPaused: true } });
+  // Conditional on the stored row: `contact` may predate a stage the AI saved in this same turn.
+  await prisma.whatsappContact.updateMany({ where: { id: contact.id, stage: "new" }, data: { stage: "engaged" } });
   await sendText(number, contact, number.handoffMessage || DEFAULT_HANDOFF, "bot");
 }
 
