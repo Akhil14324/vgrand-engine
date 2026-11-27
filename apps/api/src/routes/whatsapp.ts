@@ -8,6 +8,7 @@ import { env } from "../env.js";
 import { HttpError, badRequest, notFound, parseBody } from "../lib/errors.js";
 import { findManageableBrand } from "../lib/brand.js";
 import { decryptToken, encryptToken, hasValidTokenKey } from "../lib/social-crypto.js";
+import { captureWhatsappLead, syncLeadFromWhatsapp } from "../services/crm/capture.js";
 import { audienceWhere, countAudience, enqueueBroadcast } from "../services/whatsapp/broadcast.js";
 import { WaError, WaNetworkError, createMetaTemplate, getPhoneInfo, listMetaTemplates, subscribeWaba, uploadExampleImage } from "../services/whatsapp/graph.js";
 import { normalizePhone, templateToMeta, validateTemplate } from "../services/whatsapp/logic.js";
@@ -134,7 +135,9 @@ export async function whatsappRoutes(app: FastifyInstance) {
         ...(optedIn === true ? { optedIn: true, optedOutAt: null, optInSource: "confirmed by owner" } : optedIn === false ? { optedIn: false, optedOutAt: new Date() } : {}),
       },
     });
-    return toContactDto(u);
+    // A stage picked here is a person's decision, so the CRM takes it even if it moves back.
+    await syncLeadFromWhatsapp(u.id, rest.stage ? "manual" : "auto", req.userId);
+    return toContactDto(await prisma.whatsappContact.findUniqueOrThrow({ where: { id: u.id } }));
   });
 
   /** Bulk add people (buyers, past leads). The owner must confirm they consented; that is recorded. */
@@ -147,11 +150,12 @@ export async function whatsappRoutes(app: FastifyInstance) {
       if (!waId) { invalid++; continue; }
       const existing = await prisma.whatsappContact.findUnique({ where: { numberId_waId: { numberId: n.id, waId } } });
       if (existing?.optedOutAt) continue; // never re-subscribe someone who said STOP
-      await prisma.whatsappContact.upsert({
+      const contact = await prisma.whatsappContact.upsert({
         where: { numberId_waId: { numberId: n.id, waId } },
         create: { numberId: n.id, waId, name: row.name || null, kind: body.kind, tags: body.tags, optedIn: true, optInSource: body.consentSource },
         update: { name: existing?.name || row.name || undefined, kind: body.kind, tags: [...new Set([...(existing?.tags ?? []), ...body.tags])], optedIn: true, optInSource: body.consentSource },
       });
+      await captureWhatsappLead(contact.id);
       if (existing) updated++;
       else added++;
     }
@@ -178,6 +182,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
       metaFailure(err);
     }
     await prisma.whatsappContact.update({ where: { id: c.id }, data: { botPaused: true, stage: c.stage === "new" ? "engaged" : c.stage } });
+    await captureWhatsappLead(c.id);
     return reply.code(201).send({ ok: true });
   });
 

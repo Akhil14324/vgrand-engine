@@ -1147,3 +1147,4 @@ export * from "./ig-automation";
 export * from "./whatsapp";
 export * from "./ig-insights";
 export * from "./carousel";
+export * from "./crm";

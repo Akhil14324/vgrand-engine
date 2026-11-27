@@ -75,6 +75,8 @@ model Brand {
   updatedAt           DateTime             @updatedAt
   reelPlanItems       ReelPlanItem[]
   shortsReels         ShortsReel[]
+  crmLeads            CrmLead[]
+  crmInstagramRoutes  CrmInstagramRoute[]
 
   @@index([userId])
   @@index([workspaceId])
@@ -404,6 +406,7 @@ model SocialAccount {
   posts             SocialPost[]
   igRules           IgAutomationRule[]
   igEvents          IgAutomationEvent[]
+  crmRoute          CrmInstagramRoute?
 
   @@unique([workspaceId, userId, platform, externalAccountId])
   @@index([userId])
@@ -1634,4 +1637,63 @@ model WhatsappBroadcastRecipient {
 
   @@unique([broadcastId, contactId])
   @@index([broadcastId, status])
+}
+
+/// CRM: one person interested in one brand. Phone and Instagram id are each unique
+/// per brand (NULLs repeat), so capture can never create a second lead for them.
+model CrmLead {
+  id             String        @id @default(uuid())
+  brandId        String
+  brand          Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  name           String?
+  /// International digits only, like WhatsappContact.waId.
+  phone          String?
+  igUserId       String?
+  igUsername     String?
+  /// "whatsapp" | "instagram" | "call" | "walk_in" | "referral" | "website" | "ads" | "other" | "import"
+  source         String
+  /// Same values as WhatsappContact.stage.
+  stage          String        @default("new")
+  /// User id of the team member responsible (brand owner or workspace member).
+  ownerId        String?
+  followUpOn     DateTime?     @db.Date
+  /// {budget,bhk,location,timeline,purpose}
+  fields         Json          @default("{}")
+  lastActivityAt DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  activities     CrmActivity[]
+
+  @@unique([brandId, phone])
+  @@unique([brandId, igUserId])
+  @@index([brandId, lastActivityAt(sort: Desc)])
+  @@index([brandId, stage])
+  @@index([brandId, followUpOn])
+}
+
+/// A lead's history: notes and calls typed by the team, and automatic changes.
+model CrmActivity {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      CrmLead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// "note" | "call" | "created" | "stage" | "owner" | "followup" | "instagram" | "merge"
+  kind      String
+  text      String   @db.Text
+  /// null = recorded automatically.
+  userId    String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+/// Which brand receives the leads of a connected Instagram account.
+model CrmInstagramRoute {
+  accountId   String        @id
+  account     SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  brandId     String
+  brand       Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  createdById String
+  createdAt   DateTime      @default(now())
+
+  @@index([brandId])
 }
