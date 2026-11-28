@@ -140,27 +140,36 @@ export function useFindInstagramAccounts() {
 }
 
 /** Instagram Insights (views, reach, watch time) for the account saved on the Instagram page. */
-export function useInstagramInsights(workspaceId: string | null, enabled: boolean) {
+const insightsQuery = (workspaceId: string | null, accountId: string | null, refresh = false) => {
+  const q = new URLSearchParams();
+  if (workspaceId) q.set("workspaceId", workspaceId);
+  if (accountId) q.set("accountId", accountId);
+  if (refresh) q.set("refresh", "true");
+  const s = q.toString();
+  return `/guava/instagram-insights${s ? `?${s}` : ""}`;
+};
+
+export function useInstagramInsights(workspaceId: string | null, accountId: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: ["guava", "ig-insights", workspaceId],
+    queryKey: ["guava", "ig-insights", workspaceId, accountId],
     enabled,
     staleTime: 5 * 60 * 1000,
-    queryFn: () => apiFetch<IgInsightsDto>(`/guava/instagram-insights${workspaceId ? `?workspaceId=${workspaceId}` : ""}`),
+    queryFn: () => apiFetch<IgInsightsDto>(insightsQuery(workspaceId, accountId)),
   });
 }
 
-export function useRefreshInstagramInsights(workspaceId: string | null) {
+export function useRefreshInstagramInsights(workspaceId: string | null, accountId: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      apiFetch<IgInsightsDto>(`/guava/instagram-insights?refresh=true${workspaceId ? `&workspaceId=${workspaceId}` : ""}`),
-    onSuccess: (dto) => qc.setQueryData(["guava", "ig-insights", workspaceId], dto),
+    mutationFn: () => apiFetch<IgInsightsDto>(insightsQuery(workspaceId, accountId, true)),
+    onSuccess: (dto) => qc.setQueryData(["guava", "ig-insights", workspaceId, accountId], dto),
   });
 }
 
 /** AI "next strategy" for a brand, from the Instagram insights. */
-export function useInstagramStrategy(brandId: string | null) {
+export function useInstagramStrategy(brandId: string | null, accountId: string | null) {
   return useMutation({
-    mutationFn: () => apiFetch<IgStrategyDto>(`${base(brandId!)}/instagram-insights/strategy`, { method: "POST" }),
+    mutationFn: () =>
+      apiFetch<IgStrategyDto>(`${base(brandId!)}/instagram-insights/strategy`, { method: "POST", json: { accountId } }),
   });
 }
