@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, Pencil, Plus, RefreshCw, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, Copy, Pencil, Plus, RefreshCw, Trash2, XCircle } from "lucide-react";
 import type { IgAccountDto, IgRuleDto } from "@catgpt/types";
 import { RequireAuth } from "@/components/require-auth";
+import { CommentSearch } from "@/components/ig-automation/comment-search";
 import { RuleEditor } from "@/components/ig-automation/rule-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,6 +118,7 @@ function Automations() {
         <ConnectButton label="Connect another" variant="outline" />
       </div>
       <div key={account.id} className="space-y-4">
+        <CommentSearch accountId={account.id} />
         <Setup account={account} />
         <Rules account={account} />
         <TestBox accountId={account.id} />
@@ -147,95 +149,118 @@ function Setup({ account }: { account: IgAccountDto }) {
   const status = useIgStatus(account.id);
   const subscribe = useSubscribeIgPage();
   const s = status.data;
+  const [open, setOpen] = useState(false);
+  // One line while all is well; anything that needs attention opens the details by itself.
+  const problem = account.status !== "active" || !!status.error || (!!s && !s.ready);
+  const expanded = problem || open;
   return (
-    <Card className="space-y-3 p-4">
+    <Card className={cn("space-y-3", expanded ? "p-4" : "px-4 py-2")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-semibold">Setup</h2>
         <div className="flex items-center gap-2">
-          {s && (s.ready ? <Badge variant="secondary">Ready: automations will run</Badge> : <Badge variant="destructive">Not ready yet</Badge>)}
-          <Button size="sm" variant="ghost" onClick={() => status.refetch()} disabled={status.isFetching}>
-            <RefreshCw /> Check again
-          </Button>
+          <h2 className="font-semibold">Setup</h2>
+          {problem ? (
+            <Badge variant="destructive">Not ready yet</Badge>
+          ) : s ? (
+            <Badge variant="secondary">Ready: automations will run</Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">Checking…</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {expanded && (
+            <Button size="sm" variant="ghost" onClick={() => status.refetch()} disabled={status.isFetching}>
+              <RefreshCw /> Check again
+            </Button>
+          )}
+          {!problem && (
+            <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+              {open ? "Hide details" : "Show details"} <ChevronDown className={cn("transition-transform", open && "rotate-180")} />
+            </Button>
+          )}
         </div>
       </div>
-      {account.status !== "active" && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm">
-          <AlertTriangle className="h-4 w-4 text-destructive" /> This account&apos;s connection expired or was revoked. Automations are paused for it.
-          <ConnectButton label="Reconnect" />
-        </div>
-      )}
-      {status.isLoading ? (
-        <Skeleton className="h-28 w-full" />
-      ) : status.error ? (
-        <p className="text-sm text-destructive">{errText(status.error, "Could not check this account")}</p>
-      ) : s ? (
-        <ul className="space-y-2 text-sm">
-          <Check ok={s.webhook.verifyTokenSet && s.webhook.appSecretSet}>
-            <div>Webhook (Meta App Dashboard → Webhooks → Instagram): subscribe to <code>comments</code>, <code>live_comments</code> and <code>messages</code> with</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.webhook.callbackUrl}</code>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  void navigator.clipboard.writeText(s.webhook.callbackUrl);
-                  toast.success("Callback URL copied");
-                }}
-              >
-                <Copy /> Copy
-              </Button>
+      {!expanded ? null : (
+        <>
+          {account.status !== "active" && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-destructive" /> This account&apos;s connection expired or was revoked. Automations are paused for it.
+              <ConnectButton label="Reconnect" />
             </div>
-            {!s.webhook.verifyTokenSet && <div className="text-xs text-destructive">Set META_WEBHOOK_VERIFY_TOKEN on the server and type the same value as the Verify Token in Meta.</div>}
-            {!s.webhook.appSecretSet && <div className="text-xs text-destructive">META_APP_SECRET is not set: deliveries can&apos;t be verified and are refused.</div>}
-          </Check>
-          <Check ok={s.permissions.checked ? s.permissions.valid === true && s.permissions.missing.length === 0 : null}>
-            {s.permissions.error ? (
-              <span>Couldn&apos;t read permissions: {s.permissions.error}</span>
-            ) : s.permissions.missing.length ? (
-              <div className="space-y-1">
-                <div>
-                  Missing permissions: {s.permissions.missing.map((p) => <code key={p} className="mr-1 rounded bg-muted px-1 text-xs">{p}</code>)}
+          )}
+          {status.isLoading ? (
+            <Skeleton className="h-28 w-full" />
+          ) : status.error ? (
+            <p className="text-sm text-destructive">{errText(status.error, "Could not check this account")}</p>
+          ) : s ? (
+            <ul className="space-y-2 text-sm">
+              <Check ok={s.webhook.verifyTokenSet && s.webhook.appSecretSet}>
+                <div>Webhook (Meta App Dashboard → Webhooks → Instagram): subscribe to <code>comments</code>, <code>live_comments</code> and <code>messages</code> with</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.webhook.callbackUrl}</code>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(s.webhook.callbackUrl);
+                      toast.success("Callback URL copied");
+                    }}
+                  >
+                    <Copy /> Copy
+                  </Button>
                 </div>
-                <div className="text-xs text-muted-foreground">After Meta grants them (Advanced Access), reconnect so the token includes them.</div>
-                <ConnectButton label="Reconnect" variant="outline" />
-              </div>
-            ) : (
-              <span>All permissions granted</span>
-            )}
-          </Check>
-          <Check ok={s.subscription.checked ? s.subscription.subscribed : null}>
-            {s.subscription.error ? (
-              <span>Page subscription unknown: {s.subscription.error}</span>
-            ) : s.subscription.subscribed ? (
-              <span>Facebook Page subscribed to this app{s.subscription.fields.length ? ` (${s.subscription.fields.join(", ")})` : ""}</span>
-            ) : (
-              <span>Facebook Page not subscribed to this app.</span>
-            )}{" "}
-            {!s.subscription.subscribed && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={subscribe.isPending}
-                onClick={async () => {
-                  try {
-                    await subscribe.mutateAsync(account.id);
-                    toast.success("Page subscribed");
-                    void status.refetch();
-                  } catch (e) {
-                    toast.error(errText(e, "Subscribe failed"));
-                  }
-                }}
-              >
-                Subscribe page
-              </Button>
-            )}
-          </Check>
-          <Check ok={s.lastEventAt ? true : null}>
-            Last comment or message received: {when(s.lastEventAt)}
-            {!s.lastEventAt && <span className="text-xs text-muted-foreground"> (comment on one of your posts to test once everything above is green)</span>}
-          </Check>
-        </ul>
-      ) : null}
+                {!s.webhook.verifyTokenSet && <div className="text-xs text-destructive">Set META_WEBHOOK_VERIFY_TOKEN on the server and type the same value as the Verify Token in Meta.</div>}
+                {!s.webhook.appSecretSet && <div className="text-xs text-destructive">META_APP_SECRET is not set: deliveries can&apos;t be verified and are refused.</div>}
+              </Check>
+              <Check ok={s.permissions.checked ? s.permissions.valid === true && s.permissions.missing.length === 0 : null}>
+                {s.permissions.error ? (
+                  <span>Couldn&apos;t read permissions: {s.permissions.error}</span>
+                ) : s.permissions.missing.length ? (
+                  <div className="space-y-1">
+                    <div>
+                      Missing permissions: {s.permissions.missing.map((p) => <code key={p} className="mr-1 rounded bg-muted px-1 text-xs">{p}</code>)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">After Meta grants them (Advanced Access), reconnect so the token includes them.</div>
+                    <ConnectButton label="Reconnect" variant="outline" />
+                  </div>
+                ) : (
+                  <span>All permissions granted</span>
+                )}
+              </Check>
+              <Check ok={s.subscription.checked ? s.subscription.subscribed : null}>
+                {s.subscription.error ? (
+                  <span>Page subscription unknown: {s.subscription.error}</span>
+                ) : s.subscription.subscribed ? (
+                  <span>Facebook Page subscribed to this app{s.subscription.fields.length ? ` (${s.subscription.fields.join(", ")})` : ""}</span>
+                ) : (
+                  <span>Facebook Page not subscribed to this app.</span>
+                )}{" "}
+                {!s.subscription.subscribed && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={subscribe.isPending}
+                    onClick={async () => {
+                      try {
+                        await subscribe.mutateAsync(account.id);
+                        toast.success("Page subscribed");
+                        void status.refetch();
+                      } catch (e) {
+                        toast.error(errText(e, "Subscribe failed"));
+                      }
+                    }}
+                  >
+                    Subscribe page
+                  </Button>
+                )}
+              </Check>
+              <Check ok={s.lastEventAt ? true : null}>
+                Last comment or message received: {when(s.lastEventAt)}
+                {!s.lastEventAt && <span className="text-xs text-muted-foreground"> (comment on one of your posts to test once everything above is green)</span>}
+              </Check>
+            </ul>
+          ) : null}
+        </>
+      )}
     </Card>
   );
 }

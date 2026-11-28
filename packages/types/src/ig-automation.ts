@@ -133,3 +133,45 @@ export interface IgTestResultDto {
   publicReplyNote: string | null;
   dm: { text: string; buttonTitle: string | null; buttonUrl: string | null; options: string[] } | null;
 }
+
+/* ------------------------------ comment search ----------------------------- */
+
+export const igSearchSchema = z.object({
+  q: z.string().trim().max(100).default(""),
+  /** "word": who typed this; "user": what this username typed. */
+  by: z.enum(["word", "user"]).default("word"),
+  /** "ours": uses a keyword set on a rule; "other": uses none of them. */
+  scope: z.enum(["all", "ours", "other"]).default("all"),
+});
+export type IgSearchQuery = z.infer<typeof igSearchSchema>;
+
+export interface IgWordCount {
+  word: string;
+  comments: number;
+  people: number;
+}
+
+export interface IgSearchDto {
+  /** Newest first, capped; `total` counts every match. */
+  results: {
+    id: string;
+    kind: string;
+    fromId: string | null;
+    fromUsername: string | null;
+    text: string;
+    occurredAt: string;
+    status: string;
+    /** Rule keywords this text contains. */
+    matched: string[];
+  }[];
+  total: number;
+  people: number;
+  /** Stored comments and DMs that were looked at. */
+  scanned: number;
+  /** True when older ones exist beyond those looked at. */
+  truncated: boolean;
+  /** Keywords set on this account's rules, with how often each was typed. */
+  keywords: IgWordCount[];
+  /** Most used words that are not one of those keywords. */
+  words: IgWordCount[];
+}
