@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowLeft, Compass } from "lucide-react";
 import type { BrandDto } from "@catgpt/types";
 import { RequireAuth } from "@/components/require-auth";
-import { GuavaInstagram } from "@/components/guava-instagram";
+import { GuavaInstagram, ReviewButton } from "@/components/guava-instagram";
 import { resolveActiveBrand, useBrandMode } from "@/lib/brand-mode";
 import { useBrands } from "@/lib/hooks";
 import { useGuavaProfile } from "@/lib/guava-hooks";
@@ -29,7 +29,7 @@ function GuavaContent() {
 
   return (
     <div className="app-safe-screen flex flex-col">
-      <header className="flex items-center gap-3 border-b px-3 py-2.5 sm:px-4">
+      <header className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 border-b px-3 py-2.5 sm:px-4">
         <Button variant="ghost" size="icon" asChild>
           <Link href="/" aria-label="Back to studio">
             <ArrowLeft />
@@ -53,10 +53,11 @@ function GuavaContent() {
             ))}
           </Select>
         )}
+        {brand && <HeaderReview key={brand.id} brand={brand} />}
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-3 py-4 sm:px-4 sm:py-6">
+        <div className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-4 sm:py-6">
           {isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : !brand ? (
@@ -85,13 +86,17 @@ function NoBusiness() {
   );
 }
 
+function HeaderReview({ brand }: { brand: BrandDto }) {
+  const profile = useGuavaProfile(brand.id);
+  if (profile.isLoading) return null;
+  return <ReviewButton brand={brand} canEdit={profile.data?.canEdit ?? false} />;
+}
+
 /**
  * Brand Strategist shows only the Instagram review: reels watched by Gemini,
  * judged against this brand's Brand Engine data. The older business diagnosis
  * and profile (still used by B Camp and Growth) are kept on the API, not shown here.
  */
 function Workspace({ brand }: { brand: BrandDto }) {
-  const profile = useGuavaProfile(brand.id);
-  if (profile.isLoading) return <Skeleton className="h-40 w-full" />;
-  return <GuavaInstagram brand={brand} canEdit={profile.data?.canEdit ?? false} />;
+  return <GuavaInstagram brand={brand} />;
 }
