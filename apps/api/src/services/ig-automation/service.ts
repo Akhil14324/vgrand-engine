@@ -1,6 +1,6 @@
 import { Prisma, prisma, type SocialAccount } from "@catgpt/db";
 import { randomUUID } from "node:crypto";
-import type { IgAccountDto, IgAccountStatusDto, IgEventDto, IgOption, IgRuleDto, IgRuleInput, IgRuleStatsDto, IgTestResultDto } from "@catgpt/types";
+import type { IgAccountDto, IgAccountStatusDto, IgEventDto, IgOption, IgRuleDto, IgRuleInput, IgRuleStatsDto, IgSearchDto, IgSearchQuery, IgTestResultDto } from "@catgpt/types";
 import { env } from "../../env.js";
 import { badRequest, notFound } from "../../lib/errors.js";
 import { decryptToken } from "../../lib/social-crypto.js";
@@ -8,6 +8,7 @@ import { workspaceAccess } from "../../lib/workspace-access.js";
 import { findUsableAccount } from "../social/accounts.js";
 import { grantedScopes, pageSubscription } from "./graph.js";
 import { missingPermissions, pickRule, pickVariant, planCommentActions, readOptions, renderTemplate, ruleProblems } from "./logic.js";
+import { searchEvents } from "./search-logic.js";
 
 export type RuleRow = Prisma.IgAutomationRuleGetPayload<object>;
 
@@ -147,6 +148,25 @@ export async function listEvents(accountId: string, q: { ruleId?: string; status
     include: { rule: { select: { name: true } } },
   });
   return rows.map(toEventDto);
+}
+
+/** How far back the comment search looks. */
+export const SEARCH_SCAN_LIMIT = 5000;
+
+/** Search over the account's stored comments and DMs (our own replies and button taps left out). */
+export async function searchAccountEvents(account: SocialAccount, query: IgSearchQuery): Promise<IgSearchDto> {
+  const [rows, rules] = await Promise.all([
+    prisma.igAutomationEvent.findMany({
+      where: { accountId: account.id, kind: { in: ["comment", "message"] }, OR: [{ fromId: null }, { fromId: { not: account.externalAccountId } }] },
+      orderBy: { occurredAt: "desc" },
+      take: SEARCH_SCAN_LIMIT + 1,
+      select: { id: true, kind: true, fromId: true, fromUsername: true, text: true, occurredAt: true, status: true },
+    }),
+    // Keywords of paused rules count too: they are still "ours".
+    prisma.igAutomationRule.findMany({ where: { accountId: account.id }, select: { matchMode: true, keywords: true } }),
+  ]);
+  const keywords = rules.filter((r) => r.matchMode !== "any").flatMap((r) => r.keywords);
+  return { ...searchEvents(rows.slice(0, SEARCH_SCAN_LIMIT), keywords, query), truncated: rows.length > SEARCH_SCAN_LIMIT };
 }
 
 /** Everything that must be true for automations to run on this account, checked live against Meta. */

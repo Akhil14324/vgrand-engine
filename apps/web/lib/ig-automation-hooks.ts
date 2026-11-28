@@ -8,6 +8,8 @@ import type {
   IgMediaDto,
   IgRuleDto,
   IgRuleInput,
+  IgSearchDto,
+  IgSearchQuery,
   IgTestResultDto,
 } from "@catgpt/types";
 import { apiFetch } from "@/lib/api";
@@ -46,6 +48,15 @@ export const useIgEvents = (accountId: string | null, status: string) =>
     queryFn: () => apiFetch<{ items: IgEventDto[] }>(`/ig-automation/accounts/${accountId}/events?limit=100${status ? `&status=${status}` : ""}`),
     select: (d) => d.items,
     refetchInterval: 15_000,
+  });
+
+export const useIgSearch = (accountId: string, query: IgSearchQuery) =>
+  useQuery({
+    queryKey: [KEY, "search", accountId, query],
+    queryFn: () => apiFetch<IgSearchDto>(`/ig-automation/accounts/${accountId}/search?${new URLSearchParams({ ...query })}`),
+    // Keep the last answer on screen while the next one loads.
+    placeholderData: (previous) => previous,
+    refetchInterval: 30_000,
   });
 
 export const useIgMedia = (accountId: string | null, enabled: boolean) =>

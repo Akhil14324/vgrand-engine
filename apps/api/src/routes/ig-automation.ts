@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@catgpt/db";
-import { igRuleInputSchema, igRuleUpdateSchema, igTestSchema } from "@catgpt/types";
+import { igRuleInputSchema, igRuleUpdateSchema, igSearchSchema, igTestSchema } from "@catgpt/types";
 import { HttpError, notFound, parseBody } from "../lib/errors.js";
 import { decryptToken } from "../lib/social-crypto.js";
 import { GraphError, listMedia, subscribePage } from "../services/ig-automation/graph.js";
@@ -14,6 +14,7 @@ import {
   ownedIgAccount,
   ownedRule,
   prepareRule,
+  searchAccountEvents,
   testRules,
   toRuleDto,
 } from "../services/ig-automation/service.js";
@@ -91,6 +92,12 @@ export async function igAutomationRoutes(app: FastifyInstance) {
       req.query,
     );
     return { items: await listEvents(req.params.id, q) };
+  });
+
+  /** Who typed what: by username or word, and the words used besides our keywords. */
+  app.get<{ Params: { id: string } }>("/ig-automation/accounts/:id/search", async (req) => {
+    const account = await ownedIgAccount(req.userId, req.params.id);
+    return searchAccountEvents(account, parseBody(igSearchSchema, req.query));
   });
 
   /** "Test a comment": which rule would fire and what would be sent. Sends nothing. */
