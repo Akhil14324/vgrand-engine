@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
-import { AlertCircle, ExternalLink, Film, Instagram, Loader2 } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
+import { AlertCircle, ExternalLink, Film, Loader2 } from "lucide-react";
 import {
   type BrandDto,
   type GuavaBrandFit,
@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { EvidenceBadge, fmtDate } from "@/components/guava-report";
 import { ReviewRead, RivalRead } from "@/components/guava-instagram-read";
+import { FitPill, Glance, ScoreHero, StatRow } from "@/components/guava-overview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,12 +32,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toaster";
 
-const FIT_LABEL: Record<GuavaBrandFit, string> = { on_brand: "On brand", partly: "Partly on brand", off_brand: "Off brand" };
-const FIT_CLASS: Record<GuavaBrandFit, string> = {
-  on_brand: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  partly: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  off_brand: "bg-destructive/15 text-destructive",
-};
 const PRIORITY_LABEL = { high: "Do first", medium: "Next", low: "Later" } as const;
 const PRIORITY_CLASS = {
   high: "bg-destructive/15 text-destructive",
@@ -51,154 +46,130 @@ const TIER_CLASS: Record<GuavaReelTier, string> = {
 };
 const SOURCE_LABEL = { video: "Watched video", thumbnail: "Cover image only", caption: "Caption only" } as const;
 
-function FitPill({ fit, className }: { fit: GuavaBrandFit; className?: string }) {
-  return <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-xs font-medium", FIT_CLASS[fit], className)}>{FIT_LABEL[fit]}</span>;
-}
-
 function Empty({ children }: { children: ReactNode }) {
   return <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">{children}</p>;
 }
 
-export function GuavaInstagram({ brand, canEdit }: { brand: BrandDto; canEdit: boolean }) {
+export function GuavaInstagram({ brand }: { brand: BrandDto }) {
   const setup = useInstagramSetup(brand.workspaceId);
   const audits = useGuavaContentAudits(brand.id);
-  const start = useStartGuavaContentAudit(brand.id);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const list = audits.data ?? [];
-  const running = list.find((a) => a.status === "processing");
-  const shown = list.find((a) => a.id === selectedId) ?? running ?? list.find((a) => a.status === "completed") ?? null;
-  const latestFailed = list[0]?.status === "failed" ? list[0] : null;
   const lastDone = list.find((a) => a.status === "completed");
-
-  // Reviews this brand: its posts are picked out of your one account, rivals come from the Instagram page.
-  const run = () => start.mutate(undefined, { onSuccess: () => setSelectedId(null), onError: (e) => toast.error(e.message) });
+  const shown = list.find((a) => a.status === "processing") ?? lastDone ?? null;
+  const latestFailed = list[0]?.status === "failed" ? list[0] : null;
 
   if (setup.isLoading || audits.isLoading) return <Skeleton className="h-48 w-full" />;
-  const s = setup.data;
-  const busy = !!running || start.isPending;
 
-  return (
-    <div className="space-y-4">
-      <Card className="p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Instagram className="h-5 w-5 shrink-0 text-primary" />
-          <div className="min-w-0 flex-1 text-sm">
-            {s?.accountHandle ? (
-              <>
-                <div className="font-semibold">Reviewing {brand.name} from @{s.accountHandle.replace(/^@/, "")}</div>
-                <div className="text-muted-foreground">
-                  {s.competitors.length ? `Rivals: ${s.competitors.map((h) => `@${h}`).join(", ")}` : "No rival accounts added"}
-                  {" · "}
-                  <Link href="/instagram" className="underline">
-                    Change in Instagram
-                  </Link>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="font-semibold">Add your Instagram account first</div>
-                <div className="text-muted-foreground">
-                  Add your account and up to 3 rival accounts in Brand Engine → Instagram. Results show here, brand by brand.
-                </div>
-              </>
-            )}
-          </div>
-          {s?.accountHandle ? (
-            <div className="flex shrink-0 flex-col gap-1 sm:items-end">
-              <Button onClick={run} disabled={busy || !canEdit}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
-                {busy ? "Reviewing…" : lastDone ? `Review ${brand.name} again` : `Review ${brand.name}`}
-              </Button>
-              {lastDone && <span className="text-xs text-muted-foreground">Last reviewed {fmtDate(lastDone.createdAt)}</span>}
-              {!canEdit && <span className="text-xs text-muted-foreground">Only the owner can run a review.</span>}
-            </div>
-          ) : (
-            <Button asChild className="shrink-0">
-              <Link href="/instagram">Set up Instagram</Link>
-            </Button>
-          )}
-        </div>
-      </Card>
-
+  // With a finished review the tabs come first and these notes sit under the numbers.
+  const notes = (
+    <>
+      {!setup.data?.accountHandle && (
+        <Empty>Add your Instagram account and up to 3 rival accounts in Brand Engine → Instagram. Results show here, brand by brand.</Empty>
+      )}
       {latestFailed && shown?.id !== latestFailed.id && (
         <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <span>{latestFailed.error ?? "The latest review didn't finish."}</span>
         </div>
       )}
+    </>
+  );
 
-      {shown && <AuditPanel brandId={brand.id} summary={shown} />}
-
-      {list.length > 1 && <AuditHistory items={list} currentId={shown?.id ?? null} onOpen={setSelectedId} />}
+  if (shown) return <AuditPanel key={shown.id} brandId={brand.id} summary={shown} intro={notes} />;
+  return (
+    <div className="space-y-4">
+      {notes}
+      {setup.data?.accountHandle && !latestFailed && <Empty>No review yet. Press the review button at the top.</Empty>}
     </div>
   );
 }
 
-function AuditPanel({ brandId, summary }: { brandId: string; summary: GuavaContentAuditSummaryDto }) {
-  const { data } = useGuavaContentAudit(brandId, summary.id);
-  if (summary.status === "processing") {
+/** The page header's action: run a review of this brand, or set Instagram up first. */
+export function ReviewButton({ brand, canEdit }: { brand: BrandDto; canEdit: boolean }) {
+  const setup = useInstagramSetup(brand.workspaceId);
+  const audits = useGuavaContentAudits(brand.id);
+  const start = useStartGuavaContentAudit(brand.id);
+  if (setup.isLoading || audits.isLoading) return null;
+
+  if (!setup.data?.accountHandle) {
     return (
+      <Button asChild size="sm">
+        <Link href="/instagram">Set up Instagram</Link>
+      </Button>
+    );
+  }
+  const list = audits.data ?? [];
+  const busy = start.isPending || list.some((a) => a.status === "processing");
+  const again = list.some((a) => a.status === "completed");
+  const label = again ? `Review ${brand.name} again` : `Review ${brand.name}`;
+  // Reviews this brand: its posts are picked out of your one account, rivals come from the Instagram page.
+  return (
+    <Button
+      size="sm"
+      disabled={busy || !canEdit}
+      title={canEdit ? label : "Only the owner can run a review."}
+      aria-label={busy ? "Reviewing" : label}
+      onClick={() => start.mutate(undefined, { onError: (e) => toast.error(e.message) })}
+    >
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
+      <span className="hidden max-w-[260px] truncate sm:inline">{busy ? "Reviewing…" : label}</span>
+      <span className="sm:hidden">{busy ? "Reviewing…" : "Review"}</span>
+    </Button>
+  );
+}
+
+const cleanHandle = (audit: GuavaContentAuditDto): GuavaContentAuditDto => ({ ...audit, handle: audit.handle?.replace(/^@+/, "") ?? null });
+
+function AuditPanel({ brandId, summary, intro }: { brandId: string; summary: GuavaContentAuditSummaryDto; intro: ReactNode }) {
+  const { data } = useGuavaContentAudit(brandId, summary.id);
+  const withIntro = (node: ReactNode) => (
+    <div className="space-y-4">
+      {intro}
+      {node}
+    </div>
+  );
+  if (summary.status === "processing") {
+    return withIntro(
       <Card className="flex flex-col items-center gap-3 p-10 text-center">
         <Loader2 className="h-7 w-7 animate-spin text-primary" />
         <h2 className="text-base font-semibold">{summary.progress ?? "Reviewing your Instagram"}</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
           Gemini is watching each reel. This takes a few minutes. You can leave this page and come back.
         </p>
-      </Card>
+      </Card>,
     );
   }
-  if (summary.status === "failed") return null;
-  if (!data?.report) return <Skeleton className="h-64 w-full" />;
-  return <AuditReport audit={data} />;
+  if (summary.status === "failed") return withIntro(null);
+  if (!data?.report) return withIntro(<Skeleton className="h-64 w-full" />);
+  return <AuditReport audit={cleanHandle(data)} intro={intro} />;
 }
 
-function AuditReport({ audit }: { audit: GuavaContentAuditDto }) {
+function AuditReport({ audit, intro }: { audit: GuavaContentAuditDto; intro: ReactNode }) {
   const r = audit.report!;
   const own = audit.reels.filter((x) => x.isOwn);
   const verdictFor = new Map(r.reelVerdicts.map((v) => [v.mediaId, v]));
   const categoryFor = new Map(audit.split.map((p) => [p.mediaId, p.category]));
   const hasRead = r.whatWorks.length > 0 || r.whatLosesPeople.length > 0 || r.doNext.nextVideos.length > 0;
-  const [tab, setTab] = useState(hasRead ? "read" : "performance");
+  const [tab, setTab] = useState("performance");
+  const details = useRef<HTMLDivElement>(null);
+  const open = (next: string) => {
+    setTab(next);
+    details.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <FitPill fit={r.brandFit.verdict} className="text-sm" />
-          <span className="text-sm tabular-nums text-muted-foreground">Brand fit {Math.round(r.brandFit.score)}/100</span>
-          <span className="text-xs text-muted-foreground">· @{audit.handle} · {fmtDate(audit.createdAt)}</span>
-        </div>
-        <h2 className="mt-2 text-lg font-semibold">{r.headline}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{r.summary}</p>
-        {r.brandFit.why && <p className="mt-2 text-sm">{r.brandFit.why}</p>}
-        {r.brandBasis === "inferred" && (
-          <p className="mt-3 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
-            Your brand details in Brand Engine are thin, so the brand was read from your content itself.{" "}
-            {r.brandBasisNote}
-          </p>
-        )}
-      </Card>
-
-      {audit.skippedCompetitors.length > 0 && (
-        <div role="alert" className="space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-          {audit.skippedCompetitors.map((s) => (
-            <p key={s.handle}>
-              <span className="font-medium">@{s.handle}</span>: {s.reason}
-            </p>
-          ))}
-        </div>
-      )}
-
+    <div ref={details} className="scroll-mt-3">
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="flex-wrap">
-          {hasRead && <TabsTrigger value="read">The read</TabsTrigger>}
+        {/* One line: smaller text where space is tight, sideways swipe on phones. */}
+        <TabsList className="flex w-full flex-nowrap justify-between gap-0 [&>button]:px-1.5 [&>button]:text-[13px] lg:[&>button]:px-3 lg:[&>button]:text-[15px]">
           <TabsTrigger value="performance">Performance</TabsTrigger>
           {audit.reelRanking.length > 0 && <TabsTrigger value="compare">Compare reels</TabsTrigger>}
           <TabsTrigger value="fit">Brand fit</TabsTrigger>
           {r.improvements.length > 0 && <TabsTrigger value="improve">Improve ({r.improvements.length})</TabsTrigger>}
           <TabsTrigger value="competitors">Competitors ({r.competitors.length})</TabsTrigger>
           {audit.split.length > 0 && <TabsTrigger value="split">Account split</TabsTrigger>}
+          {hasRead && <TabsTrigger value="read">The read</TabsTrigger>}
         </TabsList>
 
         {hasRead && (
@@ -208,6 +179,19 @@ function AuditReport({ audit }: { audit: GuavaContentAuditDto }) {
         )}
 
         <TabsContent value="performance" className="space-y-4">
+          <StatRow audit={audit} />
+          {intro}
+          <ScoreHero audit={audit} />
+          <Glance audit={audit} onOpen={open} />
+          {audit.skippedCompetitors.length > 0 && (
+            <div role="alert" className="space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+              {audit.skippedCompetitors.map((s) => (
+                <p key={s.handle}>
+                  <span className="font-medium">@{s.handle}</span>: {s.reason}
+                </p>
+              ))}
+            </div>
+          )}
           <PerformancePanel audit={audit} perf={audit.performance} />
         </TabsContent>
 
@@ -528,74 +512,13 @@ function BulletList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function AuditHistory({
-  items,
-  currentId,
-  onOpen,
-}: {
-  items: GuavaContentAuditSummaryDto[];
-  currentId: string | null;
-  onOpen: (id: string) => void;
-}) {
-  return (
-    <Card className="p-4">
-      <div className="mb-2 text-sm font-medium">Past reviews</div>
-      <ul className="space-y-1.5">
-        {items.map((a) => (
-          <li key={a.id}>
-            <button
-              type="button"
-              disabled={a.status !== "completed"}
-              onClick={() => onOpen(a.id)}
-              className={cn(
-                "flex w-full flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors hover:bg-accent/50 disabled:opacity-60",
-                a.id === currentId && "border-primary/60",
-              )}
-            >
-              <span className="font-medium">{fmtDate(a.createdAt)}</span>
-              {a.verdict ? <FitPill fit={a.verdict} /> : <Badge variant="muted">{a.status === "failed" ? "Failed" : "Running"}</Badge>}
-              {a.score !== null && <span className="tabular-nums text-muted-foreground">{a.score}/100</span>}
-              {a.competitors.length > 0 && <span className="text-muted-foreground">vs {a.competitors.map((h) => `@${h}`).join(", ")}</span>}
-              <span className="w-full truncate text-sm sm:w-auto sm:flex-1">{a.headline || a.error}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-lg border bg-card px-3 py-2" title={hint}>
-      <div className="text-xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
 function PerformancePanel({ audit, perf }: { audit: GuavaContentAuditDto; perf: GuavaPerformance | null }) {
   const r = audit.report!;
   const own = audit.reels.filter((x) => x.isOwn);
   const best = own.find((x) => x.mediaId === perf?.bestMediaId);
   const weakest = own.find((x) => x.mediaId === perf?.weakestMediaId);
-  const fmt = (n: number | null | undefined) => (n === null || n === undefined ? "–" : n.toLocaleString());
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="Followers" value={fmt(perf?.followers)} />
-        <StatTile label="Avg likes per post" value={fmt(perf?.avgLikes)} />
-        <StatTile label="Avg comments per post" value={fmt(perf?.avgComments)} />
-        <StatTile
-          label="Engagement rate"
-          value={perf?.engagementRatePct !== null && perf?.engagementRatePct !== undefined ? `${perf.engagementRatePct}%` : "–"}
-          hint="(average likes + comments) ÷ followers"
-        />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        From the {perf?.postsReviewed ?? 0} {audit.split.length ? "posts about this brand" : "latest posts"} on @{audit.handle}. Views and
-        reach are not included: Instagram only shares them with an extra insights permission.
-      </p>
       {(r.performance.summary || r.performance.whatWorks || r.performance.whatDoesNot) && (
         <Card className="space-y-2 p-4 text-sm">
           {r.performance.summary && <p>{r.performance.summary}</p>}
