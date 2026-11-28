@@ -81,6 +81,13 @@ One Meta Cloud API business number per brand (`WhatsappNumber`, brand-scoped acc
 
 Keyword comment → public reply + private DM, and DM keyword → DM reply, for connected Instagram accounts (`routes/ig-automation.ts`, public signed webhook `routes/ig-webhook.ts` at `/webhooks/meta`, `services/ig-automation/{logic,graph,processor,service}.ts`, types `packages/types/src/ig-automation.ts`). Events are stored once per account (unique source id) and processed through the Shorts Postgres job queue (`ig_event` jobs). Graph calls go through `graph.ts` (`endpoints.base` is overridable for the fake-Meta test). Meta facts and decisions: `DECISIONS.md` ("Instagram comment / DM automation").
 
+### CRM, Carousels, Video Studio, Brand voice cloning
+
+- **CRM** (`routes/crm.ts`, `services/crm/{logic,service,capture}.ts`, page `/crm`) — leads with stages/sources/due dates; `capture.ts` feeds leads in from other channels (e.g. Instagram, WhatsApp). Pure rules in `logic.ts` (tested).
+- **Carousels** (`routes/carousels.ts`, `services/carousel.ts` + pure `carousel-logic.ts`) — multi-slide posts with per-slide regenerate/reorder/replace-image; minimum slide count is `CAROUSEL_MIN_SLIDES` in `packages/types`.
+- **Video Studio / reel plan** (`routes/video-studio.ts`, `routes/video-plan.ts`, `services/video-{script,render,generate,qa}.ts` with `*-logic.ts`, provider adapters in `services/video-gen/`, pages `/reels`, `/library`) — separate from the Shorts Factory's Reel Studio: video projects with a source-folder of assets, a status machine (`canTransitionVideoProject`), scripted → rendered → QA'd. `reel-plan.ts` holds planned reels from the autopilot; nothing posts until approved. ffmpeg-backed tests (`*-ffmpeg.test.ts`) need ffmpeg installed.
+- **Brand voice cloning** (`routes/brand-voice.ts`, `services/voice-tts.ts`) — one consented voice per brand, manageable only by the brand owner (`findManageableBrand`, stricter than `findAccessibleBrand`). Synthesis calls an internal self-hosted Python service (`infra/voice-service`, Chatterbox; `VOICE_MODEL_URL` + `VOICE_SERVICE_TOKEN`); `infra/voice-bakeoff` is the model benchmark. Samples live only in the private bucket and are streamed through an authenticated endpoint; never expose storage keys or consent fields in DTOs. `VERIFICATION-REPORT.md` lists known open gaps (consent fields leaking in the DTO, service logs).
+
 ### Other cross-file concepts
 
 - Image daily quota with refunds on failure: `lib/usage.ts`.
@@ -91,6 +98,12 @@ Keyword comment → public reply + private DM, and DM keyword → DM reply, for 
 - Workspaces with members/invites/team chat where `@ai` triggers an answer: `routes/team.ts`, `services/team.ts`; workspace-scoped data retention/deletion: `services/workspace-privacy.ts`.
 - Voice mode (speech-to-text/text-to-speech, `VOICE_STT_MODEL`/`VOICE_TTS_MODEL`): `routes/voice.ts`. Voice replies never claim to have produced an image or file.
 - Images go to Supabase Storage or, if unconfigured, local `UPLOAD_DIR` served at `/uploads/`; a separate `PRIVATE_STORAGE_BUCKET`/`PRIVATE_UPLOAD_DIR` holds consented voice samples.
+
+## CI and docs
+
+- `.github/workflows/ci.yml` runs, in order: `prisma generate` (tsc needs the generated client), `pnpm typecheck`, `pnpm lint`, `pnpm --filter @catgpt/api test`. Run `pnpm --filter @catgpt/db exec prisma generate` locally after a fresh clone or schema change before typechecking.
+- `claude-task.yml` is dispatched only by an external TaskHub; ignore it for normal work.
+- `DECISIONS.md` is the design/verification log for Shorts Factory, Reel Studio and IG/DM automation (verified vs. unverified external API facts) — read it before changing those modules.
 
 ## Conventions
 
